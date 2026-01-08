@@ -429,7 +429,8 @@
       clearTimeout(timer);
       timer = setTimeout(function() {
         var annId = ta.dataset.annotationId;
-        var csrf = document.cookie.match(/csrftoken=([^;]+)/);
+        var csrfMeta = document.querySelector('meta[name="csrfmiddlewaretoken"]');
+        var csrf = csrfMeta ? [csrfMeta.content, csrfMeta.content] : document.cookie.match(/ld_csrftoken=([^;]+)/);
         var formData = new FormData();
         formData.append('action', 'update_note');
         formData.append('annotation_id', annId);
@@ -509,7 +510,8 @@
       e.stopPropagation();
       var annId = opt.dataset.annotationId;
       var newColor = opt.dataset.newColor;
-      var csrf = document.cookie.match(/csrftoken=([^;]+)/);
+      var csrfMeta = document.querySelector('meta[name="csrfmiddlewaretoken"]');
+      var csrf = csrfMeta ? [csrfMeta.content, csrfMeta.content] : document.cookie.match(/ld_csrftoken=([^;]+)/);
       var formData = new FormData();
       formData.append('action', 'change_color');
       formData.append('annotation_id', annId);

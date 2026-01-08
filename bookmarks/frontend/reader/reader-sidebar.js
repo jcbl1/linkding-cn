@@ -5,13 +5,7 @@ import { READER_ICONS } from "./reader-icons";
 import { gettext, ngettext, interpolate } from "../utils/i18n.js";
 import { loadReaderSettings, saveReaderSettings } from "./reader-settings.js";
 import { showToast } from "../components/toast.js";
-
-function getCSRFToken() {
-  const m = document.cookie.match(/csrftoken=([^;]+)/);
-  if (m) return m[1];
-  const meta = document.querySelector('meta[name="csrfmiddlewaretoken"]');
-  return meta ? meta.content : "";
-}
+import { getCSRFToken } from "../utils/csrf.js";
 
 function normalizeBaseUrl(baseUrl) {
   const value = String(baseUrl || "").trim();

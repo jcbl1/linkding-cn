@@ -7,6 +7,8 @@
  * @param {Function} [options.onOptimistic] - 乐观更新回调（同步执行）
  * @param {Function} [options.onRollback]   - 失败回滚回调
  */
+import { getCSRFToken } from "./csrf.js";
+
 export async function handleBookmarkAction({ bookmarkId, action, onOptimistic, onRollback }) {
   const isFieldAction = ["share", "unshare", "mark_as_read", "mark_as_unread"].includes(action);
   const isStateToggle = ["archive", "unarchive"].includes(action);
@@ -113,10 +115,6 @@ function resolveBody(action) {
 }
 
 // ---- 工具函数 ----
-
-function getCSRFToken() {
-  return document.cookie.match(/csrftoken=([^;]+)/)?.[1] || "";
-}
 
 function updateBookmarkCount(delta) {
   const countEl = document.getElementById("bookmark-list-total");

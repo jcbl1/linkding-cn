@@ -17,20 +17,12 @@ import {
   describeRange,
 } from "./index";
 import { gettext } from "../../utils/i18n.js";
+import { getCSRFToken } from "../../utils/csrf.js";
 
 /**
  * Get CSRF token from cookie or meta tag.
  * @returns {string}
  */
-function getCSRFToken() {
-  // Try cookie first (DRF standard)
-  const match = document.cookie.match(/csrftoken=([^;]+)/);
-  if (match) return match[1];
-  // Fallback to meta tag
-  const meta = document.querySelector('meta[name="csrfmiddlewaretoken"]');
-  return meta ? meta.content : "";
-}
-
 function normalizeBaseUrl(baseUrl) {
   const value = String(baseUrl || "").trim();
   if (!value) return "";

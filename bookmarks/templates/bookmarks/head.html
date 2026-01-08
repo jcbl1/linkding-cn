@@ -16,6 +16,7 @@
   <meta name="description" content="{{ meta_description }}">
   <meta name="robots" content="index,follow">
   <meta name="author" content="Sascha Ißbrücker">
+  <meta name="csrfmiddlewaretoken" content="{{ csrf_token }}">
   <title>{{ page_title|default:default_page_title }}</title>
   {# Include specific theme variant based on user profile setting #}
   {% if request.user_profile.theme == 'light' %}

@@ -136,7 +136,7 @@ class BookmarkIndexViewTestCase(
         user = self.get_or_create_test_user()
         user.profile.language = language
         user.profile.save(update_fields=["language"])
-        self.client.cookies["django_language"] = language
+        self.client.cookies["ld_language"] = language
         return user
 
     def test_should_list_unarchived_and_user_owned_bookmarks(self):

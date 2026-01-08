@@ -1,10 +1,7 @@
 import { setAfterPageLoadFocusTarget } from "../utils/focus.js";
 import { handleBookmarkAction } from "../utils/bookmark-action.js";
+import { getCSRFToken } from "../utils/csrf.js";
 import { Modal } from "./modal.js";
-
-function getCSRFToken() {
-  return document.cookie.match(/csrftoken=([^;]+)/)?.[1] || "";
-}
 
 function gettext(s) {
   return window.gettext ? window.gettext(s) : s;

@@ -1,5 +1,6 @@
 import { Behavior, registerBehavior } from "./runtime.js";
 import { gettext } from "../utils/i18n.js";
+import { getCSRFToken } from "../utils/csrf.js";
 
 const CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 const STORAGE_KEY = "ld:update-checker";
@@ -60,7 +61,7 @@ async function renderMarkdown(text) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-CSRFToken": getCookie("csrftoken"),
+        "X-CSRFToken": getCSRFToken(),
       },
       body: JSON.stringify({ markdown: text }),
     });
@@ -71,13 +72,6 @@ async function renderMarkdown(text) {
   }
 }
 
-function getCookie(name) {
-  for (const c of document.cookie.split(";")) {
-    const [k, v] = c.trim().split("=");
-    if (k === name) return decodeURIComponent(v);
-  }
-  return null;
-}
 
 function formatDate(iso) {
   if (!iso) return "";

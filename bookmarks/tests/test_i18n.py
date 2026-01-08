@@ -18,7 +18,7 @@ class I18nTestCase(TestCase, BookmarkFactoryMixin):
 
         self.client.force_login(user)
         # Simulate stale language cookie and ensure profile language still wins
-        self.client.cookies["django_language"] = "zh-hans"
+        self.client.cookies["ld_language"] = "zh-hans"
         return user
 
     def test_login_page_defaults_to_english(self):
@@ -50,7 +50,7 @@ class I18nTestCase(TestCase, BookmarkFactoryMixin):
         self.assertNotIn("form-select", html)
 
     def test_login_page_can_render_chinese_from_language_cookie(self):
-        self.client.cookies["django_language"] = "zh-hans"
+        self.client.cookies["ld_language"] = "zh-hans"
 
         response = self.client.get(reverse("login"))
 
@@ -59,7 +59,7 @@ class I18nTestCase(TestCase, BookmarkFactoryMixin):
         self.assertContains(response, '<h1 id="main-heading">登录</h1>', html=True)
 
     def test_login_page_language_options_keep_native_names(self):
-        self.client.cookies["django_language"] = "zh-hans"
+        self.client.cookies["ld_language"] = "zh-hans"
 
         response = self.client.get(reverse("login"))
         soup = BeautifulSoup(response.content.decode(), "html.parser")
@@ -77,7 +77,7 @@ class I18nTestCase(TestCase, BookmarkFactoryMixin):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("login"))
-        self.assertEqual(response.cookies["django_language"].value, "zh-hans")
+        self.assertEqual(response.cookies["ld_language"].value, "zh-hans")
 
     def test_authenticated_language_update_route_persists_user_preference(self):
         user = self.get_or_create_test_user()
@@ -92,7 +92,7 @@ class I18nTestCase(TestCase, BookmarkFactoryMixin):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("linkding:settings.general"))
-        self.assertEqual(response.cookies["django_language"].value, "zh-hans")
+        self.assertEqual(response.cookies["ld_language"].value, "zh-hans")
         self.assertEqual(user.profile.language, "zh-hans")
 
     def test_authenticated_language_update_route_rejects_unsupported_language(self):
@@ -108,7 +108,7 @@ class I18nTestCase(TestCase, BookmarkFactoryMixin):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(user.profile.language, "en")
-        self.assertNotIn("django_language", response.cookies)
+        self.assertNotIn("ld_language", response.cookies)
 
     def test_authenticated_user_profile_language_overrides_cookie(self):
         user = self.get_or_create_test_user()
@@ -116,7 +116,7 @@ class I18nTestCase(TestCase, BookmarkFactoryMixin):
         user.profile.save()
 
         self.client.force_login(user)
-        self.client.cookies["django_language"] = "en"
+        self.client.cookies["ld_language"] = "en"
 
         response = self.client.get(reverse("linkding:settings.general"))
 
