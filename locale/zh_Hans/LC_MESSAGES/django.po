@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-12 21:43+0800\n"
+"POT-Creation-Date: 2026-05-25 19:04+0800\n"
 "PO-Revision-Date: 2026-04-22 20:55+0800\n"
 "Last-Translator: Codex\n"
 "Language-Team: Simplified Chinese\n"
@@ -133,7 +133,7 @@ msgstr "相对日期字符串"
 msgid "HTML snapshot"
 msgstr "HTML 快照"
 
-#: bookmarks/forms.py:185 bookmarks/templates/bookmarks/details/form.html:123
+#: bookmarks/forms.py:185 bookmarks/templates/bookmarks/details/form.html:113
 #: bookmarks/templates/bookmarks/form.html:93
 #: bookmarks/templates/bookmarks/form.html:100
 #: bookmarks/templates/bookmarks/form.html:106
@@ -167,165 +167,165 @@ msgstr "请至少输入一个要合并的标签。"
 msgid "The target tag cannot be selected for merging."
 msgstr "目标标签不能包含在待合并标签中。"
 
-#: bookmarks/models.py:211 bookmarks/templates/bundles/form.html:75
+#: bookmarks/models.py:256 bookmarks/templates/bundles/form.html:75
 msgid "Show bookmark count"
 msgstr "显示书签数"
 
-#: bookmarks/models.py:215
+#: bookmarks/models.py:260
 msgid "Search parameters"
 msgstr "搜索参数"
 
-#: bookmarks/models.py:579
+#: bookmarks/models.py:624
 msgid "Added ↑"
 msgstr "添加时间 ↑"
 
-#: bookmarks/models.py:580
+#: bookmarks/models.py:625
 msgid "Added ↓"
 msgstr "添加时间 ↓"
 
-#: bookmarks/models.py:581
+#: bookmarks/models.py:626
 msgid "Title ↑"
 msgstr "标题 ↑"
 
-#: bookmarks/models.py:582
+#: bookmarks/models.py:627
 msgid "Title ↓"
 msgstr "标题 ↓"
 
-#: bookmarks/models.py:583
+#: bookmarks/models.py:628
 msgid "Random"
 msgstr "随机"
 
-#: bookmarks/models.py:586 bookmarks/models.py:591 bookmarks/models.py:596
-#: bookmarks/models.py:601 bookmarks/models.py:606
+#: bookmarks/models.py:631 bookmarks/models.py:636 bookmarks/models.py:641
+#: bookmarks/models.py:646 bookmarks/models.py:651
 msgid "Off"
 msgstr "关闭"
 
-#: bookmarks/models.py:587 bookmarks/templates/bookmarks/details/form.html:72
+#: bookmarks/models.py:632 bookmarks/templates/bookmarks/details/form.html:62
 msgid "Shared"
 msgstr "已分享"
 
-#: bookmarks/models.py:588
+#: bookmarks/models.py:633
 msgid "Unshared"
 msgstr "未分享"
 
-#: bookmarks/models.py:592 bookmarks/templates/bookmarks/details/form.html:64
+#: bookmarks/models.py:637 bookmarks/templates/bookmarks/details/form.html:54
 msgid "Unread"
 msgstr "未读"
 
-#: bookmarks/models.py:593
+#: bookmarks/models.py:638
 msgid "Read"
 msgstr "已读"
 
-#: bookmarks/models.py:597
+#: bookmarks/models.py:642
 msgid "Tagged"
 msgstr "已打标签"
 
-#: bookmarks/models.py:598
+#: bookmarks/models.py:643
 msgid "Untagged"
 msgstr "未打标签"
 
-#: bookmarks/models.py:602
+#: bookmarks/models.py:647
 msgid "Has"
 msgstr "有"
 
-#: bookmarks/models.py:603
+#: bookmarks/models.py:648
 msgid "Missing"
 msgstr "无"
 
-#: bookmarks/models.py:607
+#: bookmarks/models.py:652
 msgid "Added"
 msgstr "添加时间"
 
-#: bookmarks/models.py:608
+#: bookmarks/models.py:653
 msgid "Modified"
 msgstr "修改时间"
 
-#: bookmarks/models.py:611 bookmarks/models.py:712
+#: bookmarks/models.py:656 bookmarks/models.py:757
 msgid "Absolute"
 msgstr "绝对"
 
-#: bookmarks/models.py:612 bookmarks/models.py:711
+#: bookmarks/models.py:657 bookmarks/models.py:756
 msgid "Relative"
 msgstr "相对"
 
-#: bookmarks/models.py:667
+#: bookmarks/models.py:712
 msgid "Everyone"
 msgstr "所有人"
 
-#: bookmarks/models.py:695
+#: bookmarks/models.py:740
 msgid "English"
 msgstr "英语"
 
-#: bookmarks/models.py:696
+#: bookmarks/models.py:741
 msgid "Simplified Chinese"
 msgstr "简体中文"
 
-#: bookmarks/models.py:702
+#: bookmarks/models.py:747
 msgid "Auto"
 msgstr "自动"
 
-#: bookmarks/models.py:703
+#: bookmarks/models.py:748
 msgid "Light"
 msgstr "浅色"
 
-#: bookmarks/models.py:704
+#: bookmarks/models.py:749
 msgid "Dark"
 msgstr "深色"
 
-#: bookmarks/models.py:710
+#: bookmarks/models.py:755
 msgid "Hidden"
 msgstr "隐藏"
 
-#: bookmarks/models.py:717
+#: bookmarks/models.py:762
 msgid "Inline"
 msgstr "同行"
 
-#: bookmarks/models.py:718
+#: bookmarks/models.py:763
 msgid "Separate"
 msgstr "分行"
 
-#: bookmarks/models.py:723
+#: bookmarks/models.py:768
 msgid "New page"
 msgstr "新页面"
 
-#: bookmarks/models.py:724
+#: bookmarks/models.py:769
 msgid "Same page"
 msgstr "当前页面"
 
-#: bookmarks/models.py:729 bookmarks/models.py:742 bookmarks/models.py:971
+#: bookmarks/models.py:774 bookmarks/models.py:787 bookmarks/models.py:1016
 msgid "Disabled"
 msgstr "禁用"
 
-#: bookmarks/models.py:730
+#: bookmarks/models.py:775
 msgid "Enabled"
 msgstr "启用"
 
-#: bookmarks/models.py:735
+#: bookmarks/models.py:780
 msgid "Strict"
 msgstr "严格"
 
-#: bookmarks/models.py:736
+#: bookmarks/models.py:781
 msgid "Lax"
 msgstr "宽松"
 
-#: bookmarks/models.py:741
+#: bookmarks/models.py:786
 msgid "Alphabetical"
 msgstr "首字母"
 
-#: bookmarks/models.py:749
+#: bookmarks/models.py:794
 msgid "User summary"
 msgstr "用户数据"
 
-#: bookmarks/models.py:750 bookmarks/templates/bundles/index.html:15
+#: bookmarks/models.py:795 bookmarks/templates/bundles/index.html:15
 msgid "Filters"
 msgstr "过滤器"
 
-#: bookmarks/models.py:751
+#: bookmarks/models.py:796
 #: bookmarks/templates/bookmarks/sidebar/modules/domains/index.html:7
 msgid "Domains"
 msgstr "域名"
 
-#: bookmarks/models.py:752 bookmarks/templates/bookmarks/details/form.html:87
+#: bookmarks/models.py:797 bookmarks/templates/bookmarks/details/form.html:77
 #: bookmarks/templates/bookmarks/form.html:26
 #: bookmarks/templates/bookmarks/sidebar/modules/tags/index.html:7
 #: bookmarks/templates/bundles/form.html:27
@@ -333,39 +333,35 @@ msgstr "域名"
 msgid "Tags"
 msgstr "标签"
 
-#: bookmarks/models.py:833 bookmarks/views/contexts.py:402
+#: bookmarks/models.py:878 bookmarks/views/contexts.py:402
 msgid "Calendar"
 msgstr "日历图"
 
-#: bookmarks/models.py:834 bookmarks/views/contexts.py:395
+#: bookmarks/models.py:879 bookmarks/views/contexts.py:395
 msgid "Heatmap"
 msgstr "热力图"
 
-#: bookmarks/models.py:849
-#, fuzzy
-#| msgid "Full mode"
+#: bookmarks/models.py:894
 msgid "Full"
-msgstr "完整模式"
+msgstr "完整"
 
-#: bookmarks/models.py:850
-#, fuzzy
-#| msgid "Icon mode"
+#: bookmarks/models.py:895
 msgid "Icon"
-msgstr "图标模式"
+msgstr "图标"
 
-#: bookmarks/models.py:972
+#: bookmarks/models.py:1017
 msgid "Private sharing"
 msgstr "私密分享"
 
-#: bookmarks/models.py:973
+#: bookmarks/models.py:1018
 msgid "Public sharing"
 msgstr "公开分享"
 
-#: bookmarks/models.py:1055
+#: bookmarks/models.py:1100
 msgid "Invalid sidebar configuration."
 msgstr "无效的侧边栏配置。"
 
-#: bookmarks/models.py:1123
+#: bookmarks/models.py:1168
 msgid ""
 "This version replaces the search engine with a new implementation that "
 "supports logical operators (and, or, not). If you run into any issues with "
@@ -375,23 +371,35 @@ msgstr ""
 "此版本将搜索引擎替换为支持逻辑运算符（and、or、not）的新实现。如果你在新搜索"
 "中遇到问题，可在设置中启用搜索的 兼容模式 切回旧版。"
 
-#: bookmarks/models.py:1185
+#: bookmarks/models.py:1230
 msgid "Login page"
 msgstr "登录页"
 
-#: bookmarks/models.py:1186
+#: bookmarks/models.py:1231
 msgid "Shared page"
 msgstr "分享页"
 
-#: bookmarks/models.py:1221
+#: bookmarks/models.py:1266
 msgid "Standard profile"
 msgstr "标准配置"
 
+#: bookmarks/services/articles.py:22
+#: bookmarks/templates/bookmarks/read_pending.html:55
+msgid "Processing article..."
+msgstr "正在处理文章..."
+
+#: bookmarks/services/articles.py:47
+#, python-format
+msgid "Article from %(timestamp)s"
+msgstr "%(timestamp)s 的文章"
+
+#: bookmarks/services/articles.py:69
+msgid "Article"
+msgstr "文章"
+
 #: bookmarks/services/assets.py:41
-#, fuzzy
-#| msgid "HTML snapshot"
 msgid "New snapshot"
-msgstr "HTML 快照"
+msgstr "新建快照"
 
 #: bookmarks/services/assets.py:82 bookmarks/services/assets.py:175
 #, python-format
@@ -399,10 +407,9 @@ msgid "HTML snapshot from %(timestamp)s"
 msgstr "%(timestamp)s 的 HTML 快照"
 
 #: bookmarks/services/assets.py:147
-#, fuzzy, python-format
-#| msgid "HTML snapshot from %(timestamp)s"
+#, python-format
 msgid "PDF download from %(timestamp)s"
-msgstr "%(timestamp)s 的 HTML 快照"
+msgstr "%(timestamp)s 的 PDF 下载"
 
 #: bookmarks/services/search_query_parser.py:201
 msgid "Expected RPAREN, got EOF"
@@ -576,43 +583,42 @@ msgstr "上传文件"
 msgid "Original URL"
 msgstr "原始网址"
 
-#: bookmarks/templates/bookmarks/details/form.html:25
-#: bookmarks/templates/bookmarks/details/form.html:33
+#: bookmarks/templates/bookmarks/details/form.html:24
 msgid "Reader mode"
 msgstr "阅读模式"
 
-#: bookmarks/templates/bookmarks/details/form.html:44
+#: bookmarks/templates/bookmarks/details/form.html:34
 #: bookmarks/templates/settings/general.html:757
 msgid "Internet Archive"
 msgstr "互联网存档"
 
-#: bookmarks/templates/bookmarks/details/form.html:51
+#: bookmarks/templates/bookmarks/details/form.html:41
 msgid "Status"
 msgstr "状态"
 
-#: bookmarks/templates/bookmarks/details/form.html:57
+#: bookmarks/templates/bookmarks/details/form.html:47
 msgid "Archived"
 msgstr "已归档"
 
-#: bookmarks/templates/bookmarks/details/form.html:80
+#: bookmarks/templates/bookmarks/details/form.html:70
 msgid "Files"
 msgstr "文件"
 
-#: bookmarks/templates/bookmarks/details/form.html:96
+#: bookmarks/templates/bookmarks/details/form.html:86
 msgid "Date added"
 msgstr "添加时间"
 
-#: bookmarks/templates/bookmarks/details/form.html:103
+#: bookmarks/templates/bookmarks/details/form.html:93
 #: bookmarks/templatetags/bookmarks.py:47
 msgid "Date deleted"
 msgstr "删除时间"
 
-#: bookmarks/templates/bookmarks/details/form.html:111
+#: bookmarks/templates/bookmarks/details/form.html:101
 #: bookmarks/templates/bookmarks/form.html:66
 msgid "Description"
 msgstr "描述"
 
-#: bookmarks/templates/bookmarks/details/form.html:117
+#: bookmarks/templates/bookmarks/details/form.html:107
 #: bookmarks/templates/bookmarks/form.html:78
 #: bookmarks/templates/bookmarks/form.html:80
 msgid "Notes"
@@ -758,7 +764,7 @@ msgstr "自托管书签服务"
 msgid "Linkding"
 msgstr "Linkding"
 
-#: bookmarks/templates/bookmarks/index.html:6 bookmarks/views/bookmarks.py:221
+#: bookmarks/templates/bookmarks/index.html:6 bookmarks/views/bookmarks.py:223
 msgid "Bookmarks - Linkding"
 msgstr "书签 - Linkding"
 
@@ -771,11 +777,11 @@ msgstr "书签 - Linkding"
 msgid "Bookmarks"
 msgstr "书签"
 
-#: bookmarks/templates/bookmarks/layout.html:86
+#: bookmarks/templates/bookmarks/layout.html:85
 msgid "Application logo"
 msgstr "应用图标"
 
-#: bookmarks/templates/bookmarks/layout.html:96
+#: bookmarks/templates/bookmarks/layout.html:95
 #: bookmarks/templates/registration/login.html:18
 #: bookmarks/templates/registration/login.html:37
 msgid "Login"
@@ -844,6 +850,19 @@ msgstr "新增书签 - Linkding"
 #: bookmarks/templates/bookmarks/random_sort.html:29
 msgid "Random sort"
 msgstr "随机排序"
+
+#: bookmarks/templates/bookmarks/read.html:7
+#: bookmarks/templates/bookmarks/read_pending.html:7
+msgid "Reader view"
+msgstr "阅读视图"
+
+#: bookmarks/templates/bookmarks/read_pending.html:80
+msgid "Timed out waiting for article to be ready."
+msgstr "等待文章就绪超时。"
+
+#: bookmarks/templates/bookmarks/read_pending.html:93
+msgid "Failed to process article. Please try again."
+msgstr "文章处理失败，请重试。"
 
 #: bookmarks/templates/bookmarks/search.html:7
 msgid "Search for words or #tags"
@@ -982,10 +1001,8 @@ msgid "User summary menu"
 msgstr "用户信息菜单"
 
 #: bookmarks/templates/bookmarks/sidebar/modules/summary/index.html:87
-#, fuzzy
-#| msgid "Expand or collapse"
 msgid "Expand or collapse activity panel"
-msgstr "展开或折叠"
+msgstr "展开或折叠活动面板"
 
 #: bookmarks/templates/bookmarks/sidebar/modules/summary/index.html:153
 msgid "Previous month"
@@ -1363,10 +1380,8 @@ msgid ""
 msgstr "拖拽排序模块，并切换其是否在侧边栏显示。"
 
 #: bookmarks/templates/settings/general.html:352
-#, fuzzy
-#| msgid "Tags to merge"
 msgid "Drag to reorder"
-msgstr "待合并标签"
+msgstr "拖拽重新排序"
 
 #: bookmarks/templates/settings/general.html:390
 msgid "Open mode"
@@ -1770,7 +1785,7 @@ msgstr "在下方选择您偏好的检测网站标题和描述的方法"
 
 #: bookmarks/templates/settings/integrations.html:52
 msgid "Help"
-msgstr ""
+msgstr "帮助"
 
 #: bookmarks/templates/settings/integrations.html:54
 msgid "Drag the bookmarklet below into your browser's bookmark bar / toolbar"
@@ -1796,7 +1811,7 @@ msgstr "保存书签后，linkding 会自动关闭窗口返回网站"
 
 #: bookmarks/templates/settings/integrations.html:64
 msgid "Choose your preferred bookmarklet:"
-msgstr ""
+msgstr "选择你偏好的书签小程序："
 
 #: bookmarks/templates/settings/integrations.html:68
 msgid "Detect title and description on the server"
@@ -1909,11 +1924,11 @@ msgstr "如怀疑某个 API Token 泄漏，请及时删除。"
 
 #: bookmarks/templates/settings/integrations_api_section.html:100
 msgid "已复制！"
-msgstr ""
+msgstr "已复制！"
 
 #: bookmarks/templates/settings/integrations_api_section.html:101
 msgid "复制"
-msgstr ""
+msgstr "复制"
 
 #: bookmarks/templates/tags/edit.html:5
 msgid "Edit tag - Linkding"
@@ -2118,48 +2133,48 @@ msgid_plural "%(count)s weeks ago"
 msgstr[0] "%(count)s 周前"
 msgstr[1] "%(count)s 周前"
 
-#: bookmarks/views/bookmarks.py:256
+#: bookmarks/views/bookmarks.py:258
 msgid "Archived bookmarks - Linkding"
 msgstr "已归档 - Linkding"
 
-#: bookmarks/views/bookmarks.py:291
+#: bookmarks/views/bookmarks.py:293
 msgid "Shared bookmarks - Linkding"
 msgstr "已分享 - Linkding"
 
-#: bookmarks/views/bookmarks.py:333
+#: bookmarks/views/bookmarks.py:335
 msgid "Trash - Linkding"
 msgstr "回收站 - Linkding"
 
-#: bookmarks/views/bookmarks.py:348
+#: bookmarks/views/bookmarks.py:350
 msgid "Bookmark details - Linkding"
 msgstr "书签详情 - Linkding"
 
-#: bookmarks/views/bookmarks.py:554 bookmarks/views/bookmarks.py:575
+#: bookmarks/views/bookmarks.py:556 bookmarks/views/bookmarks.py:577
 msgid "URL parameter is missing"
 msgstr "缺少 URL 参数"
 
-#: bookmarks/views/bookmarks.py:568
+#: bookmarks/views/bookmarks.py:570
 msgid "Failed to prefetch favicon"
 msgstr "预取 favicon 失败"
 
-#: bookmarks/views/bookmarks.py:588
+#: bookmarks/views/bookmarks.py:590
 #, python-format
 msgid "Failed to download image: %(error)s"
 msgstr "下载图片失败：%(error)s"
 
-#: bookmarks/views/bookmarks.py:599
+#: bookmarks/views/bookmarks.py:601
 msgid "Asset upload is disabled"
 msgstr "资源上传已禁用"
 
-#: bookmarks/views/bookmarks.py:604
+#: bookmarks/views/bookmarks.py:606
 msgid "No file provided"
 msgstr "未提供文件"
 
-#: bookmarks/views/bookmarks.py:665
+#: bookmarks/views/bookmarks.py:667
 msgid "View does not support bulk actions"
 msgstr "当前视图不支持批量操作"
 
-#: bookmarks/views/bookmarks.py:788
+#: bookmarks/views/bookmarks.py:888
 #, python-format
 msgid "Unable to load page content: %(error)s"
 msgstr "无法加载页面内容：%(error)s"
@@ -2708,9 +2723,6 @@ msgstr[1] ""
 
 #~ msgid "Bulk edit"
 #~ msgstr "批量编辑"
-
-#~ msgid "Reader view"
-#~ msgstr "阅读视图"
 
 #~ msgid "minutes"
 #~ msgstr "分钟"
