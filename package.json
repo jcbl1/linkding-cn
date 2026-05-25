@@ -23,8 +23,10 @@
   "homepage": "https://github.com/WooHooDai/linkding-cn#readme",
   "dependencies": {
     "@floating-ui/dom": "^1.7.6",
+    "approx-string-match": "^2.0.0",
     "@hotwired/turbo": "^8.0.6",
     "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-commonjs": "^28.0.0",
     "@rollup/plugin-terser": "^1.0.0",
     "@rollup/wasm-node": "^4.13.0",
     "cssnano": "^7.0.6",
