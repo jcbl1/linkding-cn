@@ -16,23 +16,13 @@
       {% endif %}
       <span>{% translate "Original URL" %}</span>
     </a>
-    {% if details.latest_snapshot %}
-      <a class="weblink" href="{% url 'linkding:assets.read' details.latest_snapshot.id %}"
-         target="{{ details.profile.bookmark_link_target }}">
-        <svg class="favicon" xmlns="http://www.w3.org/2000/svg">
-          <use xlink:href="#ld-icon-unread"></use>
-        </svg>
-        <span>{% translate "Reader mode" %}</span>
-      </a>
-    {% else %}
-      <a class="weblink" href="{% url 'linkding:bookmarks.read' details.bookmark.id %}"
-         target="{{ details.profile.bookmark_link_target }}">
-        <svg class="favicon" xmlns="http://www.w3.org/2000/svg">
-          <use xlink:href="#ld-icon-unread"></use>
-        </svg>
-        <span>{% translate "Reader mode" %}</span>
-      </a>
-    {% endif %}
+    <a class="weblink" href="{% url 'linkding:bookmarks.read' details.bookmark.id %}"
+       target="{{ details.profile.bookmark_link_target }}">
+      <svg class="favicon" xmlns="http://www.w3.org/2000/svg">
+        <use xlink:href="#ld-icon-unread"></use>
+      </svg>
+      <span>{% translate "Reader mode" %}</span>
+    </a>
     {% if details.web_archive_snapshot_url %}
       <a class="weblink" href="{{ details.web_archive_snapshot_url }}"
          target="{{ details.profile.bookmark_link_target }}">

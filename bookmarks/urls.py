@@ -36,6 +36,12 @@ urlpatterns = [
         "bookmarks/<int:bookmark_id>/read", views.bookmarks.read, name="bookmarks.read"
     ),
     path(
+        "bookmarks/<int:bookmark_id>/reparse", views.bookmarks.reparse, name="bookmarks.reparse"
+    ),
+    path(
+        "bookmarks/<int:bookmark_id>/export", views.bookmarks.export, name="bookmarks.export"
+    ),
+    path(
         "bookmarks/<int:bookmark_id>/trash",
         views.bookmarks.trashed,
         name="bookmarks.trash",
@@ -61,11 +67,6 @@ urlpatterns = [
         "assets/<int:asset_id>",
         views.assets.view,
         name="assets.view",
-    ),
-    path(
-        "assets/<int:asset_id>/read",
-        views.assets.read,
-        name="assets.read",
     ),
     # Bundles
     path("bundles", views.bundles.index, name="bundles.index"),
