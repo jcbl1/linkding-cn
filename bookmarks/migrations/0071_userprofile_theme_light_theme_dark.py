@@ -10,11 +10,29 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.AlterField(
+            model_name="userprofile",
+            name="theme",
+            field=models.CharField(
+                choices=[
+                    ("auto", "Auto"),
+                    ("light", "Light"),
+                    ("dark", "Dark"),
+                    ("nord", "Nord"),
+                ],
+                default="auto",
+                max_length=10,
+            ),
+        ),
         migrations.AddField(
             model_name="userprofile",
             name="theme_light",
             field=models.CharField(
-                choices=[("light", "Light"), ("dark", "Dark")],
+                choices=[
+                    ("light", "Light"),
+                    ("dark", "Dark"),
+                    ("nord", "Nord"),
+                ],
                 default="light",
                 max_length=10,
             ),
@@ -23,7 +41,11 @@ class Migration(migrations.Migration):
             model_name="userprofile",
             name="theme_dark",
             field=models.CharField(
-                choices=[("light", "Light"), ("dark", "Dark")],
+                choices=[
+                    ("light", "Light"),
+                    ("dark", "Dark"),
+                    ("nord", "Nord"),
+                ],
                 default="dark",
                 max_length=10,
             ),

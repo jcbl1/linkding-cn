@@ -4,10 +4,11 @@
   "description": "Self-hosted bookmark manager - Chinese enhanced fork of linkding",
   "main": "index.js",
   "scripts": {
-    "build": "npm run build-js && npm run build-theme-light && npm run build-theme-dark",
+    "build": "npm run build-js && npm run build-theme-light && npm run build-theme-dark && npm run build-theme-nord",
     "build-js": "rollup -c",
     "build-theme-light": "POSTCSS_DISABLE_CACHE=true postcss -o bookmarks/static/theme-light.css bookmarks/styles/theme-light.css",
     "build-theme-dark": "POSTCSS_DISABLE_CACHE=true postcss -o bookmarks/static/theme-dark.css bookmarks/styles/theme-dark.css",
+    "build-theme-nord": "POSTCSS_DISABLE_CACHE=true postcss -o bookmarks/static/theme-nord.css bookmarks/styles/theme-nord.css",
     "dev": "rollup -c -w"
   },
   "repository": {

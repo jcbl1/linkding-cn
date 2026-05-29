@@ -10,10 +10,8 @@ def manifest(request):
         "start_url": "bookmarks",
         "display": "standalone",
         "scope": "/" + settings.LD_CONTEXT_PATH,
-        "theme_color": "#5856e0",
-        "background_color": (
-            "#161822" if request.user_profile.theme == "dark" else "#ffffff"
-        ),
+        "theme_color": _get_theme_color(request.user_profile.theme),
+        "background_color": _get_background_color(request.user_profile.theme),
         "icons": [
             {
                 "src": "/" + settings.LD_CONTEXT_PATH + "static/logo.svg",
@@ -97,3 +95,19 @@ def manifest(request):
     }
 
     return JsonResponse(response, status=200)
+
+
+def _get_theme_color(theme: str) -> str:
+    colors = {
+        "dark": "#161822",
+        "nord": "#2E3440",
+    }
+    return colors.get(theme, "#5856e0")
+
+
+def _get_background_color(theme: str) -> str:
+    colors = {
+        "dark": "#161822",
+        "nord": "#2E3440",
+    }
+    return colors.get(theme, "#ffffff")

@@ -284,7 +284,11 @@ msgstr "浅色"
 msgid "Dark"
 msgstr "深色"
 
-#: bookmarks/models.py:759
+#: bookmarks/models.py:754
+msgid "Nord"
+msgstr "Nord"
+
+#: bookmarks/models.py:760
 msgid "Hidden"
 msgstr "隐藏"
 

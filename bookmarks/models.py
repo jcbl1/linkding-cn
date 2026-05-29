@@ -747,14 +747,17 @@ class UserProfile(models.Model):
     THEME_AUTO = "auto"
     THEME_LIGHT = "light"
     THEME_DARK = "dark"
+    THEME_NORD = "nord"
     THEME_CHOICES = [
         (THEME_AUTO, _("Auto")),
         (THEME_LIGHT, _("Light")),
         (THEME_DARK, _("Dark")),
+        (THEME_NORD, _("Nord")),
     ]
     THEME_LIGHT_CHOICES = [
         (THEME_LIGHT, _("Light")),
         (THEME_DARK, _("Dark")),
+        (THEME_NORD, _("Nord")),
     ]
     BOOKMARK_DATE_DISPLAY_RELATIVE = "relative"
     BOOKMARK_DATE_DISPLAY_ABSOLUTE = "absolute"
