@@ -238,6 +238,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
         model = UserProfile
         fields = [
             "theme",
+            "theme_light",
+            "theme_dark",
             "bookmark_date_display",
             "bookmark_link_target",
             "web_archive_integration",

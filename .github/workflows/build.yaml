@@ -39,10 +39,10 @@ jobs:
           file: ./docker/default.Dockerfile
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           tags: |
-            woohoodai/linkding-cn:latest
-            woohoodai/linkding-cn:${{ env.VERSION }}
-            ghcr.io/woohoodai/linkding-cn:latest
-            ghcr.io/woohoodai/linkding-cn:${{ env.VERSION }}
+            jcbl1/linkding-cn:latest
+            jcbl1/linkding-cn:${{ env.VERSION }}
+            ghcr.io/jcbl1/linkding-cn:latest
+            ghcr.io/jcbl1/linkding-cn:${{ env.VERSION }}
           target: linkding
           push: true
 
@@ -53,10 +53,10 @@ jobs:
           file: ./docker/alpine.Dockerfile
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           tags: |
-            woohoodai/linkding-cn:latest-alpine
-            woohoodai/linkding-cn:${{ env.VERSION }}-alpine
-            ghcr.io/woohoodai/linkding-cn:latest-alpine
-            ghcr.io/woohoodai/linkding-cn:${{ env.VERSION }}-alpine
+            jcbl1/linkding-cn:latest-alpine
+            jcbl1/linkding-cn:${{ env.VERSION }}-alpine
+            ghcr.io/jcbl1/linkding-cn:latest-alpine
+            ghcr.io/jcbl1/linkding-cn:${{ env.VERSION }}-alpine
           target: linkding
           push: true
 
@@ -67,10 +67,10 @@ jobs:
           file: ./docker/default.Dockerfile
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           tags: |
-            woohoodai/linkding-cn:latest-plus
-            woohoodai/linkding-cn:${{ env.VERSION }}-plus
-            ghcr.io/woohoodai/linkding-cn:latest-plus
-            ghcr.io/woohoodai/linkding-cn:${{ env.VERSION }}-plus
+            jcbl1/linkding-cn:latest-plus
+            jcbl1/linkding-cn:${{ env.VERSION }}-plus
+            ghcr.io/jcbl1/linkding-cn:latest-plus
+            ghcr.io/jcbl1/linkding-cn:${{ env.VERSION }}-plus
           target: linkding-plus
           push: true
 
@@ -81,9 +81,9 @@ jobs:
           file: ./docker/alpine.Dockerfile
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           tags: |
-            woohoodai/linkding-cn:latest-plus-alpine
-            woohoodai/linkding-cn:${{ env.VERSION }}-plus-alpine
-            ghcr.io/woohoodai/linkding-cn:latest-plus-alpine
-            ghcr.io/woohoodai/linkding-cn:${{ env.VERSION }}-plus-alpine
+            jcbl1/linkding-cn:latest-plus-alpine
+            jcbl1/linkding-cn:${{ env.VERSION }}-plus-alpine
+            ghcr.io/jcbl1/linkding-cn:latest-plus-alpine
+            ghcr.io/jcbl1/linkding-cn:${{ env.VERSION }}-plus-alpine
           target: linkding-plus
           push: true

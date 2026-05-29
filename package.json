@@ -12,15 +12,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/WooHooDai/linkding-cn.git"
+    "url": "git+https://github.com/jcbl1/linkding-cn.git"
   },
   "keywords": [],
-  "author": "WooHooDai",
+  "author": "jcbl1",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/WooHooDai/linkding-cn/issues"
+    "url": "https://github.com/jcbl1/linkding-cn/issues"
   },
-  "homepage": "https://github.com/WooHooDai/linkding-cn#readme",
+  "homepage": "https://github.com/jcbl1/linkding-cn#readme",
   "dependencies": {
     "@floating-ui/dom": "^1.7.6",
     "approx-string-match": "^2.0.0",
