@@ -8,6 +8,19 @@
 | `for-upstream` | 向上游 PR | 仅功能代码，不含 fork 特定配置 |
 | `feat-*` | 功能分支 | 特定功能的开发代码 |
 
+## 当前分支状态
+
+```
+main (3c7dd5a)
+├── feat: 扩展主题选择 (6dd8a31) ← 来自 for-upstream
+├── chore: configure fork-specific settings for jcbl1 (6ecf756) ← fork 配置
+├── fix: 镜像源导致的依赖解析错误 (3355761, 75b6aea) ← CI 修复
+└── docs: add git branching strategy documentation (3c7dd5a) ← 文档
+
+for-upstream (6dd8a31)
+└── feat: 扩展主题选择 (6dd8a31) ← 仅功能修改
+```
+
 ## 标准工作流程
 
 ```
