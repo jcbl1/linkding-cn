@@ -37,8 +37,8 @@ jobs:
           target: linkding
           build-args: |
             UV_INDEX_URL=https://pypi.org/simple
-          cache-from: type=gha,scope=latest
-          cache-to: type=gha,mode=max,scope=latest
+          # cache-from: type=gha,scope=latest
+          # cache-to: type=gha,mode=max,scope=latest
           push: true
 
       # - name: Build latest-alpine
@@ -69,8 +69,8 @@ jobs:
           target: linkding-plus
           build-args: |
             UV_INDEX_URL=https://pypi.org/simple
-          cache-from: type=gha,scope=latest,mode=max
-          cache-to: type=gha,mode=max,scope=latest-plus
+          # cache-from: type=gha,scope=latest,mode=max
+          # cache-to: type=gha,mode=max,scope=latest-plus
           push: true
 
       # - name: Build latest-plus-alpine
