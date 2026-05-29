@@ -44,6 +44,8 @@ jobs:
             ghcr.io/jcbl1/linkding-cn:latest
             ghcr.io/jcbl1/linkding-cn:${{ env.VERSION }}
           target: linkding
+          build-args: |
+            UV_INDEX_URL=https://pypi.org/simple
           push: true
 
       - name: Build latest-alpine
@@ -58,6 +60,8 @@ jobs:
             ghcr.io/jcbl1/linkding-cn:latest-alpine
             ghcr.io/jcbl1/linkding-cn:${{ env.VERSION }}-alpine
           target: linkding
+          build-args: |
+            UV_INDEX_URL=https://pypi.org/simple
           push: true
 
       - name: Build latest-plus
@@ -72,6 +76,8 @@ jobs:
             ghcr.io/jcbl1/linkding-cn:latest-plus
             ghcr.io/jcbl1/linkding-cn:${{ env.VERSION }}-plus
           target: linkding-plus
+          build-args: |
+            UV_INDEX_URL=https://pypi.org/simple
           push: true
 
       - name: Build latest-plus-alpine
@@ -86,4 +92,6 @@ jobs:
             ghcr.io/jcbl1/linkding-cn:latest-plus-alpine
             ghcr.io/jcbl1/linkding-cn:${{ env.VERSION }}-plus-alpine
           target: linkding-plus
+          build-args: |
+            UV_INDEX_URL=https://pypi.org/simple
           push: true

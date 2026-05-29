@@ -24,6 +24,9 @@ WORKDIR /etc/linkding
 # install uv, use installer script for now as distroless images are not availabe for armv7
 ADD https://astral.sh/uv/0.8.13/install.sh /uv-installer.sh
 RUN chmod +x /uv-installer.sh && /uv-installer.sh
+# PyPI index URL (can be overridden at build time)
+ARG UV_INDEX_URL=https://pypi.org/simple
+ENV UV_INDEX_URL=${UV_INDEX_URL}
 # install python dependencies
 COPY pyproject.toml uv.lock ./
 RUN /root/.local/bin/uv sync --no-dev

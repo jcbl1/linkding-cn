@@ -6,6 +6,7 @@ version=$(<version.txt)
 # Needs checking if this works with ARMv7, excluded for now
 docker buildx build --target linkding-plus --platform linux/amd64,linux/arm64 \
   -f docker/default.Dockerfile \
+  --build-arg UV_INDEX_URL=https://pypi.org/simple \
   -t jcbl1/linkding-cn:latest \
   -t jcbl1/linkding-cn:v$version \
   --push .
