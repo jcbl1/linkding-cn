@@ -37,7 +37,7 @@ jobs:
         with:
           context: .
           file: ./docker/default.Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: linux/amd64,linux/arm64
           tags: |
             jcbl1/linkding-cn:latest
             jcbl1/linkding-cn:${{ env.VERSION }}
@@ -53,7 +53,7 @@ jobs:
         with:
           context: .
           file: ./docker/alpine.Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: linux/amd64,linux/arm64
           tags: |
             jcbl1/linkding-cn:latest-alpine
             jcbl1/linkding-cn:${{ env.VERSION }}-alpine
@@ -69,7 +69,7 @@ jobs:
         with:
           context: .
           file: ./docker/default.Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: linux/amd64,linux/arm64
           tags: |
             jcbl1/linkding-cn:latest-plus
             jcbl1/linkding-cn:${{ env.VERSION }}-plus
@@ -85,7 +85,7 @@ jobs:
         with:
           context: .
           file: ./docker/alpine.Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: linux/amd64,linux/arm64
           tags: |
             jcbl1/linkding-cn:latest-plus-alpine
             jcbl1/linkding-cn:${{ env.VERSION }}-plus-alpine
