@@ -354,6 +354,30 @@
     }
   }
 
+  .theme-auto-settings {
+    &.is-hidden {
+      display: none;
+    }
+  }
+
+  .settings-field-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--unit-4);
+    width: 100%;
+  }
+
+  .settings-field-label {
+    font-size: var(--font-size-sm);
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+  }
+
+  .settings-select-input {
+    width: min(180px, 100%);
+  }
+
   .settings-static-value {
     justify-self: stretch;
     width: 100%;

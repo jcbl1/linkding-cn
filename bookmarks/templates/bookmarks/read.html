@@ -14,13 +14,13 @@
     <link href="{% static 'theme-dark.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
     <meta name="theme-color" content="#161822">
   {% else %}
-    {# Use auto theme as fallback #}
-    <link href="{% static 'theme-dark.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"
-          media="(prefers-color-scheme: dark)"/>
-    <link href="{% static 'theme-light.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"
+    {# Auto mode: use user-configured light/dark themes #}
+    <link href="{% static request.user_profile.theme_light_css %}?v={{ app_version }}" rel="stylesheet" type="text/css"
           media="(prefers-color-scheme: light)"/>
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161822">
+    <link href="{% static request.user_profile.theme_dark_css %}?v={{ app_version }}" rel="stylesheet" type="text/css"
+          media="(prefers-color-scheme: dark)"/>
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#5856e0">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161822">
   {% endif %}
   {% if request.user_profile.custom_css %}
     <link href="{% url 'linkding:custom_css' %}?hash={{ request.user_profile.custom_css_hash }}" rel="stylesheet" type="text/css"/>
