@@ -19,13 +19,6 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -41,8 +34,6 @@ jobs:
           tags: |
             jcbl1/linkding-cn:latest
             jcbl1/linkding-cn:${{ env.VERSION }}
-            ghcr.io/jcbl1/linkding-cn:latest
-            ghcr.io/jcbl1/linkding-cn:${{ env.VERSION }}
           target: linkding
           build-args: |
             UV_INDEX_URL=https://pypi.org/simple
@@ -57,8 +48,6 @@ jobs:
           tags: |
             jcbl1/linkding-cn:latest-alpine
             jcbl1/linkding-cn:${{ env.VERSION }}-alpine
-            ghcr.io/jcbl1/linkding-cn:latest-alpine
-            ghcr.io/jcbl1/linkding-cn:${{ env.VERSION }}-alpine
           target: linkding
           build-args: |
             UV_INDEX_URL=https://pypi.org/simple
@@ -73,8 +62,6 @@ jobs:
           tags: |
             jcbl1/linkding-cn:latest-plus
             jcbl1/linkding-cn:${{ env.VERSION }}-plus
-            ghcr.io/jcbl1/linkding-cn:latest-plus
-            ghcr.io/jcbl1/linkding-cn:${{ env.VERSION }}-plus
           target: linkding-plus
           build-args: |
             UV_INDEX_URL=https://pypi.org/simple
@@ -89,8 +76,6 @@ jobs:
           tags: |
             jcbl1/linkding-cn:latest-plus-alpine
             jcbl1/linkding-cn:${{ env.VERSION }}-plus-alpine
-            ghcr.io/jcbl1/linkding-cn:latest-plus-alpine
-            ghcr.io/jcbl1/linkding-cn:${{ env.VERSION }}-plus-alpine
           target: linkding-plus
           build-args: |
             UV_INDEX_URL=https://pypi.org/simple
