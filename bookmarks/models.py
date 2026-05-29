@@ -752,6 +752,10 @@ class UserProfile(models.Model):
         (THEME_LIGHT, _("Light")),
         (THEME_DARK, _("Dark")),
     ]
+    THEME_LIGHT_CHOICES = [
+        (THEME_LIGHT, _("Light")),
+        (THEME_DARK, _("Dark")),
+    ]
     BOOKMARK_DATE_DISPLAY_RELATIVE = "relative"
     BOOKMARK_DATE_DISPLAY_ABSOLUTE = "absolute"
     BOOKMARK_DATE_DISPLAY_HIDDEN = "hidden"
@@ -804,6 +808,12 @@ class UserProfile(models.Model):
     language = models.CharField(max_length=20, blank=False, default=LANGUAGE_EN)
     theme = models.CharField(
         max_length=10, choices=THEME_CHOICES, blank=False, default=THEME_AUTO
+    )
+    theme_light = models.CharField(
+        max_length=10, choices=THEME_LIGHT_CHOICES, blank=False, default=THEME_LIGHT
+    )
+    theme_dark = models.CharField(
+        max_length=10, choices=THEME_LIGHT_CHOICES, blank=False, default=THEME_DARK
     )
     bookmark_date_display = models.CharField(
         max_length=10,
@@ -915,6 +925,14 @@ class UserProfile(models.Model):
             self.custom_css_hash = ""
         super().save(*args, **kwargs)
 
+    @property
+    def theme_light_css(self):
+        return f"theme-{self.theme_light}.css"
+
+    @property
+    def theme_dark_css(self):
+        return f"theme-{self.theme_dark}.css"
+
     @classmethod
     def default_sidebar_modules(cls, bundles_enabled: bool = True) -> list[dict]:
         return [
@@ -979,6 +997,8 @@ class UserProfileForm(forms.ModelForm):
         model = UserProfile
         fields = [
             "theme",
+            "theme_light",
+            "theme_dark",
             "bookmark_date_display",
             "bookmark_description_display",
             "bookmark_description_max_lines",
@@ -1031,6 +1051,8 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
         model = UserProfile
         fields = [
             "theme",
+            "theme_light",
+            "theme_dark",
             "bookmark_date_display",
             "bookmark_description_display",
             "bookmark_description_max_lines",

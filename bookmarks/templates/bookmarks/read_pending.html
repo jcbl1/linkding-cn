@@ -11,10 +11,11 @@
   {% elif request.user_profile.theme == 'dark' %}
     <link href="{% static 'theme-dark.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
   {% else %}
-    <link href="{% static 'theme-dark.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"
-          media="(prefers-color-scheme: dark)"/>
-    <link href="{% static 'theme-light.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"
+    {# Auto mode: use user-configured light/dark themes #}
+    <link href="{% static request.user_profile.theme_light_css %}?v={{ app_version }}" rel="stylesheet" type="text/css"
           media="(prefers-color-scheme: light)"/>
+    <link href="{% static request.user_profile.theme_dark_css %}?v={{ app_version }}" rel="stylesheet" type="text/css"
+          media="(prefers-color-scheme: dark)"/>
   {% endif %}
   <style>
     .loading-container {

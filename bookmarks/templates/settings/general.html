@@ -91,10 +91,10 @@
               </div>
             </form>
 
-            <form action="{% url 'linkding:settings.save' %}" method="post" class="settings-subform" data-settings-save-mode="instant" data-settings-reload-after-save="true">
+            <form action="{% url 'linkding:settings.save' %}" method="post" class="settings-subform" data-settings-save-mode="instant" data-settings-reload-after-save="true" data-theme-settings-form>
               {% csrf_token %}
               <input type="hidden" name="form_id" value="profile_quick">
-              <input type="hidden" name="form_fields" value="theme">
+              <input type="hidden" name="form_fields" value="theme,theme_light,theme_dark">
               <div class="settings-row">
                 <div class="settings-copy">
                   <label id="settings-theme-label" class="settings-label">{% translate "Theme" %}</label>
@@ -113,6 +113,38 @@
                         <span>{{ label }}</span>
                       </label>
                     {% endfor %}
+                  </div>
+                </div>
+              </div>
+              <div class="settings-row theme-auto-settings{% if profile_quick_form.theme.value != 'auto' %} is-hidden{% endif %}" data-theme-auto-settings>
+                <div class="settings-copy">
+                  <label class="settings-label">{% translate "Auto theme configuration" %}</label>
+                  <div class="form-input-hint">
+                    {% translate "When following system theme, choose which theme to use for light and dark mode." %}
+                  </div>
+                </div>
+                <div class="settings-control settings-control-stack">
+                  <div class="settings-field-row">
+                    <label for="{{ profile_quick_form.theme_light.id_for_label }}" class="settings-field-label">{% translate "Light mode theme" %}</label>
+                    <select name="{{ profile_quick_form.theme_light.html_name }}"
+                            id="{{ profile_quick_form.theme_light.id_for_label }}"
+                            class="form-select settings-select-input"
+                            data-theme-light-select>
+                      {% for value, label in profile_quick_form.theme_light.field.choices %}
+                        <option value="{{ value }}"{% if profile_quick_form.theme_light.value == value %} selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="settings-field-row">
+                    <label for="{{ profile_quick_form.theme_dark.id_for_label }}" class="settings-field-label">{% translate "Dark mode theme" %}</label>
+                    <select name="{{ profile_quick_form.theme_dark.html_name }}"
+                            id="{{ profile_quick_form.theme_dark.id_for_label }}"
+                            class="form-select settings-select-input"
+                            data-theme-dark-select>
+                      {% for value, label in profile_quick_form.theme_dark.field.choices %}
+                        <option value="{{ value }}"{% if profile_quick_form.theme_dark.value == value %} selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
                   </div>
                 </div>
               </div>
