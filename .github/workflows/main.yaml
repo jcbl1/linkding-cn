@@ -6,6 +6,9 @@ on:
     branches:
       - master
 
+env:
+  UV_INDEX_URL: https://pypi.org/simple
+
 jobs:
   unit_tests:
     name: Unit Tests
