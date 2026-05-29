@@ -41,21 +41,21 @@ jobs:
           cache-to: type=gha,mode=max,scope=latest
           push: true
 
-      - name: Build latest-alpine
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./docker/alpine.Dockerfile
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            jcbl1/linkding-cn:latest-alpine
-            jcbl1/linkding-cn:${{ env.VERSION }}-alpine
-          target: linkding
-          build-args: |
-            UV_INDEX_URL=https://pypi.org/simple
-          cache-from: type=gha,scope=latest-alpine
-          cache-to: type=gha,mode=max,scope=latest-alpine
-          push: true
+      # - name: Build latest-alpine
+      #   uses: docker/build-push-action@v6
+      #   with:
+      #     context: .
+      #     file: ./docker/alpine.Dockerfile
+      #     platforms: linux/amd64,linux/arm64
+      #     tags: |
+      #       jcbl1/linkding-cn:latest-alpine
+      #       jcbl1/linkding-cn:${{ env.VERSION }}-alpine
+      #     target: linkding
+      #     build-args: |
+      #       UV_INDEX_URL=https://pypi.org/simple
+      #     cache-from: type=gha,scope=latest-alpine
+      #     cache-to: type=gha,mode=max,scope=latest-alpine
+      #     push: true
 
       - name: Build latest-plus
         uses: docker/build-push-action@v6
@@ -73,18 +73,18 @@ jobs:
           cache-to: type=gha,mode=max,scope=latest-plus
           push: true
 
-      - name: Build latest-plus-alpine
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./docker/alpine.Dockerfile
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            jcbl1/linkding-cn:latest-plus-alpine
-            jcbl1/linkding-cn:${{ env.VERSION }}-plus-alpine
-          target: linkding-plus
-          build-args: |
-            UV_INDEX_URL=https://pypi.org/simple
-          cache-from: type=gha,scope=latest-alpine,mode=max
-          cache-to: type=gha,mode=max,scope=latest-plus-alpine
-          push: true
+      # - name: Build latest-plus-alpine
+      #   uses: docker/build-push-action@v6
+      #   with:
+      #     context: .
+      #     file: ./docker/alpine.Dockerfile
+      #     platforms: linux/amd64,linux/arm64
+      #     tags: |
+      #       jcbl1/linkding-cn:latest-plus-alpine
+      #       jcbl1/linkding-cn:${{ env.VERSION }}-plus-alpine
+      #     target: linkding-plus
+      #     build-args: |
+      #       UV_INDEX_URL=https://pypi.org/simple
+      #     cache-from: type=gha,scope=latest-alpine,mode=max
+      #     cache-to: type=gha,mode=max,scope=latest-plus-alpine
+      #     push: true
