@@ -1,0 +1,168 @@
+@import "theme-light.css";
+
+:root {
+  /* Nord Polar Night palette */
+  --nord0: #2E3440;
+  --nord1: #3B4252;
+  --nord2: #434C5E;
+  --nord3: #4C566A;
+  /* Nord Snow Storm palette */
+  --nord4: #D8DEE9;
+  --nord5: #E5E9F0;
+  --nord6: #ECEFF4;
+  /* Nord Frost palette */
+  --nord7: #8FBCBB;
+  --nord8: #88C0D0;
+  --nord9: #81A1C1;
+  --nord10: #5E81AC;
+  /* Nord Aurora palette */
+  --nord11: #BF616A;
+  --nord12: #D08770;
+  --nord13: #EBCB8B;
+  --nord14: #A3BE8C;
+  --nord15: #B48EAD;
+
+  /* Contrast scale based on Nord */
+  --contrast-5: rgba(216, 222, 233, 0.06);
+  --contrast-10: rgba(216, 222, 233, 0.12);
+  --contrast-20: rgba(216, 222, 233, 0.18);
+  --contrast-30: rgba(216, 222, 233, 0.28);
+  --contrast-40: rgba(216, 222, 233, 0.38);
+  --contrast-50: rgba(216, 222, 233, 0.48);
+  --contrast-60: rgba(216, 222, 233, 0.56);
+  --contrast-70: rgba(216, 222, 233, 0.66);
+  --contrast-80: rgba(216, 222, 233, 0.78);
+  --contrast-90: rgba(216, 222, 233, 0.88);
+
+  --primary-color: var(--nord8);
+  --primary-color-highlight: #94D0DE;
+  --primary-color-shade: rgba(136, 192, 208, 0.35);
+
+  --alternative-color: var(--nord7);
+  --alternative-color-dark: #7DAEAC;
+
+  --success-color: var(--nord14);
+  --success-color-highlight: #B0C896;
+  --success-color-shade: rgba(163, 190, 140, 0.1);
+
+  --warning-color: var(--nord13);
+  --warning-color-highlight: #F0D596;
+  --warning-color-shade: rgba(235, 203, 139, 0.1);
+
+  --error-color: var(--nord11);
+  --error-color-highlight: #CC717A;
+  --error-color-shade: rgba(191, 97, 106, 0.1);
+
+  /* Core colors */
+  --text-color: var(--nord4);
+  --secondary-text-color: var(--nord9);
+  --tertiary-text-color: var(--nord3);
+  --contrast-text-color: var(--nord6);
+  --primary-text-color: var(--nord8);
+
+  --link-color: var(--primary-text-color);
+  --secondary-link-color: rgba(136, 192, 208, 0.8);
+
+  --icon-color: var(--nord4);
+
+  --border-color: var(--contrast-30);
+  --secondary-border-color: var(--contrast-20);
+
+  --body-color: var(--nord0);
+  --body-color-contrast: var(--nord1);
+
+  /* Focus */
+  --focus-outline: 2px solid var(--nord8);
+  --focus-outline-offset: 2px;
+
+  /* Shadows */
+  --box-shadow-xs: none;
+  --box-shadow: none;
+  --box-shadow-lg: none;
+}
+
+:root {
+  --input-bg-color: var(--nord1);
+  --input-disabled-bg-color: var(--contrast-30);
+  --input-text-color: var(--text-color);
+  --input-hint-color: var(--secondary-text-color);
+  --input-border-color: var(--border-color);
+  --input-placeholder-color: var(--tertiary-text-color);
+  --input-box-shadow: var(--box-shadow-xs);
+
+  --checkbox-bg-color: var(--nord1);
+  --checkbox-checked-bg-color: var(--primary-color);
+  --checkbox-disabled-bg-color: var(--contrast-30);
+  --checkbox-border-color: var(--border-color);
+  --checkbox-icon-color: var(--nord0);
+
+  --switch-bg-color: var(--nord1);
+  --switch-border-color: var(--border-color);
+  --switch-toggle-color: var(--text-color);
+}
+
+:root {
+  --btn-bg-color: var(--nord1);
+  --btn-hover-bg-color: var(--nord2);
+  --btn-border-color: var(--border-color);
+  --btn-text-color: var(--text-color);
+  --btn-icon-color: var(--icon-color);
+  --btn-font-weight: 400;
+  --btn-box-shadow: var(--box-shadow-xs);
+
+  --btn-primary-bg-color: var(--primary-color);
+  --btn-primary-hover-bg-color: var(--primary-color-highlight);
+  --btn-primary-text-color: var(--nord0);
+
+  --btn-success-bg-color: var(--success-color);
+  --btn-success-hover-bg-color: var(--success-color-highlight);
+  --btn-success-text-color: var(--nord0);
+
+  --btn-error-bg-color: var(--error-color);
+  --btn-error-hover-bg-color: var(--error-color-highlight);
+  --btn-error-text-color: var(--nord0);
+
+  --btn-link-text-color: var(--link-color);
+  --btn-link-hover-text-color: var(--link-color);
+}
+
+:root {
+  --modal-overlay-bg-color: rgba(46, 52, 64, 0.55);
+  --modal-container-bg-color: var(--nord1);
+  --modal-container-border-color: var(--contrast-30);
+  --modal-border-radius: var(--border-radius-lg);
+  --modal-box-shadow: none;
+}
+
+:root {
+  --menu-bg-color: var(--nord1);
+  --menu-border-color: var(--contrast-30);
+  --menu-border-radius: var(--border-radius);
+  --menu-box-shadow: none;
+  --menu-item-color: var(--text-color);
+  --menu-item-hover-color: var(--text-color);
+  --menu-item-bg-color: transparent;
+  --menu-item-hover-bg-color: var(--contrast-20);
+}
+
+:root {
+  --tab-color: var(--text-color);
+  --tab-hover-color: var(--primary-text-color);
+  --tab-active-color: var(--primary-text-color);
+  --tab-highlight-color: var(--primary-text-color);
+}
+
+:root {
+  --bookmark-title-color: var(--primary-text-color);
+  --bookmark-title-weight: 500;
+  --bookmark-description-color: var(--text-color);
+  --bookmark-description-weight: 400;
+  --bookmark-actions-color: var(--secondary-text-color);
+  --bookmark-actions-hover-color: var(--text-color);
+  --bookmark-actions-weight: 400;
+  --bulk-actions-bg-color: var(--nord1);
+}
+
+:root {
+  color-scheme: dark;
+}
