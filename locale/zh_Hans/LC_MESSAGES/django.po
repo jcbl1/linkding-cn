@@ -1259,6 +1259,24 @@ msgid ""
 "Choose a light or dark theme, or automatically follow your system setting."
 msgstr "手动选择明暗主题，或基于系统设置自动切换。"
 
+#: bookmarks/templates/settings/general.html:121
+msgid "Auto theme configuration"
+msgstr "自动主题配置"
+
+#: bookmarks/templates/settings/general.html:123
+msgid ""
+"When following system theme, choose which theme to use for light and dark "
+"mode."
+msgstr "跟随系统主题时，分别为浅色模式和深色模式选择使用的主题。"
+
+#: bookmarks/templates/settings/general.html:128
+msgid "Light mode theme"
+msgstr "浅色模式主题"
+
+#: bookmarks/templates/settings/general.html:139
+msgid "Dark mode theme"
+msgstr "深色模式主题"
+
 #: bookmarks/templates/settings/general.html:126
 msgid "Custom CSS"
 msgstr "自定义 CSS"
