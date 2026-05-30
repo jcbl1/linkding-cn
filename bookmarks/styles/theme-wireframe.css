@@ -1,0 +1,142 @@
+@import "theme-light.css";
+
+:root {
+  --gray-wf-text: #404040;
+  --gray-wf-secondary: #595959;
+  --gray-wf-border: #A6A6A6;
+  --gray-wf-contrast: #D9D9D9;
+  --gray-wf-bg: #F2F2F2;
+
+  --primary-color: var(--gray-wf-text);
+  --primary-color-highlight: var(--gray-wf-secondary);
+  --primary-color-shade: rgba(64, 64, 64, 0.075);
+
+  --alternative-color: var(--gray-wf-secondary);
+  --alternative-color-dark: var(--gray-wf-text);
+
+  --success-color: var(--gray-wf-text);
+  --success-color-highlight: var(--gray-wf-secondary);
+  --success-color-shade: rgba(64, 64, 64, 0.1);
+
+  --warning-color: var(--gray-wf-text);
+  --warning-color-highlight: var(--gray-wf-secondary);
+  --warning-color-shade: rgba(64, 64, 64, 0.1);
+
+  --error-color: var(--gray-wf-text);
+  --error-color-highlight: var(--gray-wf-secondary);
+  --error-color-shade: rgba(64, 64, 64, 0.1);
+
+  --text-color: var(--gray-wf-text);
+  --secondary-text-color: var(--gray-wf-secondary);
+  --tertiary-text-color: var(--gray-wf-border);
+  --contrast-text-color: #fff;
+  --primary-text-color: var(--gray-wf-text);
+
+  --link-color: var(--gray-wf-text);
+  --secondary-link-color: var(--gray-wf-secondary);
+
+  --icon-color: var(--gray-wf-secondary);
+
+  --border-color: var(--gray-wf-border);
+  --secondary-border-color: var(--gray-wf-contrast);
+
+  --body-color: var(--gray-wf-bg);
+  --body-color-contrast: var(--gray-wf-contrast);
+
+  --border-radius: 0;
+  --border-radius-lg: 0;
+  --border-width: 1.5px;
+  --border-width-lg: 2.5px;
+
+  --focus-outline: 2px dashed var(--gray-wf-text);
+  --focus-outline-offset: 2px;
+
+  --box-shadow-xs: none;
+  --box-shadow: none;
+  --box-shadow-lg: none;
+
+  --base-font-family: "Courier New", Courier, monospace;
+  --mono-font-family: "Courier New", Courier, monospace;
+}
+
+:root {
+  --input-bg-color: #fff;
+  --input-disabled-bg-color: var(--gray-wf-contrast);
+  --input-text-color: var(--text-color);
+  --input-hint-color: var(--secondary-text-color);
+  --input-border-color: var(--border-color);
+  --input-placeholder-color: var(--gray-wf-border);
+  --input-box-shadow: none;
+
+  --checkbox-bg-color: #fff;
+  --checkbox-checked-bg-color: var(--gray-wf-text);
+  --checkbox-disabled-bg-color: var(--gray-wf-contrast);
+  --checkbox-border-color: var(--border-color);
+  --checkbox-icon-color: #fff;
+
+  --switch-bg-color: var(--gray-wf-contrast);
+  --switch-border-color: var(--border-color);
+  --switch-toggle-color: var(--gray-wf-text);
+}
+
+:root {
+  --btn-bg-color: #fff;
+  --btn-hover-bg-color: var(--gray-wf-text);
+  --btn-border-color: var(--border-color);
+  --btn-text-color: var(--text-color);
+  --btn-icon-color: var(--icon-color);
+  --btn-font-weight: 400;
+  --btn-box-shadow: none;
+
+  --btn-primary-bg-color: var(--gray-wf-text);
+  --btn-primary-hover-bg-color: var(--gray-wf-secondary);
+  --btn-primary-text-color: #fff;
+
+  --btn-success-bg-color: var(--gray-wf-text);
+  --btn-success-hover-bg-color: var(--gray-wf-secondary);
+  --btn-success-text-color: #fff;
+
+  --btn-error-bg-color: var(--gray-wf-text);
+  --btn-error-hover-bg-color: var(--gray-wf-secondary);
+  --btn-error-text-color: #fff;
+
+  --btn-link-text-color: var(--gray-wf-text);
+  --btn-link-hover-text-color: var(--gray-wf-secondary);
+}
+
+:root {
+  --modal-overlay-bg-color: rgba(64, 64, 64, 0.45);
+  --modal-container-bg-color: #fff;
+  --modal-container-border-color: var(--border-color);
+  --modal-border-radius: 0;
+  --modal-box-shadow: none;
+}
+
+:root {
+  --menu-bg-color: #fff;
+  --menu-border-color: var(--border-color);
+  --menu-border-radius: 0;
+  --menu-box-shadow: none;
+  --menu-item-color: var(--text-color);
+  --menu-item-hover-color: var(--text-color);
+  --menu-item-bg-color: transparent;
+  --menu-item-hover-bg-color: var(--gray-wf-contrast);
+}
+
+:root {
+  --tab-color: var(--text-color);
+  --tab-hover-color: var(--gray-wf-text);
+  --tab-active-color: var(--gray-wf-text);
+  --tab-highlight-color: var(--gray-wf-text);
+}
+
+:root {
+  --bookmark-title-color: var(--gray-wf-text);
+  --bookmark-title-weight: 500;
+  --bookmark-description-color: var(--text-color);
+  --bookmark-description-weight: 400;
+  --bookmark-actions-color: var(--secondary-text-color);
+  --bookmark-actions-hover-color: var(--text-color);
+  --bookmark-actions-weight: 400;
+  --bulk-actions-bg-color: var(--gray-wf-contrast);
+}

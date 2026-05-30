@@ -288,6 +288,10 @@ msgstr "深色"
 msgid "Nord"
 msgstr "Nord"
 
+#: bookmarks/models.py:757
+msgid "Wireframe"
+msgstr "Wireframe"
+
 #: bookmarks/models.py:760
 msgid "Hidden"
 msgstr "隐藏"

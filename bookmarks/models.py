@@ -748,16 +748,19 @@ class UserProfile(models.Model):
     THEME_LIGHT = "light"
     THEME_DARK = "dark"
     THEME_NORD = "nord"
+    THEME_WIREFRAME = "wireframe"
     THEME_CHOICES = [
         (THEME_AUTO, _("Auto")),
         (THEME_LIGHT, _("Light")),
         (THEME_DARK, _("Dark")),
         (THEME_NORD, _("Nord")),
+        (THEME_WIREFRAME, _("Wireframe")),
     ]
     THEME_LIGHT_CHOICES = [
         (THEME_LIGHT, _("Light")),
         (THEME_DARK, _("Dark")),
         (THEME_NORD, _("Nord")),
+        (THEME_WIREFRAME, _("Wireframe")),
     ]
     BOOKMARK_DATE_DISPLAY_RELATIVE = "relative"
     BOOKMARK_DATE_DISPLAY_ABSOLUTE = "absolute"

@@ -101,6 +101,7 @@ def _get_theme_color(theme: str) -> str:
     colors = {
         "dark": "#161822",
         "nord": "#2E3440",
+        "wireframe": "#404040",
     }
     return colors.get(theme, "#5856e0")
 
@@ -109,5 +110,6 @@ def _get_background_color(theme: str) -> str:
     colors = {
         "dark": "#161822",
         "nord": "#2E3440",
+        "wireframe": "#F2F2F2",
     }
     return colors.get(theme, "#ffffff")
