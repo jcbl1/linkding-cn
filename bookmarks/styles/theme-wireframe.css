@@ -43,20 +43,7 @@
   --body-color: var(--gray-wf-bg);
   --body-color-contrast: var(--gray-wf-contrast);
 
-  --border-radius: 0;
-  --border-radius-lg: 0;
-  --border-width: 1.5px;
-  --border-width-lg: 2.5px;
-
-  --focus-outline: 2px dashed var(--gray-wf-text);
-  --focus-outline-offset: 2px;
-
-  --box-shadow-xs: none;
-  --box-shadow: none;
-  --box-shadow-lg: none;
-
-  --base-font-family: "Courier New", Courier, monospace;
-  --mono-font-family: "Courier New", Courier, monospace;
+  --focus-outline: 2px solid var(--gray-wf-text);
 }
 
 :root {
@@ -66,7 +53,6 @@
   --input-hint-color: var(--secondary-text-color);
   --input-border-color: var(--border-color);
   --input-placeholder-color: var(--gray-wf-border);
-  --input-box-shadow: none;
 
   --checkbox-bg-color: #fff;
   --checkbox-checked-bg-color: var(--gray-wf-text);
@@ -81,12 +67,9 @@
 
 :root {
   --btn-bg-color: #fff;
-  --btn-hover-bg-color: var(--gray-wf-text);
   --btn-border-color: var(--border-color);
   --btn-text-color: var(--text-color);
   --btn-icon-color: var(--icon-color);
-  --btn-font-weight: 400;
-  --btn-box-shadow: none;
 
   --btn-primary-bg-color: var(--gray-wf-text);
   --btn-primary-hover-bg-color: var(--gray-wf-secondary);
@@ -108,15 +91,11 @@
   --modal-overlay-bg-color: rgba(64, 64, 64, 0.45);
   --modal-container-bg-color: #fff;
   --modal-container-border-color: var(--border-color);
-  --modal-border-radius: 0;
-  --modal-box-shadow: none;
 }
 
 :root {
   --menu-bg-color: #fff;
   --menu-border-color: var(--border-color);
-  --menu-border-radius: 0;
-  --menu-box-shadow: none;
   --menu-item-color: var(--text-color);
   --menu-item-hover-color: var(--text-color);
   --menu-item-bg-color: transparent;
