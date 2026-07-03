@@ -187,7 +187,10 @@ def _build_domain_group_condition(raw_group: str) -> Q:
 
 def _field_term_expression_to_q(field_name: str, term: str) -> Q:
     if field_name == "title":
-        return Q(title__icontains=term)
+        # Match resolved_title logic: fall back to url when title is empty
+        return Q(title__icontains=term) | (
+            (Q(title__isnull=True) | Q(title="")) & Q(url__icontains=term)
+        )
     if field_name == "desc":
         return Q(description__icontains=term)
     if field_name == "notes":
@@ -206,7 +209,10 @@ def _field_term_expression_to_q(field_name: str, term: str) -> Q:
 def _annotation_field_term_expression_to_q(field_name: str, term: str) -> Q:
     """将搜索字段转换为 Annotation 模型的 Q 对象"""
     if field_name == "title":
-        return Q(bookmark__title__icontains=term)
+        # Match resolved_title logic: fall back to url when title is empty
+        return Q(bookmark__title__icontains=term) | (
+            (Q(bookmark__title__isnull=True) | Q(bookmark__title="")) & Q(bookmark__url__icontains=term)
+        )
     if field_name == "desc":
         return Q(bookmark__description__icontains=term)
     if field_name == "notes":
