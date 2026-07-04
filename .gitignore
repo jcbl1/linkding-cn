@@ -184,6 +184,8 @@ typings/
 # Rollup compilation output
 /bookmarks/static/bundle.js*
 /bookmarks/static/reader.js*
+/bookmarks/static/reader-pending.js*
+/bookmarks/static/reader-unavailable.js*
 # CSS compilation output
 /bookmarks/static/theme-*.css*
 # esbuild bundled defuddle (built from defuddle_entry.js)
