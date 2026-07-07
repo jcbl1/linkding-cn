@@ -140,10 +140,13 @@ export class SearchAutocomplete extends TurboLitElement {
     const currentWord = getCurrentWord(this.input);
     if (currentWord && currentWord.length > 1 && currentWord[0] === "#") {
       const searchTag = currentWord.substring(1);
+      const search = searchTag.toLowerCase();
       tagSuggestions = (tags || [])
         .filter(
           (tag) =>
-            tag.name.toLowerCase().indexOf(searchTag.toLowerCase()) === 0,
+            tag.name.toLowerCase().indexOf(search) === 0 ||
+            (tag.pinyin_full && tag.pinyin_full.indexOf(search) === 0) ||
+            (tag.pinyin_first && tag.pinyin_first.indexOf(search) === 0),
         )
         .slice(0, 5)
         .map((tag) => ({

@@ -180,9 +180,10 @@ class AssetServiceTestCase(TestCase, BookmarkFactoryMixin):
 
         self.mock_detect_content_type.return_value = "application/pdf"
 
-        with mock.patch("bookmarks.services.assets.requests.get") as mock_get:
-            mock_get.return_value = self.create_mock_pdf_response()
-            assets.create_snapshot(asset)
+        with timezone.override("UTC"):
+            with mock.patch("bookmarks.services.assets.requests.get") as mock_get:
+                mock_get.return_value = self.create_mock_pdf_response()
+                assets.create_snapshot(asset)
 
         expected_filename = (
             "snapshot_2023-08-11_214511_https___example.com_doc.pdf.pdf.gz"

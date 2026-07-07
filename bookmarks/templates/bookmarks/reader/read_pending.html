@@ -1,0 +1,45 @@
+{% load i18n static %}
+<!DOCTYPE html>
+<html lang="{{ LANGUAGE_CODE|default:'en' }}" class="reader-mode" data-api-base-url="{{ api_base_url }}/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="csrfmiddlewaretoken" content="{{ csrf_token }}">
+  <title>{% translate "Reader view" %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimal-ui">
+  {% if request.user_profile.theme == 'light' %}
+    <link href="{% static 'theme-light.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
+  {% elif request.user_profile.theme == 'dark' %}
+    <link href="{% static 'theme-dark.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
+  {% elif request.user_profile.theme == 'nord' %}
+    <link href="{% static 'theme-nord.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
+  {% elif request.user_profile.theme == 'wireframe' %}
+    <link href="{% static 'theme-wireframe.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
+  {% else %}
+    <link href="{% static 'theme-dark.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"
+          media="(prefers-color-scheme: dark)"/>
+    <link href="{% static 'theme-light.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"
+          media="(prefers-color-scheme: light)"/>
+  {% endif %}
+</head>
+<body>
+<div class="loading-container">
+  <div class="loading-spinner"></div>
+  <p class="loading-text">{% translate "Processing article..." %}</p>
+  <p class="loading-error" id="error-msg"></p>
+</div>
+{{ api_base_url|default:"/api/"|json_script:"reader-api-base-url" }}
+<script type="application/json" id="pending-config">
+{
+  "bookmarkId": {{ bookmark_id }},
+  "assetId": {{ asset_id }},
+  "msg": {
+    "timeout": "{% translate 'Timed out waiting for article to be ready.' %}",
+    "processFailed": "{% translate 'Failed to process article. Please refresh to try again.' %}",
+    "retry": "{% translate 'Failed to process article. Please try again.' %}"
+  }
+}
+</script>
+<script src="{% url 'javascript-catalog' %}"></script>
+<script src="{% static 'reader-pending.js' %}?v={{ app_version }}" type="application/javascript"></script>
+</body>
+</html>

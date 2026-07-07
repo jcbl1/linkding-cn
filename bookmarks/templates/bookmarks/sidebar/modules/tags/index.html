@@ -12,18 +12,46 @@
   <li class="menu-item">
     <a href="{% url 'linkding:tags.index' %}" class="menu-link">{% translate "Manage tags" %}</a>
   </li>
+  <li class="menu-divider"></li>
   {% endif %}
-  <li class="menu-item">
-    <form method="post">
-      {% csrf_token %}
-      <input type="hidden" name="pref_action" value="toggle_tag_grouping">
-      <input type="hidden" name="value" value="{{ tag_cloud.toggle_tag_grouping_value }}">
-      <button type="submit" class="menu-link">{{ tag_cloud.toggle_tag_grouping_label }}</button>
-    </form>
+  {% for value, label, is_active in tag_cloud.mode_options %}
+  <li class="menu-item{% if is_active %} menu-item-active{% endif %}">
+    {% if is_active %}
+      <span class="menu-link menu-link-active">{{ label }}</span>
+    {% else %}
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="pref_action" value="toggle_tag_grouping">
+        <input type="hidden" name="value" value="{{ value }}">
+        <button type="submit" class="menu-link">{{ label }}</button>
+      </form>
+    {% endif %}
   </li>
+  {% endfor %}
+  {% if tag_cloud.grouping_options %}
+  <li class="menu-divider"></li>
+  {% for value, label, is_active in tag_cloud.grouping_options %}
+  <li class="menu-item{% if is_active %} menu-item-active{% endif %}">
+    {% if is_active %}
+      <span class="menu-link menu-link-active">{{ label }}</span>
+    {% else %}
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="pref_action" value="toggle_tag_grouping">
+        <input type="hidden" name="value" value="{{ value }}">
+        <button type="submit" class="menu-link">{{ label }}</button>
+      </form>
+    {% endif %}
+  </li>
+  {% endfor %}
+  {% endif %}
 {% endblock %}
 
 {% block content_attrs %}id="tag-cloud-container"{% endblock %}
 {% block content %}
-  {% include 'bookmarks/sidebar/modules/tags/cloud.html' %}
+  {% if tag_cloud.tag_grouping == "smart_tree" %}
+    {% include 'bookmarks/sidebar/modules/tags/tree.html' %}
+  {% else %}
+    {% include 'bookmarks/sidebar/modules/tags/cloud.html' %}
+  {% endif %}
 {% endblock %}

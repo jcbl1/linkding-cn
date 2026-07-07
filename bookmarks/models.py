@@ -16,7 +16,7 @@ from django.db.models import Q
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.http import QueryDict
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext_lazy as _, pgettext_lazy
 
 from bookmarks.utils import normalize_url, unique
 from bookmarks.validators import BookmarkURLValidator
@@ -59,7 +59,7 @@ def build_tag_string(tag_names: list[str], delimiter: str = ","):
 class Bookmark(models.Model):
     url = models.CharField(max_length=2048, validators=[BookmarkURLValidator()])
     url_normalized = models.CharField(max_length=2048, blank=True, db_index=True)
-    title = models.CharField(max_length=512, blank=True)
+    title = models.TextField(blank=True)
     description = models.TextField(blank=True)
     notes = models.TextField(blank=True)
     preview_image_remote_url = models.URLField(max_length=2048, blank=True)
@@ -68,7 +68,6 @@ class Bookmark(models.Model):
     # Obsolete field, kept to not remove column when generating migrations
     website_description = models.TextField(blank=True, null=True)
     web_archive_snapshot_url = models.CharField(max_length=2048, blank=True)
-    favicon_file = models.CharField(max_length=512, blank=True)
     preview_image_file = models.CharField(max_length=512, blank=True)
     unread = models.BooleanField(default=False)
     is_archived = models.BooleanField(default=False)
@@ -150,6 +149,46 @@ def bookmark_deleted(sender, instance, **kwargs):
                 )
 
 
+class FaviconCache(models.Model):
+    """全局域名级 favicon 缓存，所有用户共享。
+
+    domain 为纯 hostname（已 lowercased，不含 scheme）。
+    同一域名在磁盘上只有一个 favicon 文件，通过此表映射。
+    """
+
+    STATUS_PENDING = "pending"
+    STATUS_SUCCESS = "success"
+    STATUS_FAILED = "failed"
+    STATUS_MISSING = "missing"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_SUCCESS, "Success"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_MISSING, "Missing"),
+    ]
+
+    # 退火重试延迟序列（秒）：1min, 3min, 5min, 10min, 20min
+    RETRY_DELAYS = [60, 180, 300, 600, 1200]
+
+    domain = models.CharField(max_length=512, unique=True, db_index=True)
+    favicon_file = models.CharField(max_length=512, blank=True, default="")
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING
+    )
+    fetched_at = models.DateTimeField(null=True, blank=True)
+    retry_count = models.IntegerField(default=0)
+    next_retry_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "next_retry_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.domain} -> {self.favicon_file} ({self.status})"
+
+
 class BookmarkAsset(models.Model):
     TYPE_SNAPSHOT = "snapshot"
     TYPE_UPLOAD = "upload"
@@ -171,6 +210,8 @@ class BookmarkAsset(models.Model):
     display_name = models.CharField(max_length=2048, blank=True, null=False)
     status = models.CharField(max_length=64, blank=False, null=False)
     gzip = models.BooleanField(default=False, null=False)
+    retry_count = models.IntegerField(default=0)
+    next_retry_at = models.DateTimeField(null=True, blank=True)
 
     @property
     def download_name(self):
@@ -212,11 +253,11 @@ class Annotation(models.Model):
     COLOR_PINK = "pink"
     COLOR_PRIMARY = "primary"
     COLOR_CHOICES = [
-        (COLOR_YELLOW, "Yellow"),
-        (COLOR_GREEN, "Green"),
-        (COLOR_BLUE, "Blue"),
-        (COLOR_PINK, "Pink"),
-        (COLOR_PRIMARY, "Theme"),
+        (COLOR_YELLOW, _("Yellow")),
+        (COLOR_GREEN, _("Green")),
+        (COLOR_BLUE, _("Blue")),
+        (COLOR_PINK, _("Pink")),
+        (COLOR_PRIMARY, _("Theme")),
     ]
 
     bookmark = models.ForeignKey(
@@ -244,6 +285,52 @@ class Annotation(models.Model):
     def __str__(self):
         preview = self.selected_text[:50]
         return f"Annotation on '{self.bookmark.resolved_title}': {preview}..."
+
+
+class ReadingProgress(models.Model):
+    """每用户每书签的阅读进度，用于恢复阅读位置。"""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    bookmark = models.ForeignKey(
+        Bookmark, on_delete=models.CASCADE, related_name="reading_progress"
+    )
+    article_asset = models.ForeignKey(
+        BookmarkAsset, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    # 文字锚点：视口顶部文字在正文 textContent 中的字符偏移
+    text_position_start = models.IntegerField(null=True, blank=True)
+    # 文字锚点：用于跨布局精确恢复的 TextQuoteSelector 字段
+    text_quote_exact = models.CharField(max_length=1024, blank=True, default="")
+    text_quote_prefix = models.CharField(max_length=512, blank=True, default="")
+    text_quote_suffix = models.CharField(max_length=512, blank=True, default="")
+    # 元素锚点：视口顶部为非文字元素（如 IMG）时，记录元素特征用于跨布局恢复
+    element_selector = models.JSONField(null=True, blank=True)
+    # 滚动比值（scrollTop / scrollableHeight），设备无关的阅读百分比
+    progress = models.FloatField(
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    # 滚动位置快照，同布局恢复时像素级精确
+    scroll_top = models.IntegerField(default=0)
+    scroll_height = models.IntegerField(default=0)
+    client_width = models.IntegerField(default=0)
+    client_height = models.IntegerField(default=0)
+    date_created = models.DateTimeField(auto_now_add=True)
+    date_modified = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "bookmark"],
+                name="unique_reading_progress_per_user_bookmark",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Reading progress for {self.user.username} on "
+            f"{self.bookmark.resolved_title}: {self.progress:.2%}"
+        )
 
 
 class BookmarkBundle(models.Model):
@@ -311,10 +398,20 @@ class BookmarkSearch:
     FILTER_ASSET_YES = "yes"
     FILTER_ASSET_NO = "no"
 
+    FILTER_HIGHLIGHT_OFF = "off"
+    FILTER_HIGHLIGHT_YES = "yes"
+    FILTER_HIGHLIGHT_NO = "no"
+
+    FILTER_ANNOTATION_OFF = "off"
+    FILTER_ANNOTATION_YES = "yes"
+    FILTER_ANNOTATION_NO = "no"
+
     FILTER_DATE_OFF = "off"
     FILTER_DATE_BY_ADDED = "added"
     FILTER_DATE_BY_MODIFIED = "modified"
     FILTER_DATE_BY_DELETED = "deleted"
+    FILTER_DATE_BY_HIGHLIGHT = "highlight"
+    FILTER_DATE_BY_ANNOTATION = "annotation"
 
     FILTER_DATE_TYPE_ABSOLUTE = "absolute"
     FILTER_DATE_TYPE_RELATIVE = "relative"
@@ -338,6 +435,8 @@ class BookmarkSearch:
         "html_snapshot",
         "preview_image",
         "favicon",
+        "highlight",
+        "annotation",
     ]
     preferences = [
         "sort",
@@ -367,6 +466,8 @@ class BookmarkSearch:
         "html_snapshot": FILTER_ASSET_OFF,
         "preview_image": FILTER_ASSET_OFF,
         "favicon": FILTER_ASSET_OFF,
+        "highlight": FILTER_HIGHLIGHT_OFF,
+        "annotation": FILTER_ANNOTATION_OFF,
     }
 
     @staticmethod
@@ -436,6 +537,8 @@ class BookmarkSearch:
         html_snapshot: str = None,
         preview_image: str = None,
         favicon: str = None,
+        highlight: str = None,
+        annotation: str = None,
         preferences: dict = None,
         request: any = None,
     ):
@@ -464,6 +567,8 @@ class BookmarkSearch:
             "html_snapshot": html_snapshot,
             "preview_image": preview_image,
             "favicon": favicon,
+            "highlight": highlight,
+            "annotation": annotation,
         }
         bundle_params = {}
         if bundle:
@@ -638,8 +743,8 @@ class BookmarkSearchForm(forms.Form):
     ]
     FILTER_UNREAD_CHOICES = [
         (BookmarkSearch.FILTER_UNREAD_OFF, _("Off")),
-        (BookmarkSearch.FILTER_UNREAD_YES, _("Unread")),
-        (BookmarkSearch.FILTER_UNREAD_NO, _("Read")),
+        (BookmarkSearch.FILTER_UNREAD_YES, pgettext_lazy("bookmark filter", "Unread")),
+        (BookmarkSearch.FILTER_UNREAD_NO, pgettext_lazy("bookmark filter", "Read")),
     ]
     FILTER_TAGGED_CHOICES = [
         (BookmarkSearch.FILTER_TAGGED_OFF, _("Off")),
@@ -651,10 +756,22 @@ class BookmarkSearchForm(forms.Form):
         (BookmarkSearch.FILTER_ASSET_YES, _("Has")),
         (BookmarkSearch.FILTER_ASSET_NO, _("Missing")),
     ]
+    FILTER_HIGHLIGHT_CHOICES = [
+        (BookmarkSearch.FILTER_HIGHLIGHT_OFF, _("Off")),
+        (BookmarkSearch.FILTER_HIGHLIGHT_YES, _("Has")),
+        (BookmarkSearch.FILTER_HIGHLIGHT_NO, _("Missing")),
+    ]
+    FILTER_ANNOTATION_CHOICES = [
+        (BookmarkSearch.FILTER_ANNOTATION_OFF, _("Off")),
+        (BookmarkSearch.FILTER_ANNOTATION_YES, _("Has")),
+        (BookmarkSearch.FILTER_ANNOTATION_NO, _("Missing")),
+    ]
     FILTER_DATE_BY_CHOICES = [
         (BookmarkSearch.FILTER_DATE_OFF, _("Off")),
         (BookmarkSearch.FILTER_DATE_BY_ADDED, _("Added")),
         (BookmarkSearch.FILTER_DATE_BY_MODIFIED, _("Modified")),
+        (BookmarkSearch.FILTER_DATE_BY_HIGHLIGHT, _("Highlighted")),
+        (BookmarkSearch.FILTER_DATE_BY_ANNOTATION, _("Annotated")),
     ]
     FILTER_DATE_TYPE_CHOICES = [
         (BookmarkSearch.FILTER_DATE_TYPE_ABSOLUTE, _("Absolute")),
@@ -696,6 +813,16 @@ class BookmarkSearchForm(forms.Form):
     )
     favicon = forms.ChoiceField(
         choices=FILTER_ASSET_CHOICES,
+        widget=forms.RadioSelect,
+        required=False,
+    )
+    highlight = forms.ChoiceField(
+        choices=FILTER_HIGHLIGHT_CHOICES,
+        widget=forms.RadioSelect,
+        required=False,
+    )
+    annotation = forms.ChoiceField(
+        choices=FILTER_ANNOTATION_CHOICES,
         widget=forms.RadioSelect,
         required=False,
     )
@@ -770,6 +897,18 @@ class UserProfile(models.Model):
         (BOOKMARK_DATE_DISPLAY_RELATIVE, _("Relative")),
         (BOOKMARK_DATE_DISPLAY_ABSOLUTE, _("Absolute")),
     ]
+    BOOKMARK_DATE_ROUTE_DISABLED = "disabled"
+    BOOKMARK_DATE_ROUTE_SNAPSHOT = "snapshot"
+    BOOKMARK_DATE_ROUTE_READER = "reader"
+    BOOKMARK_DATE_ROUTE_WEB_ARCHIVE = "web_archive"
+    BOOKMARK_DATE_ROUTE_HIGHLIGHTS = "highlights"
+    BOOKMARK_DATE_ROUTE_CHOICES = [
+        (BOOKMARK_DATE_ROUTE_DISABLED, _("Disabled")),
+        (BOOKMARK_DATE_ROUTE_SNAPSHOT, _("Latest snapshot")),
+        (BOOKMARK_DATE_ROUTE_READER, _("Reader mode")),
+        (BOOKMARK_DATE_ROUTE_WEB_ARCHIVE, _("Internet Archive")),
+        (BOOKMARK_DATE_ROUTE_HIGHLIGHTS, _("Highlights & Annotations")),
+    ]
     BOOKMARK_DESCRIPTION_DISPLAY_INLINE = "inline"
     BOOKMARK_DESCRIPTION_DISPLAY_SEPARATE = "separate"
     BOOKMARK_DESCRIPTION_DISPLAY_CHOICES = [
@@ -796,20 +935,116 @@ class UserProfile(models.Model):
     ]
     TAG_GROUPING_ALPHABETICAL = "alphabetical"
     TAG_GROUPING_DISABLED = "disabled"
+    TAG_GROUPING_SMART_TREE = "smart_tree"
     TAG_GROUPING_CHOICES = [
         (TAG_GROUPING_ALPHABETICAL, _("Alphabetical")),
+        (TAG_GROUPING_SMART_TREE, _("Smart tree")),
         (TAG_GROUPING_DISABLED, _("Disabled")),
     ]
     SIDEBAR_MODULE_SUMMARY = "summary"
     SIDEBAR_MODULE_BUNDLES = "bundles"
     SIDEBAR_MODULE_DOMAINS = "domains"
     SIDEBAR_MODULE_TAGS = "tags"
+    SIDEBAR_MODULE_COLORS = "colors"
     SIDEBAR_MODULE_LABELS = {
         SIDEBAR_MODULE_SUMMARY: _("User summary"),
         SIDEBAR_MODULE_BUNDLES: _("Filters"),
         SIDEBAR_MODULE_DOMAINS: _("Domains"),
         SIDEBAR_MODULE_TAGS: _("Tags"),
+        SIDEBAR_MODULE_COLORS: _("Colors"),
     }
+
+    TOOLBAR_MODULE_DATE = "date"
+    TOOLBAR_MODULE_ACTIONS = "actions"
+    TOOLBAR_MODULE_QUICK_EDITS = "quick_edits"
+    TOOLBAR_MODULE_QUICK_TAGS = "quick_tags"
+    TOOLBAR_MODULE_STATUSES = "statuses"
+    TOOLBAR_MODULE_KEYS = [
+        TOOLBAR_MODULE_DATE,
+        TOOLBAR_MODULE_ACTIONS,
+        TOOLBAR_MODULE_QUICK_EDITS,
+        TOOLBAR_MODULE_QUICK_TAGS,
+        TOOLBAR_MODULE_STATUSES,
+    ]
+    TOOLBAR_MODULE_LABELS = {
+        TOOLBAR_MODULE_DATE: _("Bookmark date"),
+        TOOLBAR_MODULE_ACTIONS: _("Bookmark actions"),
+        TOOLBAR_MODULE_QUICK_EDITS: _("Quick edit"),
+        TOOLBAR_MODULE_QUICK_TAGS: _("Quick tags"),
+        TOOLBAR_MODULE_STATUSES: _("Bookmark status"),
+    }
+
+    ACTION_READ = "read"
+    ACTION_VIEW = "view"
+    ACTION_HIGHLIGHT = "highlight"
+    ACTION_EDIT = "edit"
+    ACTION_ARCHIVE = "archive"
+    ACTION_REMOVE = "remove"
+    ACTION_KEYS = [ACTION_READ, ACTION_VIEW, ACTION_HIGHLIGHT, ACTION_EDIT, ACTION_ARCHIVE, ACTION_REMOVE]
+    ACTION_LABELS = {
+        ACTION_READ: pgettext_lazy("bookmark action", "Read"),
+        ACTION_VIEW: _("View"),
+        ACTION_HIGHLIGHT: _("Highlights"),
+        ACTION_EDIT: _("Edit"),
+        ACTION_ARCHIVE: _("Archive"),
+        ACTION_REMOVE: _("Remove"),
+    }
+    ACTION_ICONS = {
+        ACTION_READ: "ld-icon-unread",
+        ACTION_VIEW: "ld-icon-view",
+        ACTION_HIGHLIGHT: "ld-icon-highlight",
+        ACTION_EDIT: "ld-icon-edit",
+        ACTION_ARCHIVE: "ld-icon-archive",
+        ACTION_REMOVE: "ld-icon-remove",
+    }
+    ACTION_FIELD_MAP = {
+        ACTION_READ: "display_read_bookmark_action",
+        ACTION_VIEW: "display_view_bookmark_action",
+        ACTION_EDIT: "display_edit_bookmark_action",
+        ACTION_ARCHIVE: "display_archive_bookmark_action",
+        ACTION_REMOVE: "display_remove_bookmark_action",
+    }
+
+    STATUS_NOTES = "notes"
+    STATUS_SHARE = "share"
+    STATUS_UNREAD = "unread"
+    STATUS_KEYS = [STATUS_NOTES, STATUS_SHARE, STATUS_UNREAD]
+    STATUS_LABELS = {
+        STATUS_NOTES: pgettext_lazy("bookmark status", "Notes"),
+        STATUS_SHARE: pgettext_lazy("bookmark status", "Share"),
+        STATUS_UNREAD: pgettext_lazy("bookmark status", "Unread"),
+    }
+    STATUS_ICONS = {
+        STATUS_NOTES: "ld-icon-note",
+        STATUS_SHARE: "ld-icon-share",
+        STATUS_UNREAD: "ld-icon-unread",
+    }
+
+    # 快捷编辑按钮
+    QUICK_EDIT_TITLE = "title"
+    QUICK_EDIT_DESCRIPTION = "description"
+    QUICK_EDIT_NOTES = "notes"
+    QUICK_EDIT_TAGS = "tags"
+    QUICK_EDIT_KEYS = [QUICK_EDIT_TITLE, QUICK_EDIT_DESCRIPTION, QUICK_EDIT_NOTES, QUICK_EDIT_TAGS]
+    QUICK_EDIT_LABELS = {
+        QUICK_EDIT_TITLE: _("Title"),
+        QUICK_EDIT_DESCRIPTION: _("Description"),
+        QUICK_EDIT_NOTES: _("Notes"),
+        QUICK_EDIT_TAGS: _("Tags"),
+    }
+    QUICK_EDIT_ICONS = {
+        QUICK_EDIT_TITLE: "ld-icon-edit-title",
+        QUICK_EDIT_DESCRIPTION: "ld-icon-edit-description",
+        QUICK_EDIT_NOTES: "ld-icon-edit-notes",
+        QUICK_EDIT_TAGS: "ld-icon-tag",
+    }
+
+    ACTION_DISPLAY_MODE_TEXT = "text"
+    ACTION_DISPLAY_MODE_ICON = "icon"
+    ACTION_DISPLAY_MODE_CHOICES = [
+        (ACTION_DISPLAY_MODE_TEXT, _("Text")),
+        (ACTION_DISPLAY_MODE_ICON, _("Icon")),
+    ]
     user = models.OneToOneField(User, related_name="profile", on_delete=models.CASCADE)
     language = models.CharField(max_length=20, blank=False, default=LANGUAGE_EN)
     theme = models.CharField(
@@ -826,6 +1061,12 @@ class UserProfile(models.Model):
         choices=BOOKMARK_DATE_DISPLAY_CHOICES,
         blank=False,
         default=BOOKMARK_DATE_DISPLAY_RELATIVE,
+    )
+    bookmark_date_route = models.CharField(
+        max_length=12,
+        choices=BOOKMARK_DATE_ROUTE_CHOICES,
+        blank=False,
+        default=BOOKMARK_DATE_ROUTE_SNAPSHOT,
     )
     bookmark_description_display = models.CharField(
         max_length=10,
@@ -866,11 +1107,34 @@ class UserProfile(models.Model):
     enable_public_sharing = models.BooleanField(default=False, null=False)
     enable_favicons = models.BooleanField(default=True, null=False)
     enable_preview_images = models.BooleanField(default=False, null=False)
+    enable_preview_image_placeholders = models.BooleanField(default=True, null=False)
     display_url = models.BooleanField(default=False, null=False)
     display_view_bookmark_action = models.BooleanField(default=True, null=False)
     display_edit_bookmark_action = models.BooleanField(default=True, null=False)
     display_archive_bookmark_action = models.BooleanField(default=True, null=False)
     display_remove_bookmark_action = models.BooleanField(default=True, null=False)
+    display_read_bookmark_action = models.BooleanField(default=True, null=False)
+    bookmark_actions = models.JSONField(default=list, blank=True, null=False)
+    bookmark_statuses = models.JSONField(default=list, blank=True, null=False)
+    bookmark_quick_edits = models.JSONField(default=list, blank=True, null=False)
+    bookmark_action_display_mode = models.CharField(
+        max_length=10,
+        choices=ACTION_DISPLAY_MODE_CHOICES,
+        blank=False,
+        default=ACTION_DISPLAY_MODE_TEXT,
+    )
+    bookmark_status_display_mode = models.CharField(
+        max_length=10,
+        choices=ACTION_DISPLAY_MODE_CHOICES,
+        blank=False,
+        default=ACTION_DISPLAY_MODE_ICON,
+    )
+    bookmark_quick_edit_display_mode = models.CharField(
+        max_length=10,
+        choices=ACTION_DISPLAY_MODE_CHOICES,
+        blank=False,
+        default=ACTION_DISPLAY_MODE_ICON,
+    )
     permanent_notes = models.BooleanField(default=False, null=False)
     custom_css = models.TextField(blank=True, null=False)
     custom_css_hash = models.CharField(blank=True, null=False, max_length=32)
@@ -878,18 +1142,59 @@ class UserProfile(models.Model):
     auto_tagging_rules = models.TextField(blank=True, null=False)
     search_preferences = models.JSONField(default=dict, null=False)
     trash_search_preferences = models.JSONField(default=dict, null=False)
+    highlights_search_preferences = models.JSONField(default=dict, null=False)
     sidebar_modules = models.JSONField(default=list, blank=True, null=False)
+    highlights_sidebar_modules = models.JSONField(default=list, blank=True, null=False)
     enable_automatic_html_snapshots = models.BooleanField(default=True, null=False)
     default_mark_unread = models.BooleanField(default=True, null=False)
     default_mark_shared = models.BooleanField(default=False, null=False)
     items_per_page = models.IntegerField(
         null=False, default=30, validators=[MinValueValidator(10)]
     )
+    highlights_per_page = models.IntegerField(
+        null=False, default=50, validators=[MinValueValidator(1)]
+    )
     sticky_header_controls = models.BooleanField(default=True, null=False)
     sticky_pagination = models.BooleanField(default=True, null=False)
     sticky_side_panel = models.BooleanField(default=True, null=False)
-    collapse_side_panel = models.BooleanField(default=False, null=False)
+    show_sidebar = models.BooleanField(default=True, null=False)
     hide_bundles = models.BooleanField(default=False, null=False)
+    reader_settings = models.JSONField(default=dict, null=False)
+    bookmark_quick_tags = models.JSONField(default=list, blank=True, null=False)
+    bookmark_toolbar_modules = models.JSONField(default=list, blank=True, null=False)
+
+    # 随机按钮设置
+    RANDOM_MODE_LIST = "list"
+    RANDOM_MODE_SINGLE = "single"
+    RANDOM_MODE_CHOICES = [
+        (RANDOM_MODE_LIST, _("List")),
+        (RANDOM_MODE_SINGLE, _("Single")),
+    ]
+
+    RANDOM_TARGET_URL = "url"
+    RANDOM_TARGET_READER = "reader"
+    RANDOM_TARGET_SNAPSHOT = "snapshot"
+    RANDOM_TARGET_DETAILS = "details"
+    RANDOM_TARGET_CHOICES = [
+        (RANDOM_TARGET_URL, _("URL")),
+        (RANDOM_TARGET_READER, _("Reader")),
+        (RANDOM_TARGET_SNAPSHOT, _("Snapshot")),
+        (RANDOM_TARGET_DETAILS, _("Details")),
+    ]
+
+    enable_random_button = models.BooleanField(default=True, null=False)
+    random_mode = models.CharField(
+        max_length=10,
+        choices=RANDOM_MODE_CHOICES,
+        blank=False,
+        default=RANDOM_MODE_LIST,
+    )
+    random_target = models.CharField(
+        max_length=10,
+        choices=RANDOM_TARGET_CHOICES,
+        blank=False,
+        default=RANDOM_TARGET_URL,
+    )
 
     # Summary display preferences
     SUM_MODE_CALENDAR = "calendar"
@@ -921,6 +1226,79 @@ class UserProfile(models.Model):
         default=DOMAIN_VIEW_ICON,
     )
     domain_compact_mode = models.BooleanField(default=True, null=False)
+    highlights_domain_view_mode = models.CharField(
+        max_length=20,
+        choices=DOMAIN_VIEW_CHOICES,
+        blank=False,
+        default=DOMAIN_VIEW_ICON,
+    )
+    highlights_domain_compact_mode = models.BooleanField(default=True, null=False)
+    highlights_tag_grouping = models.CharField(
+        max_length=12,
+        choices=TAG_GROUPING_CHOICES,
+        blank=False,
+        default=TAG_GROUPING_ALPHABETICAL,
+    )
+    show_highlights_sidebar = models.BooleanField(default=True, null=False)
+    highlights_sticky_header_controls = models.BooleanField(default=True, null=False)
+    highlights_sticky_pagination = models.BooleanField(default=True, null=False)
+    highlights_sticky_side_panel = models.BooleanField(default=True, null=False)
+    highlight_copy_format = models.JSONField(default=dict, blank=True, null=False)
+
+    HIGHLIGHT_COPY_ACTION_BOTH = "both"
+    HIGHLIGHT_COPY_ACTION_HIGHLIGHT = "highlight"
+    HIGHLIGHT_COPY_ACTION_NOTE = "note"
+    HIGHLIGHT_COPY_ACTION_CHOICES = [
+        (HIGHLIGHT_COPY_ACTION_BOTH, _("Copy all")),
+        (HIGHLIGHT_COPY_ACTION_HIGHLIGHT, _("Copy highlight only")),
+        (HIGHLIGHT_COPY_ACTION_NOTE, _("Copy annotation only")),
+    ]
+    highlight_copy_default_action = models.CharField(
+        max_length=20,
+        choices=HIGHLIGHT_COPY_ACTION_CHOICES,
+        blank=False,
+        default=HIGHLIGHT_COPY_ACTION_BOTH,
+    )
+
+    @classmethod
+    def normalize_quick_tag(cls, qt: dict) -> dict:
+        tag_name = (qt.get("tag_name") or "").strip()
+        tag_names = [sanitize_tag_name(t) for t in tag_name.split() if t.strip()]
+        tag_names = list(dict.fromkeys(tag_names))
+
+        label = (qt.get("label") or "").strip()
+        short_label = (qt.get("short_label") or "").strip()
+        if not short_label:
+            short_label = tag_names[0][0] if tag_names else ""
+
+        icon_name = (qt.get("icon_name") or "").strip()
+        display_position = qt.get("display_position", "direct")
+        if display_position not in ("direct", "submenu"):
+            display_position = "direct"
+        display_mode = qt.get("display_mode", "icon")
+        if display_mode not in ("text", "icon"):
+            display_mode = "text"
+        enabled = bool(qt.get("enabled", True))
+
+        return {
+            "tag_name": tag_name,
+            "tag_names": tag_names,
+            "label": label,
+            "short_label": short_label,
+            "icon_name": icon_name,
+            "display_position": display_position,
+            "display_mode": display_mode,
+            "enabled": enabled,
+        }
+
+    @classmethod
+    def normalize_bookmark_quick_tags(cls, quick_tags: list | None) -> list[dict]:
+        if not isinstance(quick_tags, list):
+            return []
+        return [cls.normalize_quick_tag(qt) for qt in quick_tags if isinstance(qt, dict)]
+
+    def get_bookmark_quick_tags(self) -> list[dict]:
+        return self.normalize_bookmark_quick_tags(self.bookmark_quick_tags)
 
     def save(self, *args, **kwargs):
         if self.custom_css:
@@ -946,6 +1324,7 @@ class UserProfile(models.Model):
             {"key": cls.SIDEBAR_MODULE_BUNDLES, "enabled": bundles_enabled},
             {"key": cls.SIDEBAR_MODULE_DOMAINS, "enabled": True},
             {"key": cls.SIDEBAR_MODULE_TAGS, "enabled": True},
+            {"key": cls.SIDEBAR_MODULE_COLORS, "enabled": True},
         ]
 
     @classmethod
@@ -997,6 +1376,246 @@ class UserProfile(models.Model):
             for item in self.get_sidebar_modules()
         ]
 
+    @classmethod
+    def default_highlights_sidebar_modules(cls) -> list[dict]:
+        return [
+            {"key": cls.SIDEBAR_MODULE_COLORS, "enabled": True},
+            {"key": cls.SIDEBAR_MODULE_DOMAINS, "enabled": True},
+            {"key": cls.SIDEBAR_MODULE_TAGS, "enabled": True},
+        ]
+
+    @staticmethod
+    def _normalize_module_list(raw: list | None, defaults: dict[str, bool]) -> list[dict]:
+        """Normalize a module list: validate keys, fill missing defaults, deduplicate."""
+        if not isinstance(raw, list) or len(raw) == 0:
+            return [{"key": k, "enabled": v} for k, v in defaults.items()]
+
+        normalized = []
+        seen = set()
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            if key not in defaults or key in seen:
+                continue
+            normalized.append({"key": key, "enabled": bool(item.get("enabled", defaults[key]))})
+            seen.add(key)
+
+        for key, enabled in defaults.items():
+            if key not in seen:
+                normalized.append({"key": key, "enabled": enabled})
+
+        return normalized
+
+    def get_highlights_sidebar_modules(self) -> list[dict]:
+        defaults = {
+            item["key"]: item["enabled"]
+            for item in self.default_highlights_sidebar_modules()
+        }
+        return self._normalize_module_list(self.highlights_sidebar_modules, defaults)
+
+    def get_highlights_sidebar_module_items(self) -> list[dict]:
+        return [
+            {
+                **item,
+                "label": self.SIDEBAR_MODULE_LABELS[item["key"]],
+            }
+            for item in self.get_highlights_sidebar_modules()
+        ]
+
+    @classmethod
+    def default_bookmark_toolbar_modules(cls) -> list[dict]:
+        return [{"key": key, "enabled": True} for key in cls.TOOLBAR_MODULE_KEYS]
+
+    @classmethod
+    def normalize_bookmark_toolbar_modules(
+        cls, toolbar_modules: list | None
+    ) -> list[dict]:
+        if not isinstance(toolbar_modules, list) or len(toolbar_modules) == 0:
+            return cls.default_bookmark_toolbar_modules()
+
+        normalized = []
+        seen = set()
+        defaults = {key: True for key in cls.TOOLBAR_MODULE_KEYS}
+
+        for item in toolbar_modules:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            if key not in defaults or key in seen:
+                continue
+            normalized.append(
+                {
+                    "key": key,
+                    "enabled": bool(item.get("enabled", defaults[key])),
+                }
+            )
+            seen.add(key)
+
+        for key in cls.TOOLBAR_MODULE_KEYS:
+            if key not in seen:
+                normalized.append({"key": key, "enabled": defaults[key]})
+
+        return normalized
+
+    def get_bookmark_toolbar_modules(self) -> list[dict]:
+        return self.normalize_bookmark_toolbar_modules(self.bookmark_toolbar_modules)
+
+    def get_bookmark_toolbar_module_items(self) -> list[dict]:
+        return [
+            {
+                **item,
+                "label": self.TOOLBAR_MODULE_LABELS[item["key"]],
+            }
+            for item in self.get_bookmark_toolbar_modules()
+        ]
+
+    @classmethod
+    def default_bookmark_actions(cls) -> list[dict]:
+        # 高亮动作默认关闭
+        defaults = {key: True for key in cls.ACTION_KEYS}
+        defaults[cls.ACTION_HIGHLIGHT] = False
+        return [{"key": key, "enabled": defaults[key]} for key in cls.ACTION_KEYS]
+
+    @classmethod
+    def normalize_bookmark_actions(cls, bookmark_actions: list | None) -> list[dict]:
+        if not isinstance(bookmark_actions, list) or len(bookmark_actions) == 0:
+            return cls.default_bookmark_actions()
+
+        defaults = {key: True for key in cls.ACTION_KEYS}
+        defaults[cls.ACTION_HIGHLIGHT] = False
+        normalized = []
+        seen = set()
+
+        for item in bookmark_actions:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            if key not in defaults or key in seen:
+                continue
+            normalized.append(
+                {
+                    "key": key,
+                    "enabled": bool(item.get("enabled", defaults[key])),
+                }
+            )
+            seen.add(key)
+
+        for key, enabled in defaults.items():
+            if key not in seen:
+                normalized.append({"key": key, "enabled": enabled})
+
+        return normalized
+
+    def get_bookmark_actions(self) -> list[dict]:
+        if self.bookmark_actions:
+            return self.normalize_bookmark_actions(self.bookmark_actions)
+        # Fall back to legacy boolean fields
+        return [
+            {"key": key, "enabled": getattr(self, self.ACTION_FIELD_MAP[key], True)}
+            for key in self.ACTION_FIELD_MAP
+        ]
+
+    def get_bookmark_action_items(self) -> list[dict]:
+        return [
+            {
+                **item,
+                "label": self.ACTION_LABELS[item["key"]],
+            }
+            for item in self.get_bookmark_actions()
+        ]
+
+    @classmethod
+    def default_bookmark_statuses(cls) -> list[dict]:
+        return [{"key": key, "enabled": True} for key in cls.STATUS_KEYS]
+
+    @classmethod
+    def normalize_bookmark_statuses(cls, bookmark_statuses: list | None) -> list[dict]:
+        if not isinstance(bookmark_statuses, list) or len(bookmark_statuses) == 0:
+            return cls.default_bookmark_statuses()
+
+        defaults = {key: True for key in cls.STATUS_KEYS}
+        normalized = []
+        seen = set()
+
+        for item in bookmark_statuses:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            if key not in defaults or key in seen:
+                continue
+            normalized.append(
+                {
+                    "key": key,
+                    "enabled": bool(item.get("enabled", defaults[key])),
+                }
+            )
+            seen.add(key)
+
+        for key, enabled in defaults.items():
+            if key not in seen:
+                normalized.append({"key": key, "enabled": enabled})
+
+        return normalized
+
+    def get_bookmark_statuses(self) -> list[dict]:
+        return self.normalize_bookmark_statuses(self.bookmark_statuses)
+
+    def get_bookmark_status_items(self) -> list[dict]:
+        return [
+            {
+                **item,
+                "label": self.STATUS_LABELS[item["key"]],
+            }
+            for item in self.get_bookmark_statuses()
+        ]
+
+    @classmethod
+    def default_bookmark_quick_edits(cls) -> list[dict]:
+        return [{"key": key, "enabled": True} for key in cls.QUICK_EDIT_KEYS]
+
+    @classmethod
+    def normalize_bookmark_quick_edits(cls, bookmark_quick_edits: list | None) -> list[dict]:
+        if not isinstance(bookmark_quick_edits, list) or len(bookmark_quick_edits) == 0:
+            return cls.default_bookmark_quick_edits()
+
+        defaults = {key: True for key in cls.QUICK_EDIT_KEYS}
+        normalized = []
+        seen = set()
+
+        for item in bookmark_quick_edits:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            if key not in defaults or key in seen:
+                continue
+            normalized.append(
+                {
+                    "key": key,
+                    "enabled": bool(item.get("enabled", defaults[key])),
+                }
+            )
+            seen.add(key)
+
+        for key, enabled in defaults.items():
+            if key not in seen:
+                normalized.append({"key": key, "enabled": enabled})
+
+        return normalized
+
+    def get_bookmark_quick_edits(self) -> list[dict]:
+        return self.normalize_bookmark_quick_edits(self.bookmark_quick_edits)
+
+    def get_bookmark_quick_edit_items(self) -> list[dict]:
+        return [
+            {
+                **item,
+                "label": self.QUICK_EDIT_LABELS[item["key"]],
+            }
+            for item in self.get_bookmark_quick_edits()
+        ]
+
+
 
 class UserProfileForm(forms.ModelForm):
     class Meta:
@@ -1006,6 +1625,7 @@ class UserProfileForm(forms.ModelForm):
             "theme_light",
             "theme_dark",
             "bookmark_date_display",
+            "bookmark_date_route",
             "bookmark_description_display",
             "bookmark_description_max_lines",
             "bookmark_link_target",
@@ -1017,12 +1637,22 @@ class UserProfileForm(forms.ModelForm):
             "enable_public_sharing",
             "enable_favicons",
             "enable_preview_images",
+            "enable_preview_image_placeholders",
             "enable_automatic_html_snapshots",
             "display_url",
             "display_view_bookmark_action",
             "display_edit_bookmark_action",
             "display_archive_bookmark_action",
             "display_remove_bookmark_action",
+            "display_read_bookmark_action",
+            "bookmark_actions",
+            "bookmark_statuses",
+            "bookmark_quick_edits",
+            "bookmark_quick_tags",
+            "bookmark_toolbar_modules",
+            "bookmark_action_display_mode",
+            "bookmark_status_display_mode",
+            "bookmark_quick_edit_display_mode",
             "permanent_notes",
             "default_mark_unread",
             "default_mark_shared",
@@ -1030,11 +1660,15 @@ class UserProfileForm(forms.ModelForm):
             "custom_domain_root",
             "auto_tagging_rules",
             "items_per_page",
+            "highlights_per_page",
             "sticky_header_controls",
             "sticky_pagination",
             "sticky_side_panel",
-            "collapse_side_panel",
+            "show_sidebar",
             "hide_bundles",
+            "enable_random_button",
+            "random_mode",
+            "random_target",
         ]
 
 
@@ -1049,9 +1683,16 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
     ]
 
     show_sidebar = forms.BooleanField(required=False)
+    show_highlights_sidebar = forms.BooleanField(required=False)
     enable_web_archive = forms.BooleanField(required=False)
     sharing_mode = forms.ChoiceField(choices=SHARING_MODE_CHOICES)
     sidebar_modules = forms.CharField()
+    highlights_sidebar_modules = forms.CharField()
+    bookmark_actions = forms.CharField()
+    bookmark_statuses = forms.CharField()
+    bookmark_quick_edits = forms.CharField()
+    bookmark_quick_tags = forms.CharField(required=False)
+    bookmark_toolbar_modules = forms.CharField()
 
     class Meta:
         model = UserProfile
@@ -1060,6 +1701,7 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
             "theme_light",
             "theme_dark",
             "bookmark_date_display",
+            "bookmark_date_route",
             "bookmark_description_display",
             "bookmark_description_max_lines",
             "bookmark_link_target",
@@ -1068,26 +1710,34 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
             "tag_grouping",
             "legacy_search",
             "display_url",
-            "display_view_bookmark_action",
-            "display_edit_bookmark_action",
-            "display_archive_bookmark_action",
-            "display_remove_bookmark_action",
+            "bookmark_action_display_mode",
+            "bookmark_status_display_mode",
+            "bookmark_quick_edit_display_mode",
             "permanent_notes",
             "default_mark_unread",
             "default_mark_shared",
             "enable_favicons",
             "enable_preview_images",
+            "enable_preview_image_placeholders",
             "enable_automatic_html_snapshots",
             "items_per_page",
+            "highlights_per_page",
+            "highlights_sticky_header_controls",
+            "highlights_sticky_pagination",
+            "highlights_sticky_side_panel",
             "sticky_header_controls",
             "sticky_pagination",
             "sticky_side_panel",
+            "enable_random_button",
+            "random_mode",
+            "random_target",
         ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if self.instance and self.instance.pk:
-            self.fields["show_sidebar"].initial = not self.instance.collapse_side_panel
+            self.fields["show_sidebar"].initial = self.instance.show_sidebar
+            self.fields["show_highlights_sidebar"].initial = self.instance.show_highlights_sidebar
             self.fields["enable_web_archive"].initial = (
                 self.instance.web_archive_integration
                 == self.instance.WEB_ARCHIVE_INTEGRATION_ENABLED
@@ -1100,6 +1750,24 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
                 self.fields["sharing_mode"].initial = self.SHARING_MODE_DISABLED
             self.fields["sidebar_modules"].initial = json.dumps(
                 self.instance.get_sidebar_modules()
+            )
+            self.fields["highlights_sidebar_modules"].initial = json.dumps(
+                self.instance.get_highlights_sidebar_modules()
+            )
+            self.fields["bookmark_actions"].initial = json.dumps(
+                self.instance.get_bookmark_actions()
+            )
+            self.fields["bookmark_statuses"].initial = json.dumps(
+                self.instance.get_bookmark_statuses()
+            )
+            self.fields["bookmark_quick_edits"].initial = json.dumps(
+                self.instance.get_bookmark_quick_edits()
+            )
+            self.fields["bookmark_quick_tags"].initial = json.dumps(
+                self.instance.get_bookmark_quick_tags()
+            )
+            self.fields["bookmark_toolbar_modules"].initial = json.dumps(
+                self.instance.get_bookmark_toolbar_modules()
             )
 
     @property
@@ -1124,6 +1792,22 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
 
         return self.instance.get_sidebar_module_items()
 
+    @property
+    def highlights_sidebar_module_items(self) -> list[dict]:
+        if self.is_bound:
+            modules = self.data.get("highlights_sidebar_modules")
+            try:
+                parsed = json.loads(modules) if modules else []
+            except (TypeError, ValueError):
+                parsed = []
+            defaults = {item["key"]: item["enabled"] for item in UserProfile.default_highlights_sidebar_modules()}
+            return [
+                {**item, "label": UserProfile.SIDEBAR_MODULE_LABELS[item["key"]]}
+                for item in UserProfile._normalize_module_list(parsed, defaults)
+            ]
+
+        return self.instance.get_highlights_sidebar_module_items()
+
     def clean_sidebar_modules(self):
         raw_value = self.cleaned_data["sidebar_modules"]
         try:
@@ -1136,9 +1820,161 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
             bundles_enabled=not self.instance.hide_bundles,
         )
 
+    def clean_highlights_sidebar_modules(self):
+        raw_value = self.cleaned_data["highlights_sidebar_modules"]
+        try:
+            parsed_value = json.loads(raw_value)
+        except (TypeError, ValueError):
+            raise forms.ValidationError(_("Invalid sidebar configuration.")) from None
+        defaults = {item["key"]: item["enabled"] for item in UserProfile.default_highlights_sidebar_modules()}
+        return UserProfile._normalize_module_list(parsed_value, defaults)
+
+    @property
+    def bookmark_toolbar_module_items(self) -> list[dict]:
+        if self.is_bound:
+            modules = self.data.get("bookmark_toolbar_modules")
+            try:
+                parsed_modules = json.loads(modules) if modules else []
+            except (TypeError, ValueError):
+                parsed_modules = []
+            normalized = UserProfile.normalize_bookmark_toolbar_modules(parsed_modules)
+            return [
+                {
+                    **item,
+                    "label": UserProfile.TOOLBAR_MODULE_LABELS[item["key"]],
+                }
+                for item in normalized
+            ]
+
+        return self.instance.get_bookmark_toolbar_module_items()
+
+    def clean_bookmark_toolbar_modules(self):
+        raw_value = self.cleaned_data["bookmark_toolbar_modules"]
+        try:
+            parsed_value = json.loads(raw_value)
+        except (TypeError, ValueError):
+            raise forms.ValidationError(_("Invalid toolbar configuration.")) from None
+
+        return UserProfile.normalize_bookmark_toolbar_modules(parsed_value)
+
+    @property
+    def bookmark_action_items(self) -> list[dict]:
+        if self.is_bound:
+            actions = self.data.get("bookmark_actions")
+            try:
+                parsed_actions = json.loads(actions) if actions else []
+            except (TypeError, ValueError):
+                parsed_actions = []
+            normalized = UserProfile.normalize_bookmark_actions(parsed_actions)
+            return [
+                {
+                    **item,
+                    "label": UserProfile.ACTION_LABELS[item["key"]],
+                }
+                for item in normalized
+            ]
+
+        return self.instance.get_bookmark_action_items()
+
+    def clean_bookmark_actions(self):
+        raw_value = self.cleaned_data["bookmark_actions"]
+        try:
+            parsed_value = json.loads(raw_value)
+        except (TypeError, ValueError):
+            raise forms.ValidationError(_("Invalid bookmark actions configuration.")) from None
+
+        return UserProfile.normalize_bookmark_actions(parsed_value)
+
+    @property
+    def bookmark_status_items(self) -> list[dict]:
+        if self.is_bound:
+            statuses = self.data.get("bookmark_statuses")
+            try:
+                parsed_statuses = json.loads(statuses) if statuses else []
+            except (TypeError, ValueError):
+                parsed_statuses = []
+            normalized = UserProfile.normalize_bookmark_statuses(parsed_statuses)
+            return [
+                {
+                    **item,
+                    "label": UserProfile.STATUS_LABELS[item["key"]],
+                }
+                for item in normalized
+            ]
+
+        return self.instance.get_bookmark_status_items()
+
+    def clean_bookmark_statuses(self):
+        raw_value = self.cleaned_data["bookmark_statuses"]
+        try:
+            parsed_value = json.loads(raw_value)
+        except (TypeError, ValueError):
+            raise forms.ValidationError(_("Invalid bookmark status configuration.")) from None
+
+        return UserProfile.normalize_bookmark_statuses(parsed_value)
+
+    @property
+    def bookmark_quick_edit_items(self) -> list[dict]:
+        if self.is_bound:
+            quick_edits = self.data.get("bookmark_quick_edits")
+            try:
+                parsed_quick_edits = json.loads(quick_edits) if quick_edits else []
+            except (TypeError, ValueError):
+                parsed_quick_edits = []
+            normalized = UserProfile.normalize_bookmark_quick_edits(parsed_quick_edits)
+            return [
+                {
+                    **item,
+                    "label": UserProfile.QUICK_EDIT_LABELS[item["key"]],
+                }
+                for item in normalized
+            ]
+
+        return self.instance.get_bookmark_quick_edit_items()
+
+    def clean_bookmark_quick_edits(self):
+        raw_value = self.cleaned_data["bookmark_quick_edits"]
+        try:
+            parsed_value = json.loads(raw_value)
+        except (TypeError, ValueError):
+            raise forms.ValidationError(_("Invalid bookmark quick edit configuration.")) from None
+
+        return UserProfile.normalize_bookmark_quick_edits(parsed_value)
+
+    @property
+    def bookmark_quick_tag_items(self) -> list[dict]:
+        if self.is_bound:
+            try:
+                items = self.clean_bookmark_quick_tags()
+            except Exception:
+                return []
+        else:
+            items = self.instance.get_bookmark_quick_tags()
+        # 为每个快捷标签加载图标 SVG 数据
+        from bookmarks.services.icon_loader import load_quick_tags_icon
+        for item in items:
+            icon_name = item.get("icon_name")
+            if icon_name:
+                item["icon_data"] = load_quick_tags_icon(icon_name)
+            else:
+                item["icon_data"] = None
+        return items
+
+    def clean_bookmark_quick_tags(self):
+        raw_value = self.cleaned_data.get("bookmark_quick_tags", "[]")
+        if not raw_value:
+            return []
+        try:
+            parsed_value = json.loads(raw_value)
+        except (TypeError, ValueError):
+            raise forms.ValidationError(_("Invalid bookmark quick tags configuration.")) from None
+
+        return UserProfile.normalize_bookmark_quick_tags(parsed_value)
+
     def save(self, commit=True):
         profile = super().save(commit=False)
-        profile.collapse_side_panel = not self.cleaned_data["show_sidebar"]
+        profile.show_sidebar = self.cleaned_data["show_sidebar"]
+        profile.show_highlights_sidebar = self.cleaned_data.get("show_highlights_sidebar", True)
 
         profile.web_archive_integration = (
             self.instance.WEB_ARCHIVE_INTEGRATION_ENABLED
@@ -1153,6 +1989,20 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
             profile.default_mark_shared = False
 
         profile.sidebar_modules = self.cleaned_data["sidebar_modules"]
+        profile.highlights_sidebar_modules = self.cleaned_data.get("highlights_sidebar_modules", [])
+        profile.bookmark_toolbar_modules = self.cleaned_data["bookmark_toolbar_modules"]
+
+        # Sync bookmark actions to JSON field and legacy boolean fields
+        actions = self.cleaned_data["bookmark_actions"]
+        profile.bookmark_actions = actions
+        for action in actions:
+            field_name = UserProfile.ACTION_FIELD_MAP.get(action["key"])
+            if field_name:
+                setattr(profile, field_name, action["enabled"])
+
+        profile.bookmark_statuses = self.cleaned_data["bookmark_statuses"]
+        profile.bookmark_quick_edits = self.cleaned_data["bookmark_quick_edits"]
+        profile.bookmark_quick_tags = self.cleaned_data.get("bookmark_quick_tags", [])
 
         if commit:
             profile.save()
@@ -1176,6 +2026,44 @@ class UserProfileCustomDomainRootForm(forms.ModelForm):
     class Meta:
         model = UserProfile
         fields = ["custom_domain_root"]
+
+
+class UserProfileHighlightCopyFormatForm(forms.ModelForm):
+    DEFAULT_ITEM_FORMAT = "> ${highlight}\n\n${annotation}"
+    DEFAULT_SEPARATOR = "\n\n---\n\n"
+
+    item_format = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 4}),
+        label=_("Item format"),
+        strip=False,
+    )
+    separator = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        label=_("Separator"),
+        strip=False,
+    )
+
+    class Meta:
+        model = UserProfile
+        fields = ["highlight_copy_format", "highlight_copy_default_action"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        fmt = self.instance.highlight_copy_format if self.instance and self.instance.pk else {}
+        self.fields["item_format"].initial = fmt.get("item_format", self.DEFAULT_ITEM_FORMAT)
+        self.fields["separator"].initial = fmt.get("separator", self.DEFAULT_SEPARATOR)
+
+    def save(self, commit=True):
+        profile = super().save(commit=False)
+        profile.highlight_copy_format = {
+            "item_format": self.cleaned_data.get("item_format", ""),
+            "separator": self.cleaned_data.get("separator", ""),
+        }
+        if commit:
+            profile.save()
+        return profile
 
 
 @receiver(post_save, sender=User)

@@ -1,0 +1,154 @@
+{% load i18n static shared %}
+<!DOCTYPE html>
+<html lang="{{ LANGUAGE_CODE|default:'en' }}" class="reader-mode" data-api-base-url="{{ api_base_url }}/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="csrfmiddlewaretoken" content="{{ csrf_token }}">
+  <title>{% translate "Reader view" %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimal-ui">
+  {% if request.user_profile.theme == 'light' %}
+    <link href="{% static 'theme-light.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
+    <meta name="theme-color" content="#5856e0">
+  {% elif request.user_profile.theme == 'dark' %}
+    <link href="{% static 'theme-dark.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
+    <meta name="theme-color" content="#161822">
+  {% else %}
+    <link href="{% static 'theme-dark.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"
+          media="(prefers-color-scheme: dark)"/>
+    <link href="{% static 'theme-light.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"
+          media="(prefers-color-scheme: light)"/>
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161822">
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#5856e0">
+  {% endif %}
+  <link href="{% static 'layout.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
+  {% if request.user_profile.custom_css %}
+    <link href="{% url 'linkding:custom_css' %}?hash={{ request.user_profile.custom_css_hash }}" rel="stylesheet" type="text/css"/>
+  {% endif %}
+</head>
+<body>
+<header class="container">
+  <div class="d-flex justify-between">
+    <a href="{% url 'linkding:root' %}" class="app-link d-flex align-center">
+      <img class="app-logo" src="{% static 'logo.png' %}" alt="{% translate 'Application logo' %}">
+      <span class="app-name">LINKDING</span>
+    </a>
+    <nav>
+      {% if request.user.is_authenticated %}
+        {% include 'bookmarks/nav_menu.html' %}
+      {% else %}
+        <a href="{% url 'login' %}" class="btn btn-link">{% translate "Login" %}</a>
+      {% endif %}
+    </nav>
+  </div>
+</header>
+<div class="content container">
+  <div class="unavailable-container">
+    <p class="unavailable-title">
+      {% translate "The bookmark owner has not generated a reader view yet. You can:" %}
+    </p>
+    <div class="weblinks">
+      <a class="weblink" href="{{ bookmark.url }}" rel="noopener">
+        {% if favicon_file %}
+          <img class="favicon" src="{% static favicon_file %}" alt=""
+               onerror="handleFaviconError(this,'{{ bookmark.url|escapejs }}')">
+        {% elif favicon_unavailable %}
+          <img class="favicon" src="{% static 'favicon.svg' %}" alt="">
+        {% else %}
+          <img class="favicon" src="{% static 'favicon.svg' %}"
+               data-favicon-url="{{ bookmark.url|escape }}" alt="">
+        {% endif %}
+        <span>{% translate "Original URL" %}</span>
+      </a>
+      {% if snapshot_url %}
+        <a class="weblink" href="{{ snapshot_url }}" rel="noopener">
+          <svg class="favicon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+            <path d="M14 3v4a1 1 0 0 0 1 1h4"></path>
+            <path d="M5 12v-7a2 2 0 0 1 2 -2h7l5 5v4"></path>
+            <path d="M2 21v-6"></path>
+            <path d="M5 15v6"></path>
+            <path d="M2 18h3"></path>
+            <path d="M20 15v6h2"></path>
+            <path d="M13 21v-6l2 3l2 -3v6"></path>
+            <path d="M7.5 15h3"></path>
+            <path d="M9 15v6"></path>
+          </svg>
+          <span>{% translate "Latest snapshot" %}</span>
+        </a>
+      {% endif %}
+      {% if web_archive_url %}
+        <a class="weblink" href="{{ web_archive_url }}" rel="noopener">
+          <svg class="favicon" viewBox="0 0 76 86" xmlns="http://www.w3.org/2000/svg">
+            <path
+                d="m76 82v4h-76l.00080851-4zm-3-6v5h-70v-5zm-62.6696277-54 .8344146.4217275.4176066 6.7436084.4176065 10.9576581v10.5383496l-.4176065 13.1364492-.0694681 8.8498268-1.1825531.3523804h-4.17367003l-1.25202116-.3523804-.48627608-8.8498268-.41840503-13.0662957v-10.5375432l.41840503-11.028618.38167482-6.7798947.87034634-.3854412zm60.0004653 0 .8353798.4217275.4168913 6.7436084.4168913 10.9576581v10.5383496l-.4168913 13.1364492-.0686832 8.8498268-1.1835879.3523804h-4.1737047l-1.2522712-.3523804-.4879704-8.8498268-.4168913-13.0662957v-10.5375432l.4168913-11.028618.3833483-6.7798947.8697215-.3854412zm-42.000632 0 .8344979.4217275.4176483 6.7436084.4176482 10.9576581v10.5383496l-.4176482 13.1364492-.0686764 8.8498268-1.1834698.3523804h-4.1740866l-1.2529447-.3523804-.4863246-8.8498268-.4168497-13.0662957v-10.5375432l.4168497-11.028618.38331-6.7798947.8688361-.3854412zm23 0 .8344979.4217275.4176483 6.7436084.4176482 10.9576581v10.5383496l-.4176482 13.1364492-.0686764 8.8498268-1.1834698.3523804h-4.1740866l-1.2521462-.3523804-.4871231-8.8498268-.4168497-13.0662957v-10.5375432l.4168497-11.028618.38331-6.7798947.8696347-.3854412zm21.6697944-9v7h-70v-7zm-35.7200748-13 36.7200748 8.4088317-1.4720205 2.5911683h-70.32799254l-2.19998696-2.10140371z"
+                fill="currentColor" fill-rule="evenodd"/>
+          </svg>
+          <span>{% translate "Internet Archive" %}</span>
+        </a>
+      {% endif %}
+      {% if is_authenticated %}
+        <a class="weblink" href="#" id="add-bookmark-link" data-url="{{ bookmark.url }}">
+          <img class="favicon" src="{% static 'logo.svg' %}" alt="" width="16" height="16">
+          <span id="add-bookmark-text">{% translate "Add to my bookmarks" %}</span>
+        </a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% if is_authenticated %}
+{{ api_base_url|default:"/api"|json_script:"reader-api-base-url" }}
+<script type="application/json" id="unavailable-config">
+{
+  "msg": {
+    "adding": "{% translate 'Adding...' %}",
+    "failed": "{% translate 'Failed, please try again.' %}"
+  }
+}
+</script>
+<script src="{% static 'reader-unavailable.js' %}?v={{ app_version }}" type="application/javascript"></script>
+{% endif %}
+<script>
+var _faviconPromises = {};
+function _faviconDomainKey(url) {
+  try { return new URL(url).origin; } catch(e) { return url; }
+}
+function _prefetchFavicon(url) {
+  var key = _faviconDomainKey(url);
+  if (!_faviconPromises[key]) {
+    _faviconPromises[key] = fetch('{% url "linkding:bookmarks.prefetch_favicon" %}?url=' + encodeURIComponent(url))
+      .then(function(r) { return r.json(); })
+      .catch(function() { return {favicon_file: ''}; });
+  }
+  return _faviconPromises[key];
+}
+var _faviconFallbackSrc = '{% static "favicon.svg" %}';
+function _applyFavicon(img, faviconFile) {
+  if (faviconFile && faviconFile !== 'favicon.svg') {
+    img.onerror = function() { img.onerror = null; img.src = _faviconFallbackSrc; };
+    img.src = '/static/' + faviconFile;
+  } else {
+    img.src = _faviconFallbackSrc;
+  }
+}
+function handleFaviconError(img, url) {
+  img.onerror = null;
+  _prefetchFavicon(url).then(function(d) { _applyFavicon(img, d.favicon_file); });
+}
+(function() {
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (!entry.isIntersecting) return;
+      var img = entry.target;
+      var url = img.getAttribute('data-favicon-url');
+      if (!url) return;
+      observer.unobserve(img);
+      _prefetchFavicon(url).then(function(d) { _applyFavicon(img, d.favicon_file); });
+    });
+  }, { rootMargin: '200px' });
+  document.querySelectorAll('img[data-favicon-url]').forEach(function(el) {
+    observer.observe(el);
+  });
+})();
+</script>
+</body>
+</html>

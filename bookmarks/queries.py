@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import (
     Case,
     CharField,
+    Count,
     Exists,
     IntegerField,
     OuterRef,
@@ -20,6 +21,7 @@ from django.db.models.expressions import RawSQL
 from django.db.models.functions import Lower
 
 from bookmarks.models import (
+    Annotation,
     Bookmark,
     BookmarkBundle,
     BookmarkSearch,
@@ -98,6 +100,18 @@ def _build_term_search_condition(term: str, profile: UserProfile) -> Q:
         )
 
     return conditions
+
+
+def _parse_date(value):
+    """解析日期字符串为 date 对象。"""
+    if isinstance(value, datetime.date):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return datetime.datetime.strptime(value, "%Y-%m-%d").date()
+        except Exception:
+            return None
+    return None
 
 
 def _build_domain_group_condition(raw_group: str) -> Q:
@@ -182,6 +196,33 @@ def _field_term_expression_to_q(field_name: str, term: str) -> Q:
         return Q(url__icontains=term)
     if field_name == "domain":
         return _build_domain_group_condition(term)
+    if field_name == "hl":
+        return Q(annotations__selected_text__icontains=term)
+    if field_name == "ann":
+        return Q(annotations__note_content__icontains=term)
+    return Q()
+
+
+def _annotation_field_term_expression_to_q(field_name: str, term: str) -> Q:
+    """将搜索字段转换为 Annotation 模型的 Q 对象"""
+    if field_name == "title":
+        return Q(bookmark__title__icontains=term)
+    if field_name == "desc":
+        return Q(bookmark__description__icontains=term)
+    if field_name == "notes":
+        return Q(bookmark__notes__icontains=term)
+    if field_name == "url":
+        return Q(bookmark__url__icontains=term)
+    if field_name == "domain":
+        # domain 搜索书签的 URL，通过子查询匹配
+        bookmark_ids = Bookmark.objects.filter(
+            _build_domain_group_condition(term)
+        ).values_list("id", flat=True)
+        return Q(bookmark_id__in=bookmark_ids)
+    if field_name == "hl":
+        return Q(selected_text__icontains=term)
+    if field_name == "ann":
+        return Q(note_content__icontains=term)
     return Q()
 
 
@@ -234,6 +275,41 @@ def _convert_ast_to_q_object(ast_node: SearchExpression, profile: UserProfile) -
         return Q()
 
 
+def _convert_annotation_ast_to_q_object(ast_node: SearchExpression, profile: UserProfile) -> Q:
+    """将搜索 AST 转换为 Annotation 模型的 Q 对象"""
+    if isinstance(ast_node, TermExpression):
+        # 默认搜高亮文本和批注内容
+        return Q(selected_text__icontains=ast_node.term) | Q(note_content__icontains=ast_node.term)
+
+    elif isinstance(ast_node, FieldTermExpression):
+        return _annotation_field_term_expression_to_q(ast_node.field, ast_node.term)
+
+    elif isinstance(ast_node, TagExpression):
+        # 通过 bookmark__ 跨表查询标签
+        return Q(bookmark__tags__name__iexact=ast_node.tag)
+
+    elif isinstance(ast_node, SpecialKeywordExpression):
+        # 对于 Annotation，!unread 和 !untagged 不适用，返回空 Q
+        return Q()
+
+    elif isinstance(ast_node, AndExpression):
+        left_q = _convert_annotation_ast_to_q_object(ast_node.left, profile)
+        right_q = _convert_annotation_ast_to_q_object(ast_node.right, profile)
+        return left_q & right_q
+
+    elif isinstance(ast_node, OrExpression):
+        left_q = _convert_annotation_ast_to_q_object(ast_node.left, profile)
+        right_q = _convert_annotation_ast_to_q_object(ast_node.right, profile)
+        return left_q | right_q
+
+    elif isinstance(ast_node, NotExpression):
+        operand_q = _convert_annotation_ast_to_q_object(ast_node.operand, profile)
+        return ~operand_q
+
+    else:
+        return Q()
+
+
 def _filter_search_query(
     query_set: QuerySet, query_string: str, profile: UserProfile
 ) -> QuerySet:
@@ -246,6 +322,22 @@ def _filter_search_query(
             query_set = query_set.filter(search_query)
     except SearchQueryParseError:
         # If the query cannot be parsed, return zero results
+        return query_set.none()
+
+    return query_set
+
+
+def _filter_annotation_search_query(
+    query_set: QuerySet, query_string: str, profile: UserProfile
+) -> QuerySet:
+    """为 Annotation 模型过滤搜索查询"""
+
+    try:
+        ast = parse_search_query(query_string)
+        if ast:
+            search_query = _convert_annotation_ast_to_q_object(ast, profile)
+            query_set = query_set.filter(search_query)
+    except SearchQueryParseError:
         return query_set.none()
 
     return query_set
@@ -399,26 +491,68 @@ def _apply_filters(
             preview_image_remote_url="",
         )
 
-    if search.favicon == BookmarkSearch.FILTER_ASSET_YES:
-        query_set = query_set.exclude(favicon_file="")
-    elif search.favicon == BookmarkSearch.FILTER_ASSET_NO:
-        query_set = query_set.filter(favicon_file="")
+    if search.favicon in (BookmarkSearch.FILTER_ASSET_YES, BookmarkSearch.FILTER_ASSET_NO):
+        from bookmarks.models import FaviconCache
+        from bookmarks.utils import get_alias_domains_for_root, parse_domain_roots
+
+        # 收集所有有 favicon 的域名，加上别名展开（双向）
+        raw_domains = set(
+            FaviconCache.objects.filter(status="success", favicon_file__gt="")
+            .values_list("domain", flat=True)
+        )
+        domain_config = parse_domain_roots(profile.custom_domain_root)
+        match_domains = set(raw_domains)
+        from bookmarks.utils import resolve_favicon_domain
+        for d in raw_domains:
+            # 正向：d 是目标域名，展开其所有别名
+            match_domains.update(get_alias_domains_for_root(d, domain_config))
+            # 反向：d 是别名域名，也加入其归一化目标（兼容旧数据）
+            match_domains.add(resolve_favicon_domain(d, config=domain_config))
+
+        if match_domains:
+            domain_q = Q()
+            for d in match_domains:
+                domain_q |= Q(url__startswith=f"https://{d}") | Q(url__startswith=f"http://{d}")
+            if search.favicon == BookmarkSearch.FILTER_ASSET_YES:
+                query_set = query_set.filter(domain_q)
+            else:
+                query_set = query_set.exclude(domain_q)
+        elif search.favicon == BookmarkSearch.FILTER_ASSET_YES:
+            query_set = query_set.none()
+
+    # Highlight filter
+    if search.highlight == BookmarkSearch.FILTER_HIGHLIGHT_YES:
+        query_set = query_set.filter(
+            Exists(Annotation.objects.filter(bookmark=OuterRef("id")))
+        )
+    elif search.highlight == BookmarkSearch.FILTER_HIGHLIGHT_NO:
+        query_set = query_set.filter(
+            ~Exists(Annotation.objects.filter(bookmark=OuterRef("id")))
+        )
+
+    # Annotation filter
+    if search.annotation == BookmarkSearch.FILTER_ANNOTATION_YES:
+        query_set = query_set.filter(
+            Exists(
+                Annotation.objects.filter(
+                    bookmark=OuterRef("id"), note_content__gt=""
+                )
+            )
+        )
+    elif search.annotation == BookmarkSearch.FILTER_ANNOTATION_NO:
+        query_set = query_set.filter(
+            ~Exists(
+                Annotation.objects.filter(
+                    bookmark=OuterRef("id"), note_content__gt=""
+                )
+            )
+        )
 
     # Filter by bundle
     if search.bundle:
         query_set = _filter_bundle(query_set, search.bundle)
 
     # 日期筛选逻辑
-    def _parse_date(value):
-        if isinstance(value, datetime.date):
-            return value
-        if isinstance(value, str) and value:
-            try:
-                return datetime.datetime.strptime(value, "%Y-%m-%d").date()
-            except Exception:
-                return None
-        return None
-
     if search.date_filter_by in ("added", "modified", "deleted"):
         field_map = {
             "added": "date_added",
@@ -436,6 +570,23 @@ def _apply_filters(
             ):
                 end = end + datetime.timedelta(days=1)
             query_set = query_set.filter(**{f"{field}__lt": end})
+
+    # 按高亮/批注创建日期筛选
+    if search.date_filter_by in ("highlight", "annotation"):
+        start = _parse_date(search.date_filter_start)
+        end = _parse_date(search.date_filter_end)
+        annotation_qs = Annotation.objects.filter(bookmark=OuterRef("id"))
+        if search.date_filter_by == "annotation":
+            annotation_qs = annotation_qs.filter(note_content__gt="")
+        if start:
+            annotation_qs = annotation_qs.filter(date_created__date__gte=start)
+        if end:
+            if isinstance(end, datetime.date) and not isinstance(
+                end, datetime.datetime
+            ):
+                end = end + datetime.timedelta(days=1)
+            annotation_qs = annotation_qs.filter(date_created__lt=end)
+        query_set = query_set.filter(Exists(annotation_qs))
 
     return query_set
 
@@ -561,6 +712,145 @@ def _base_bookmarks_query(
     return query_set
 
 
+def query_annotations(
+    user: User,
+    search_q: str = "",
+    colors: list[str] | None = None,
+    note_filter: str = "",
+    sort: str = "-date_created",
+    group_by: str = "none",
+    date_filter_by: str = "",
+    date_filter_start: str = "",
+    date_filter_end: str = "",
+    bookmark_id: int | None = None,
+    with_related: bool = True,
+) -> QuerySet:
+    """查询用户的所有高亮 & 批注，支持搜索、颜色筛选、类型筛选、排序、聚合。
+
+    Args:
+        with_related: 是否 select_related(bookmark, article_asset)。
+                      聚合查询(values+annotate)时应设为 False 以避免 JOIN 干扰分组。
+    """
+    qs = Annotation.objects.filter(bookmark__owner=user)
+    if with_related:
+        qs = qs.select_related("bookmark", "article_asset")
+
+    # 按书签 ID 过滤
+    if bookmark_id:
+        qs = qs.filter(bookmark_id=bookmark_id)
+
+    # 搜索关键词（使用搜索引擎解析器）
+    if search_q:
+        try:
+            profile = UserProfile.objects.get(user=user)
+        except UserProfile.DoesNotExist:
+            profile = UserProfile(user=user)
+        qs = _filter_annotation_search_query(qs, search_q, profile)
+
+    # 颜色筛选（多色列表）
+    if colors:
+        qs = qs.filter(color__in=colors)
+
+    # 批注筛选：off/空=不限, yes=有批注, no=无批注
+    if note_filter == "yes":
+        qs = qs.filter(note_content__gt="")
+    elif note_filter == "no":
+        qs = qs.filter(Q(note_content="") | Q(note_content__isnull=True))
+
+    # 日期筛选
+    if date_filter_by in ("bookmark_added", "bookmark_modified", "highlight_created", "highlight_modified"):
+        start = _parse_date(date_filter_start)
+        end = _parse_date(date_filter_end)
+
+        if date_filter_by == "bookmark_added":
+            field = "bookmark__date_added"
+            if start:
+                qs = qs.filter(**{f"{field}__gte": start})
+            if end:
+                end = end + datetime.timedelta(days=1)
+                qs = qs.filter(**{f"{field}__lt": end})
+
+        elif date_filter_by == "bookmark_modified":
+            field = "bookmark__date_modified"
+            if start:
+                qs = qs.filter(**{f"{field}__gte": start})
+            if end:
+                end = end + datetime.timedelta(days=1)
+                qs = qs.filter(**{f"{field}__lt": end})
+
+        elif date_filter_by == "highlight_created":
+            if start:
+                qs = qs.filter(date_created__date__gte=start)
+            if end:
+                end = end + datetime.timedelta(days=1)
+                qs = qs.filter(date_created__lt=end)
+
+        elif date_filter_by == "highlight_modified":
+            if start:
+                qs = qs.filter(date_modified__date__gte=start)
+            if end:
+                end = end + datetime.timedelta(days=1)
+                qs = qs.filter(date_modified__lt=end)
+
+    # 随机排序（数据库端随机，避免加载全部 ID 到内存）
+    if sort == "random":
+        return qs.order_by("?")
+
+    # 不需要排序时直接返回（用于纯聚合查询）
+    if not sort:
+        return qs.order_by()
+
+    # 聚合排序：根据 group_by 决定主排序和次排序
+    if group_by == "bookmark":
+        order_fields = ["bookmark__title", sort]
+    elif group_by == "domain":
+        # 按 URL 域名分组
+        from django.db.models.functions import Lower
+
+        qs = qs.annotate(_domain=Lower("bookmark__url"))
+        order_fields = ["_domain", sort]
+    elif group_by == "color":
+        order_fields = ["color", sort]
+    else:
+        order_fields = [sort]
+
+    qs = qs.order_by(*order_fields)
+    return qs
+
+
+def query_annotation_color_stats(user: User) -> dict:
+    """统计用户各颜色的标注数量。"""
+    from django.db.models import Count
+
+    stats = (
+        Annotation.objects.filter(bookmark__owner=user)
+        .values("color")
+        .annotate(count=Count("id"))
+    )
+    return {item["color"]: item["count"] for item in stats}
+
+
+def query_annotation_summary(user: User) -> dict:
+    """返回高亮 & 批注的摘要统计。"""
+    from django.db.models import Count
+
+    total_annotations = Annotation.objects.filter(bookmark__owner=user).count()
+    total_notes = Annotation.objects.filter(
+        bookmark__owner=user, note_content__gt=""
+    ).count()
+    total_bookmarks = (
+        Annotation.objects.filter(bookmark__owner=user)
+        .values("bookmark")
+        .distinct()
+        .count()
+    )
+    return {
+        "total_annotations": total_annotations,
+        "total_notes": total_notes,
+        "total_bookmarks": total_bookmarks,
+    }
+
+
 def query_bookmark_tags(
     user: User, profile: UserProfile, search: BookmarkSearch
 ) -> QuerySet:
@@ -656,7 +946,7 @@ def get_shared_tags_for_query(
 
 
 def parse_query_string(query_string):
-    """解析查询字符串为不同组件.
+    r"""解析查询字符串为不同组件.
 
     语法说明:
     - Field terms:
@@ -687,7 +977,12 @@ def replace_field_terms(
 
     for term in new_terms:
         if term:
-            filtered_tokens.append(f"{field_name}:({term})")
+            # 包含空格或会被 tokenizer 断词的特殊字符时用引号
+            if any(c in term for c in ' ()#!"'):
+                escaped = term.replace("\\", "\\\\").replace('"', '\\"')
+                filtered_tokens.append(f'{field_name}:"{escaped}"')
+            else:
+                filtered_tokens.append(f"{field_name}:{term}")
 
     return " ".join(filtered_tokens).strip()
 
@@ -736,14 +1031,35 @@ def _tokenize_query_string(query_string):
 
 
 def _extract_field_token(query_string, start_pos, field_prefix):
-    """提取field_term."""
+    """提取field_term，支持 field:(content) 和 field:keyword / field:"phrase" 两种语法。"""
     if not query_string.startswith(field_prefix, start_pos):
         return None
 
     prefix_end = start_pos + len(field_prefix)
 
-    # 检查是否跟着非转义 '('
-    if prefix_end >= len(query_string) or query_string[prefix_end] != "(":
+    if prefix_end >= len(query_string):
+        return None
+
+    # 新语法：field:"phrase" 或 field:'phrase'
+    if query_string[prefix_end] in ('"', "'"):
+        quote_char = query_string[prefix_end]
+        i = prefix_end + 1
+        while i < len(query_string):
+            if query_string[i] == "\\" and i + 1 < len(query_string):
+                i += 2
+                continue
+            if query_string[i] == quote_char:
+                return query_string[start_pos:i + 1]
+            i += 1
+        return None
+
+    # 新语法：field:keyword（读到空格为止）
+    if query_string[prefix_end] != "(":
+        i = prefix_end
+        while i < len(query_string) and not query_string[i].isspace():
+            i += 1
+        if i > prefix_end:
+            return query_string[start_pos:i]
         return None
 
     # 查找闭合的 ')'
@@ -828,7 +1144,7 @@ def _is_field_term(token):
 
 
 def _extract_field_content(token):
-    """提取字段名称和内容."""
+    """提取字段名称和内容，支持 field:(content) 和 field:keyword / field:"phrase" 两种语法。"""
     field_prefixes = ("title:", "desc:", "notes:", "url:", "domain:")
 
     for prefix in field_prefixes:
@@ -836,18 +1152,28 @@ def _extract_field_content(token):
             field_name = prefix[:-1]  # Remove trailing ':'
             content_part = token[len(prefix) :]
 
-            # Check if content starts with unescaped '('
-            # If it starts with '\(', it's escaped and should be treated as plain text
+            # 新语法：field:"phrase" 或 field:'phrase'
+            if content_part and content_part[0] in ('"', "'"):
+                quote_char = content_part[0]
+                if content_part[-1] == quote_char and len(content_part) > 1:
+                    content = content_part[1:-1]
+                    # 反转义引号和反斜杠
+                    content = content.replace(f"\\{quote_char}", quote_char).replace("\\\\", "\\")
+                    return field_name, content
+                return None, None
+
+            # 新语法：field:keyword
+            if content_part and not content_part.startswith("("):
+                return field_name, content_part
+
+            # 旧语法：field:(content)
             if content_part.startswith("\\("):
                 return None, None
 
-            if not content_part.startswith("("):
-                return None, None
-
-            # Extract content between parentheses
-            content = _extract_parenthesized_content(content_part)
-            if content is not None:
-                return field_name, content
+            if content_part.startswith("("):
+                content = _extract_parenthesized_content(content_part)
+                if content is not None:
+                    return field_name, content
 
     return None, None
 

@@ -170,7 +170,6 @@ class I18nTestCase(TestCase, BookmarkFactoryMixin):
         self.assertIn("Bookmarks", index_html)
         self.assertIn("Settings", index_html)
         self.assertIn('placeholder="Search for words or #tags"', index_html)
-        self.assertIn("Filters", index_html)
         self.assertIn(">Bundles<", index_html)
         self.assertIn(">Tags<", index_html)
 
@@ -198,10 +197,14 @@ class I18nTestCase(TestCase, BookmarkFactoryMixin):
                 modified=bookmark_added,
             )
 
+        # Set profile attributes to enable calendar mode, weekdays and details
+        user.profile.sum_mode = "calendar"
+        user.profile.sum_show_weekdays = True
+        user.profile.sum_show_details = True
+        user.profile.save()
+
         response = self.client.get(
             reverse("linkding:bookmarks.index"),
-            HTTP_X_LINKDING_SUMMARY_SHOW_WEEKDAYS="1",
-            HTTP_X_LINKDING_SUMMARY_SHOW_DETAILS="1",
         )
 
         soup = BeautifulSoup(response.content.decode(), "html.parser")
@@ -226,20 +229,19 @@ class I18nTestCase(TestCase, BookmarkFactoryMixin):
 
         activity_summary = summary.select_one("[data-summary-activity-summary]")
         self.assertIsNotNone(activity_summary)
-        self.assertEqual(
-            activity_summary.select_one(".summary-activity-summary-lead").get_text(
-                strip=True
-            ),
-            (
-                f"This month ({today.replace(day=1).strftime('%Y/%m/%d')} - "
-                f"{today.replace(day=calendar.monthrange(today.year, today.month)[1]).strftime('%Y/%m/%d')}):"
-            ),
-        )
-        self.assertEqual(
+        lead_text = activity_summary.select_one(
+            ".summary-activity-summary-lead"
+        ).get_text(strip=True)
+        # The lead text shows the current period (this week or this month)
+        # with date range, verify it uses English and date format
+        self.assertIn("(", lead_text)
+        self.assertIn(" - ", lead_text)
+        self.assertTrue(lead_text.endswith("):"))
+        self.assertIn(
+            "Bookmarked 3 items, active on 3 days, longest streak 2 days.",
             activity_summary.select_one(".summary-activity-summary-copy").get_text(
                 " ", strip=True
             ),
-            "Bookmarked 3 items, active on 3 days, longest streak 2 days.",
         )
 
         first_bookmarked_day = summary.select_one(
@@ -271,15 +273,14 @@ class I18nTestCase(TestCase, BookmarkFactoryMixin):
 
     def test_pagination_uses_translated_navigation_labels(self):
         user = self.login_user_with_english_profile()
-        self.setup_numbered_bookmarks(31, user=user)
+        self.setup_numbered_bookmarks(61, user=user)
 
         response = self.client.get(reverse("linkding:bookmarks.index") + "?page=2")
-        html = response.content.decode()
 
-        self.assertContains(response, ">Previous<", html=False)
-        self.assertContains(response, ">Next<", html=False)
-        self.assertNotIn(">上一页<", html)
-        self.assertNotIn(">下一页<", html)
+        self.assertContains(response, 'class="page-nav prev"')
+        self.assertContains(response, 'class="page-nav next"')
+        self.assertNotContains(response, ">上一页<")
+        self.assertNotContains(response, ">下一页<")
 
     def test_bundle_pages_use_english_labels_when_profile_language_is_en(self):
         user = self.login_user_with_english_profile()

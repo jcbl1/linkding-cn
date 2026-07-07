@@ -28,13 +28,12 @@ class BookmarkForm(forms.ModelForm):
     url = forms.CharField(validators=[BookmarkURLValidator()])
     tag_string = forms.CharField(required=False)
     # Do not require title and description as they may be empty
-    title = forms.CharField(max_length=512, required=False)
+    title = forms.CharField(required=False)
     description = forms.CharField(required=False, widget=forms.Textarea())
     unread = forms.BooleanField(required=False)
     shared = forms.BooleanField(required=False)
     # Hidden field that determines whether to close window/tab after saving the bookmark
     auto_close = forms.CharField(required=False, widget=forms.HiddenInput())
-    favicon_file = forms.CharField(required=False, widget=forms.HiddenInput())
 
     class Meta:
         model = Bookmark
@@ -48,7 +47,6 @@ class BookmarkForm(forms.ModelForm):
             "unread",
             "shared",
             "auto_close",
-            "favicon_file",
         ]
 
     def __init__(self, request: HttpRequest, instance: Bookmark = None):
@@ -191,6 +189,18 @@ class BookmarkBundleForm(forms.ModelForm):
         label=_("Favicon"),
         required=False,
     )
+    highlight = forms.ChoiceField(
+        choices=BookmarkSearchForm.FILTER_HIGHLIGHT_CHOICES,
+        widget=forms.RadioSelect,
+        label=_("Highlight filter"),
+        required=False,
+    )
+    annotation = forms.ChoiceField(
+        choices=BookmarkSearchForm.FILTER_ANNOTATION_CHOICES,
+        widget=forms.RadioSelect,
+        label=_("Annotation filter"),
+        required=False,
+    )
 
     class Meta:
         model = BookmarkBundle
@@ -214,6 +224,8 @@ class BookmarkBundleForm(forms.ModelForm):
             "html_snapshot",
             "preview_image",
             "favicon",
+            "highlight",
+            "annotation",
         ]
 
     def __init__(self, *args, **kwargs):
@@ -239,6 +251,8 @@ class BookmarkBundleForm(forms.ModelForm):
             "html_snapshot",
             "preview_image",
             "favicon",
+            "highlight",
+            "annotation",
         ]:
             if field_name in self.fields:
                 self.fields[field_name].initial = defaults.get(field_name)
@@ -260,6 +274,8 @@ class BookmarkBundleForm(forms.ModelForm):
             "html_snapshot",
             "preview_image",
             "favicon",
+            "highlight",
+            "annotation",
         ]
 
         for field_name in search_field_names:

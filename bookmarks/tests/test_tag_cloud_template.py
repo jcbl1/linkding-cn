@@ -413,7 +413,7 @@ class TagCloudTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
 
         self.assertInHTML(
             """
-            <a href="?q="
+            <a href="/bookmarks"
                class="text-bold mr-2">
                 <span>-TEST</span>
             </a>
@@ -436,7 +436,7 @@ class TagCloudTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
 
         self.assertInHTML(
             """
-            <a href="?q="
+            <a href="/bookmarks/shared"
                class="text-bold mr-2">
                 <span>-shared</span>
             </a>

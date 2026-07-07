@@ -1,7 +1,6 @@
 import io
 import os.path
 import tempfile
-import time
 from pathlib import Path
 from unittest import mock
 
@@ -11,11 +10,14 @@ from django.test import TestCase, override_settings
 
 from bookmarks.services import favicon_loader
 
-mock_icon_data = b"mock_icon"
+mock_icon_data = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + b"mock_icon_data"
+mock_ico_data = bytes([0x00, 0x00, 0x01, 0x00]) + b"mock_ico_data"
+mock_svg_data = b"<svg>mock</svg>"
 
 
 class MockStreamingResponse:
     def __init__(self, data=mock_icon_data, content_type="image/png"):
+        self.content = data
         self.chunks = [data]
         self.headers = {"Content-Type": content_type}
 
@@ -45,14 +47,13 @@ class FaviconLoaderTestCase(TestCase):
         self.favicon_folder_override.disable()
 
     def create_mock_response(self, icon_data=mock_icon_data, content_type="image/png"):
-        mock_response = mock.Mock()
-        mock_response.raw = io.BytesIO(icon_data)
         return MockStreamingResponse(icon_data, content_type)
 
     def clear_favicon_folder(self):
         folder = Path(settings.LD_FAVICON_FOLDER)
         for file in folder.iterdir():
-            file.unlink()
+            if file.is_file():
+                file.unlink()
 
     def get_icon_path(self, filename):
         return Path(os.path.join(settings.LD_FAVICON_FOLDER, filename))
@@ -64,193 +65,151 @@ class FaviconLoaderTestCase(TestCase):
         return self.get_icon_path(filename).read_bytes()
 
     def count_icons(self):
-        files = os.listdir(settings.LD_FAVICON_FOLDER)
+        files = [f for f in os.listdir(settings.LD_FAVICON_FOLDER)
+                 if os.path.isfile(os.path.join(settings.LD_FAVICON_FOLDER, f))]
         return len(files)
 
-    def test_load_favicon(self):
+    # --- fetch_and_save_favicon ---
+
+    def test_fetch_and_save_favicon(self):
         with mock.patch("requests.get") as mock_get:
             mock_get.return_value = self.create_mock_response()
-            favicon_loader.load_favicon("https://example.com")
+            result = favicon_loader.fetch_and_save_favicon("example.com")
 
-            # should create icon file
-            self.assertTrue(self.icon_exists("https_example_com.png"))
+            self.assertEqual(result, "example_com.png")
+            self.assertTrue(self.icon_exists("example_com.png"))
+            self.assertEqual(mock_icon_data, self.get_icon_data("example_com.png"))
 
-            # should store image data
-            self.assertEqual(
-                mock_icon_data, self.get_icon_data("https_example_com.png")
-            )
-
-    def test_load_favicon_creates_folder_if_not_exists(self):
+    def test_fetch_creates_folder_if_not_exists(self):
         with mock.patch("requests.get") as mock_get:
             mock_get.return_value = self.create_mock_response()
-
             folder = Path(settings.LD_FAVICON_FOLDER)
             folder.rmdir()
-
             self.assertFalse(folder.exists())
 
-            favicon_loader.load_favicon("https://example.com")
-
+            favicon_loader.fetch_and_save_favicon("example.com")
             self.assertTrue(folder.exists())
 
-    def test_load_favicon_creates_single_icon_for_same_base_url(self):
+    def test_fetch_single_icon_per_domain(self):
+        """同一域名只会产生一个文件，不管调用多少次。"""
         with mock.patch("requests.get") as mock_get:
             mock_get.return_value = self.create_mock_response()
-            favicon_loader.load_favicon("https://example.com")
-            favicon_loader.load_favicon("https://example.com?foo=bar")
-            favicon_loader.load_favicon("https://example.com/foo")
+            favicon_loader.fetch_and_save_favicon("example.com")
+            favicon_loader.fetch_and_save_favicon("example.com")
 
             self.assertEqual(1, self.count_icons())
-            self.assertTrue(self.icon_exists("https_example_com.png"))
+            self.assertTrue(self.icon_exists("example_com.png"))
 
-    def test_load_favicon_creates_multiple_icons_for_different_base_url(self):
+    def test_fetch_multiple_icons_for_different_domains(self):
         with mock.patch("requests.get") as mock_get:
             mock_get.return_value = self.create_mock_response()
-            favicon_loader.load_favicon("https://example.com")
-            favicon_loader.load_favicon("https://sub.example.com")
-            favicon_loader.load_favicon("https://other-domain.com")
+            favicon_loader.fetch_and_save_favicon("example.com")
+            favicon_loader.fetch_and_save_favicon("sub.example.com")
+            favicon_loader.fetch_and_save_favicon("other-domain.com")
 
             self.assertEqual(3, self.count_icons())
-            self.assertTrue(self.icon_exists("https_example_com.png"))
-            self.assertTrue(self.icon_exists("https_sub_example_com.png"))
-            self.assertTrue(self.icon_exists("https_other_domain_com.png"))
+            self.assertTrue(self.icon_exists("example_com.png"))
+            self.assertTrue(self.icon_exists("sub_example_com.png"))
+            self.assertTrue(self.icon_exists("other_domain_com.png"))
 
-    def test_load_favicon_caches_icons(self):
-        with mock.patch("requests.get") as mock_get:
-            mock_get.return_value = self.create_mock_response()
-
-            favicon_file = favicon_loader.load_favicon("https://example.com")
-            mock_get.assert_called()
-            self.assertEqual(favicon_file, "https_example_com.png")
-
-            mock_get.reset_mock()
-            updated_favicon_file = favicon_loader.load_favicon("https://example.com")
-            mock_get.assert_not_called()
-            self.assertEqual(favicon_file, updated_favicon_file)
-
-    def test_load_favicon_updates_stale_icon(self):
-        with mock.patch("requests.get") as mock_get:
-            mock_get.return_value = self.create_mock_response()
-            favicon_loader.load_favicon("https://example.com")
-
-            icon_path = self.get_icon_path("https_example_com.png")
-
-            updated_mock_icon_data = b"updated_mock_icon"
-            mock_get.return_value = self.create_mock_response(
-                icon_data=updated_mock_icon_data
-            )
-            mock_get.reset_mock()
-
-            # change icon modification date so it is not stale yet
-            nearly_one_day_ago = time.time() - 60 * 60 * 23
-            os.utime(icon_path.absolute(), (nearly_one_day_ago, nearly_one_day_ago))
-
-            favicon_loader.load_favicon("https://example.com")
-            mock_get.assert_not_called()
-
-            # change icon modification date so it is considered stale
-            one_day_ago = time.time() - 60 * 60 * 24
-            os.utime(icon_path.absolute(), (one_day_ago, one_day_ago))
-
-            favicon_loader.load_favicon("https://example.com")
-            mock_get.assert_called()
-            self.assertEqual(
-                updated_mock_icon_data, self.get_icon_data("https_example_com.png")
-            )
-
-    def test_get_cached_favicon_returns_stale_icon(self):
-        with mock.patch("requests.get") as mock_get:
-            mock_get.return_value = self.create_mock_response()
-            favicon_loader.load_favicon("https://example.com")
-
-        icon_path = self.get_icon_path("https_example_com.png")
-        one_day_ago = time.time() - 60 * 60 * 24
-        os.utime(icon_path.absolute(), (one_day_ago, one_day_ago))
-
-        cached_favicon = favicon_loader.get_cached_favicon("https://example.com")
-
-        self.assertIsNotNone(cached_favicon)
-        self.assertEqual(cached_favicon.filename, "https_example_com.png")
-        self.assertTrue(cached_favicon.is_stale)
-
-    def test_get_cached_favicon_can_skip_stale_icon(self):
-        with mock.patch("requests.get") as mock_get:
-            mock_get.return_value = self.create_mock_response()
-            favicon_loader.load_favicon("https://example.com")
-
-        icon_path = self.get_icon_path("https_example_com.png")
-        one_day_ago = time.time() - 60 * 60 * 24
-        os.utime(icon_path.absolute(), (one_day_ago, one_day_ago))
-
-        cached_favicon = favicon_loader.get_cached_favicon(
-            "https://example.com", include_stale=False
-        )
-
-        self.assertIsNone(cached_favicon)
-
-    def test_refresh_favicon_replaces_existing_variant(self):
+    def test_fetch_replaces_existing_variant(self):
+        """新扩展名的文件会替换旧扩展名的变体。"""
         with mock.patch("requests.get") as mock_get:
             mock_get.return_value = self.create_mock_response(
                 content_type="image/x-icon",
-                icon_data=b"original_icon",
+                icon_data=mock_ico_data,
             )
-            favicon_loader.load_favicon("https://example.com")
+            favicon_loader.fetch_and_save_favicon("example.com")
 
-        self.assertTrue(self.icon_exists("https_example_com.ico"))
+        self.assertTrue(self.icon_exists("example_com.ico"))
         self.assertEqual(self.count_icons(), 1)
 
         with mock.patch("requests.get") as mock_get:
             mock_get.return_value = self.create_mock_response(
                 content_type="image/png",
-                icon_data=b"updated_icon",
+                icon_data=mock_icon_data,
             )
-            refreshed_favicon = favicon_loader.refresh_favicon("https://example.com")
+            result = favicon_loader.fetch_and_save_favicon("example.com")
 
-        self.assertEqual(refreshed_favicon, "https_example_com.png")
-        self.assertTrue(self.icon_exists("https_example_com.png"))
-        self.assertFalse(self.icon_exists("https_example_com.ico"))
+        self.assertEqual(result, "example_com.png")
+        self.assertTrue(self.icon_exists("example_com.png"))
+        self.assertFalse(self.icon_exists("example_com.ico"))
         self.assertEqual(self.count_icons(), 1)
-        self.assertEqual(self.get_icon_data("https_example_com.png"), b"updated_icon")
+        self.assertTrue(self.get_icon_data("example_com.png").startswith(bytes([0x89, 0x50, 0x4E, 0x47])))
 
-    def test_refresh_favicon_raises_on_request_error(self):
-        with (
-            mock.patch(
-                "requests.get", side_effect=requests.exceptions.RequestException("boom")
-            ),
-            self.assertRaises(requests.exceptions.RequestException),
+    def test_fetch_returns_empty_on_request_error(self):
+        with mock.patch(
+            "requests.get", side_effect=requests.exceptions.RequestException("boom")
         ):
-            favicon_loader.refresh_favicon("https://example.com")
+            result = favicon_loader.fetch_and_save_favicon("example.com")
+            self.assertEqual(result, "")
 
-    @override_settings(LD_FAVICON_PROVIDER="https://custom.icons.com/?url={url}")
-    def test_custom_provider_with_url_param(self):
+    def test_fetch_skips_data_uri_response(self):
+        """Provider 返回 data URI 应被视为无效，尝试下一个 provider。"""
         with mock.patch("requests.get") as mock_get:
-            mock_get.return_value = self.create_mock_response()
-
-            favicon_loader.load_favicon("https://example.com/foo?bar=baz")
-            mock_get.assert_called_with(
-                "https://custom.icons.com/?url=https://example.com",
-                stream=True,
-                timeout=10,
+            data_uri_resp = MockStreamingResponse(
+                data=b"data:image/gif;base64,R0lGODlhAQABAIAAAP",
+                content_type="text/plain",
             )
+            real_resp = self.create_mock_response()
+            mock_get.side_effect = [data_uri_resp, real_resp]
 
-    @override_settings(LD_FAVICON_PROVIDER="https://custom.icons.com/?url={domain}")
+            result = favicon_loader.fetch_and_save_favicon("example.com")
+            self.assertEqual(result, "example_com.png")
+            self.assertEqual(mock_get.call_count, 2)
+
+    # --- Multi-provider fallback ---
+
+    @override_settings(
+        LD_FAVICON_PROVIDERS=[
+            "https://failing.provider/{domain}",
+            "https://fallback.provider/{domain}",
+        ]
+    )
+    def test_multi_provider_fallback(self):
+        with mock.patch("requests.get") as mock_get:
+            ok_resp = self.create_mock_response()
+            mock_get.side_effect = [requests.exceptions.RequestException("fail"), ok_resp]
+
+            result = favicon_loader.fetch_and_save_favicon("example.com")
+            self.assertEqual(result, "example_com.png")
+            self.assertEqual(mock_get.call_count, 2)
+
+    @override_settings(
+        LD_FAVICON_PROVIDERS=[
+            "https://custom.icons.com/?url={domain}",
+        ]
+    )
     def test_custom_provider_with_domain_param(self):
         with mock.patch("requests.get") as mock_get:
             mock_get.return_value = self.create_mock_response()
-
-            favicon_loader.load_favicon("https://example.com/foo?bar=baz")
+            favicon_loader.fetch_and_save_favicon("example.com")
             mock_get.assert_called_with(
                 "https://custom.icons.com/?url=example.com",
-                stream=True,
                 timeout=10,
             )
+
+    @override_settings(
+        LD_FAVICON_PROVIDERS=[
+            "https://custom.icons.com/?url={url}",
+        ]
+    )
+    def test_custom_provider_with_url_param(self):
+        with mock.patch("requests.get") as mock_get:
+            mock_get.return_value = self.create_mock_response()
+            favicon_loader.fetch_and_save_favicon("example.com")
+            mock_get.assert_called_with(
+                "https://custom.icons.com/?url=https://example.com",
+                timeout=10,
+            )
+
+    # --- File extension guessing ---
 
     def test_guess_file_extension(self):
         with mock.patch("requests.get") as mock_get:
             mock_get.return_value = self.create_mock_response(content_type="image/png")
-            favicon_loader.load_favicon("https://example.com")
-
-            self.assertTrue(self.icon_exists("https_example_com.png"))
+            favicon_loader.fetch_and_save_favicon("example.com")
+            self.assertTrue(self.icon_exists("example_com.png"))
 
         self.clear_favicon_folder()
 
@@ -258,6 +217,36 @@ class FaviconLoaderTestCase(TestCase):
             mock_get.return_value = self.create_mock_response(
                 content_type="image/x-icon"
             )
-            favicon_loader.load_favicon("https://example.com")
+            favicon_loader.fetch_and_save_favicon("example.com")
+            self.assertTrue(self.icon_exists("example_com.ico"))
 
-            self.assertTrue(self.icon_exists("https_example_com.ico"))
+    # --- _find_cached_favicon_file ---
+
+    def test_find_cached_favicon_file(self):
+        with mock.patch("requests.get") as mock_get:
+            mock_get.return_value = self.create_mock_response()
+            favicon_loader.fetch_and_save_favicon("example.com")
+
+        result = favicon_loader._find_cached_favicon_file("example.com")
+        self.assertEqual(result, "example_com.png")
+
+    def test_find_cached_favicon_file_missing(self):
+        result = favicon_loader._find_cached_favicon_file("nonexistent.com")
+        self.assertIsNone(result)
+
+    def test_find_cached_favicon_file_prefers_svg(self):
+        """当同一域名有多个扩展名时，优先返回 SVG。"""
+        name = favicon_loader.domain_to_filename("example.com")
+        for ext in [".png", ".ico", ".svg"]:
+            path = Path(os.path.join(settings.LD_FAVICON_FOLDER, f"{name}{ext}"))
+            path.write_bytes(mock_icon_data)
+
+        result = favicon_loader._find_cached_favicon_file("example.com")
+        self.assertEqual(result, f"{name}.svg")
+
+    # --- domain_to_filename ---
+
+    def test_domain_to_filename(self):
+        self.assertEqual(favicon_loader.domain_to_filename("example.com"), "example_com")
+        self.assertEqual(favicon_loader.domain_to_filename("sub.example.com"), "sub_example_com")
+        self.assertEqual(favicon_loader.domain_to_filename("a-b.com"), "a_b_com")

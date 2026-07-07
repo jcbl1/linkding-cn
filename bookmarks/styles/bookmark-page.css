@@ -10,26 +10,19 @@
 }
 
 /* Bookmark page grid */
-.bookmarks-page {
+.bookmarks-page,
+.highlights-page {
   &.grid {
     grid-gap: var(--unit-9);
   }
 
-  ld-filter-drawer-trigger {
+  /* sidebar-close-btn: desktop always hidden, mobile shown via sidebar-visible */
+  .sidebar-close-btn {
     display: none;
   }
 
-  @media (max-width: 840px) {
-    section.sidebar {
-      display: none;
-    }
-
-    ld-filter-drawer-trigger {
-      display: inline-block;
-    }
-  }
-
-  &.collapse-sidebar {
+  /* 侧边栏关闭 */
+  &.sidebar-closed {
     main {
       grid-column: span var(--grid-columns);
     }
@@ -37,11 +30,111 @@
     .sidebar {
       display: none;
     }
+  }
+}
 
-    ld-filter-drawer-trigger {
-      display: inline-block;
+/* 移动端：sidebar 始终用 fixed overlay 模式
+   注意：@media 不能嵌套在 CSS nesting 规则内部（postcss-nesting 不支持） */
+@media (max-width: 840px) {
+  .bookmarks-page.sidebar-open,
+  .highlights-page.sidebar-open {
+    main {
+      grid-column: span var(--grid-columns);
+    }
+
+    .sidebar {
+      position: fixed !important;
+      top: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      left: auto !important;
+      width: 85% !important;
+      max-width: 360px !important;
+      height: 100vh !important;
+      max-height: none !important;
+      z-index: var(--zindex-4) !important;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      overscroll-behavior: contain;
+      background: var(--body-color);
+      box-shadow: -2px 0 12px rgba(0, 0, 0, 0.15);
+      transform: translateX(100%);
+      padding: var(--unit-4);
+      scrollbar-gutter: auto;
+      padding-right: var(--unit-4);
+    }
+
+    /* 遮罩层 */
+    &::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.3);
+      opacity: 0;
+      pointer-events: none;
+      z-index: calc(var(--zindex-4) - 1);
+    }
+
+    /* 展开态：无动画（页面加载/Turbo 导航时 sidebar 直接就位） */
+    &.sidebar-visible .sidebar {
+      transform: translateX(0);
+      transition: none;
+    }
+
+    &.sidebar-visible::after {
+      opacity: 1;
+      pointer-events: auto;
+      transition: none;
+    }
+
+    /* 开启动画：仅用户点击 toggle 时由 openSidebar() 添加
+       specificity 0-4-1 > sidebar-visible 的 0-3-1，覆盖 transition: none */
+    &.sidebar-animate.sidebar-visible .sidebar {
+      transition: transform 0.25s ease;
+    }
+
+    &.sidebar-animate.sidebar-visible::after {
+      transition: opacity 0.25s ease;
+    }
+
+    /* 关闭动画：closing 期间保留 transition，允许 sidebar 滑出 */
+    &.sidebar-closing .sidebar {
+      transition: transform 0.25s ease;
+    }
+
+    &.sidebar-closing::after {
+      pointer-events: auto;
+      transition: opacity 0.25s ease;
+    }
+
+    .sidebar-close-bar {
+      display: flex;
     }
   }
+
+  body.sidebar-overlay-active {
+    overflow: visible !important;
+  }
+}
+
+/* 移动端关闭栏 */
+.sidebar-close-bar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--unit-4);
+}
+.sidebar-close-label {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+.sidebar-close-bar .sidebar-close-btn {
+  padding: 0;
+  height: auto;
+  border: none;
+  background: none;
+  box-shadow: none;
+  display: inline-flex;
 }
 
 /* Bookmark area header controls */
@@ -54,7 +147,7 @@
   display: flex;
   max-width: 300px;
   margin-left: auto;
-  position: relative; /* 添加相对定位作为菜单的定位父元素 */
+  position: relative;
 
   & form {
     width: 100%;
@@ -115,55 +208,11 @@
 
   & .dropdown {
     position: static; /* 移除dropdown的相对定位，让菜单基于search-container定位 */
-    
-    & .menu {
-      padding: var(--unit-4);
-      width: 265px;
-      font-size: var(--font-size-sm);
-      position: absolute;
-      top: 100%;
-      left: auto;
-      right: 0;
-      
-      /* 当屏幕宽度大于426px时右对齐 */
-      @media (max-width: 426px) {
-        left: 0;
-        right: auto;
-      }
-    }
+  }
 
-    & .menu .actions {
-      margin-top: var(--unit-4);
-      display: flex;
-      justify-content: space-between;
-    }
-
-    & .form-group:first-of-type {
-      margin-top: 0;
-    }
-
-    & .form-group {
-      margin-bottom: var(--unit-3);
-    }
-
-    & .radio-group {
-      & .form-label {
-        margin-bottom: var(--unit-1);
-      }
-
-      & .form-radio.form-inline {
-        margin: 0 var(--unit-2) 0 0;
-        padding: 0;
-        display: inline-flex;
-        align-items: center;
-        column-gap: var(--unit-1);
-      }
-
-      & .form-icon {
-        top: 0;
-        position: relative;
-      }
-    }
+  & .menu {
+    left: 0;
+    right: 0;
   }
 
   /* 行内表单布局 */
@@ -209,6 +258,7 @@ ul.bookmark-list {
 li[ld-bookmark-item] {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   gap: var(--unit-2);
   margin-top: 0;
   margin-bottom: var(--unit-3);
@@ -216,9 +266,11 @@ li[ld-bookmark-item] {
   & .content {
     flex: 1 1 0;
     min-width: 0;
+    order: 1;
   }
 
   & .preview-image {
+    order: 2;
     flex: 0 0 auto;
     width: 100px;
     height: 60px;
@@ -231,15 +283,30 @@ li[ld-bookmark-item] {
       display: flex;
       align-items: center;
       justify-content: center;
-      background: var(--body-color-contrast);
 
       & .img {
         width: var(--unit-12);
         height: var(--unit-12);
         background-color: var(--tertiary-text-color);
+        opacity: 0.5;
         -webkit-mask: url(preview-placeholder.svg) no-repeat center;
         mask: url(preview-placeholder.svg) no-repeat center;
       }
+    }
+  }
+
+  & .preview-image-container {
+    position: relative;
+    order: 2;
+    flex: 0 0 auto;
+    width: 100px;
+    height: 60px;
+    margin-top: var(--unit-h);
+
+    & > .preview-image {
+      position: absolute;
+      inset: 0;
+      margin: 0;
     }
   }
 
@@ -273,6 +340,19 @@ li[ld-bookmark-item] {
     font-weight: var(--bookmark-title-weight);
     display: block;
     width: 100%;
+  }
+
+  & .title .quick-edit-title-input {
+    width: 100%;
+    min-width: 0;
+    font: inherit;
+    font-weight: var(--bookmark-title-weight);
+    color: inherit;
+    border: 1px solid var(--primary-color);
+    border-radius: var(--border-radius);
+    padding: 2px 4px;
+    background: var(--body-color);
+    outline: none;
   }
 
   & .title .favicon-link {
@@ -309,6 +389,83 @@ li[ld-bookmark-item] {
     color: var(--bookmark-description-color);
     font-weight: var(--bookmark-description-weight);
     position: relative;
+  }
+
+  /* 同行模式：点击描述文字展开，标签不动 */
+  & .description .description-container.expanded {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  & .description .description-text.expanded {
+    cursor: pointer;
+  }
+
+  /* 分行模式：点击容器展开，限制最大高度 + 滚动条 */
+  & .description.expanded .description-container {
+    white-space: normal;
+    -webkit-line-clamp: unset;
+    max-height: calc(15 * 1.1rem);
+    overflow-y: auto;
+    /* 滚动条样式 */
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
+    scrollbar-color: transparent transparent;
+    &::-webkit-scrollbar { width: 8px; }
+    &::-webkit-scrollbar-thumb {
+      background: transparent;
+      border-radius: 4px;
+    }
+    &:hover {
+      scrollbar-color: var(--secondary-border-color) transparent;
+    }
+    &:hover::-webkit-scrollbar-thumb {
+      background: var(--secondary-border-color);
+    }
+  }
+
+  & .description.is-editing-description .description-container {
+    display: block;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  & .description .quick-edit-description-textarea {
+    width: 100%;
+    max-height: 300px;
+    padding: var(--unit-1) var(--unit-2);
+    margin: 0;
+    border: 1px solid var(--primary-color);
+    border-radius: var(--border-radius);
+    background: var(--body-color);
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    overflow-y: hidden;
+    resize: none;
+    outline: none;
+    box-sizing: border-box;
+    vertical-align: middle;
+    /* 滚动条样式：匹配笔记，默认隐藏，hover/focus 时显示 */
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
+    scrollbar-color: transparent transparent;
+    &::-webkit-scrollbar { width: 8px; }
+    &::-webkit-scrollbar-thumb {
+      background: transparent;
+      border-radius: 4px;
+    }
+    &:hover,
+    &:focus {
+      scrollbar-color: var(--secondary-border-color) transparent;
+    }
+    &:hover::-webkit-scrollbar-thumb,
+    &:focus::-webkit-scrollbar-thumb {
+      background: var(--secondary-border-color);
+    }
   }
 
   & .description .separate{
@@ -382,6 +539,9 @@ li[ld-bookmark-item] {
       box-sizing: border-box;
       transition: none;
       text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
 
       &:focus,
       &:hover,
@@ -391,9 +551,106 @@ li[ld-bookmark-item] {
         --btn-icon-color: var(--bookmark-actions-hover-color);
       }
     }
-    & > a[href^="/assets"] {
-      color: green;
+
+    & button.btn-link.quick-edit-btn.active {
+      color: var(--primary-color);
+      --btn-icon-color: var(--primary-color);
     }
+
+    & button.btn-link.quick-edit-btn.active:hover,
+    & button.btn-link.quick-edit-btn.active:focus {
+      color: var(--primary-color-highlight);
+      --btn-icon-color: var(--primary-color-highlight);
+    }
+
+    & button.btn-link.quick-tag-btn.active {
+      color: var(--primary-color);
+      --btn-icon-color: var(--primary-color);
+    }
+
+    & button.btn-link.quick-tag-btn.active:hover,
+    & button.btn-link.quick-tag-btn.active:focus {
+      color: var(--primary-color-highlight);
+      --btn-icon-color: var(--primary-color-highlight);
+    }
+
+
+    & .quick-tag-menu-wrapper {
+      position: relative;
+      display: inline-flex;
+    }
+
+    & .date-link-exists {
+      color: var(--success-color);
+    }
+
+    & .toolbar-sep {
+      display: inline-flex;
+      align-items: center;
+      color: var(--bookmark-actions-color);
+      vertical-align: unset;
+      line-height: inherit;
+    }
+
+    & .toolbar-sep:last-child {
+      display: none;
+    }
+
+    & .action-icon,
+    & iconify-icon {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+    }
+  }
+}
+
+/* quick tag 子菜单按钮（在 body 上，不依赖 ld-bookmark-item） */
+button.btn-link.quick-tag-btn {
+  color: var(--bookmark-actions-color);
+}
+
+button.btn-link.quick-tag-btn.active {
+  color: var(--primary-color);
+  --btn-icon-color: var(--primary-color);
+}
+
+button.btn-link.quick-tag-btn.active:hover,
+button.btn-link.quick-tag-btn.active:focus {
+  color: var(--primary-color-highlight);
+  --btn-icon-color: var(--primary-color-highlight);
+}
+
+/* quick tag 子菜单面板 */
+.quick-tag-menu-panel {
+  position: absolute;
+  top: 100%;
+  z-index: calc(var(--zindex-2) + 2);
+  margin-top: 4px;
+  background: var(--body-color);
+  border: var(--border-width) solid var(--secondary-border-color);
+  border-radius: calc(var(--border-radius) * 2);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  padding: var(--unit-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+  max-width: 280px;
+
+  .btn {
+    justify-content: flex-start;
+    align-items: center;
+    text-align: left;
+    gap: var(--unit-2) !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  iconify-icon {
+    flex-shrink: 0;
   }
 }
 
@@ -542,6 +799,127 @@ li[ld-bookmark-item] {
     text-transform: uppercase;
     color: var(--alternative-color-dark);
   }
+}
+
+.tag-tree {
+  line-height: 1.1rem;
+
+  & .selected-tags {
+    margin-bottom: var(--unit-4);
+
+    & a,
+    & a:visited:hover {
+      color: var(--error-color);
+    }
+  }
+}
+
+.tag-tree-roots {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tag-tree-children {
+  margin: 0 0 var(--unit-2);
+  padding-left: var(--unit-4);
+  list-style: none;
+  display: none;
+}
+
+.tag-tree-node[data-has-children="true"][data-expanded="true"] > .tag-tree-children {
+  display: block;
+}
+
+.tag-tree-row {
+  display: flex;
+  align-items: center;
+  gap: var(--unit-1);
+  padding: var(--unit-1) 0;
+}
+
+.tag-tree-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.tag-tree-link {
+  color: var(--alternative-color);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--unit-1);
+
+  &:hover {
+    color: var(--alternative-color-dark);
+  }
+}
+
+.tag-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-tree-count {
+  color: var(--alternative-color-dark);
+  font-size: var(--font-size-sm);
+  flex-shrink: 0;
+}
+
+.tag-tree-co-count {
+  color: var(--alternative-color-dark);
+  font-size: var(--font-size-sm);
+  flex-shrink: 0;
+}
+
+.tag-tree-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--alternative-color-dark);
+  cursor: pointer;
+  padding: var(--unit-1);
+  border-radius: var(--border-radius);
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+
+  &:hover {
+    color: var(--primary-text-color);
+    background: var(--secondary-bg-color);
+  }
+}
+
+.tag-tree-node[data-expanded="true"] > .tag-tree-row .tag-tree-toggle {
+  transform: rotate(180deg);
+}
+
+.tag-tree-toggle.loading {
+  opacity: 0.4;
+  animation: tag-tree-spin 0.8s linear infinite;
+}
+
+@keyframes tag-tree-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Tag module dropdown enhancements */
+.menu-divider {
+  height: 1px;
+  margin: var(--unit-2) 0;
+  background: var(--border-color);
+}
+
+.menu-link-active {
+  color: var(--primary-text-color);
+  font-weight: 600;
+  cursor: default;
+}
+
+.menu-link-active::before {
+  content: "✓ ";
 }
 
 .domain-menu {
@@ -759,24 +1137,102 @@ li[ld-bookmark-item] {
   justify-content: center;
 }
 
-/* Bookmark notes */
+/* Inline edit (used for notes and description) */
 ul.bookmark-list {
-  & .notes {
+  & .inline-edit {
     display: none;
-    max-height: 300px;
+    flex-basis: 100%;
+    order: 3;
+    position: relative;
+    z-index: var(--zindex-4);
     margin: var(--unit-1) 0;
-    overflow-y: auto;
+    overflow: visible;
     background: var(--body-color-contrast);
     border-radius: var(--border-radius);
   }
 
-  & .notes .markdown {
+  & .inline-edit .markdown {
+    max-height: calc(var(--ld-notes-max-lines, 15) * 1.1rem);
     padding: var(--unit-2) var(--unit-3);
+    box-sizing: border-box;
+    overflow-y: auto;
+    /* 宽图片适配 */
+    & img {
+      max-width: 100%;
+      height: auto;
+    }
+    /* 滚动条样式：匹配侧边栏，默认隐藏，hover 时显示 */
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
+    scrollbar-color: transparent transparent;
+    &::-webkit-scrollbar { width: 8px; }
+    &::-webkit-scrollbar-thumb {
+      background: transparent;
+      border-radius: 4px;
+    }
+    &:hover {
+      scrollbar-color: var(--secondary-border-color) transparent;
+    }
+    &:hover::-webkit-scrollbar-thumb {
+      background: var(--secondary-border-color);
+    }
   }
 
-  &.show-notes .notes,
-  & li.show-notes .notes {
+  & .inline-edit .inline-edit-textarea {
+    width: 100%;
+    max-height: calc(var(--ld-notes-max-lines, 15) * 1.1rem);
+    padding: var(--unit-2) var(--unit-3);
+    margin: 0;
+    border: 1px solid var(--primary-color);
+    background: var(--body-color);
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    resize: none;
+    outline: none;
+    box-sizing: border-box;
+    /* placeholder 样式 */
+    &::placeholder {
+      color: var(--tertiary-text-color);
+      font-style: italic;
+    }
+    /* 滚动条样式：匹配侧边栏，默认隐藏，hover/focus 时显示 */
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
+    scrollbar-color: transparent transparent;
+    &::-webkit-scrollbar { width: 8px; }
+    &::-webkit-scrollbar-thumb {
+      background: transparent;
+      border-radius: 4px;
+    }
+    &:hover,
+    &:focus {
+      scrollbar-color: var(--secondary-border-color) transparent;
+    }
+    &:hover::-webkit-scrollbar-thumb,
+    &:focus::-webkit-scrollbar-thumb {
+      background: var(--secondary-border-color);
+    }
+  }
+
+  & li.show-notes .inline-edit {
     display: block;
+  }
+
+  /* Tag autocomplete menu: fixed positioning to escape overflow clipping */
+  & .form-autocomplete .menu {
+    position: fixed;
+    transform: none;
+    max-height: min(var(--menu-max-height, 200px), 50vh);
+    /* 滚动条样式：始终显示 */
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
+    scrollbar-color: var(--secondary-border-color) transparent;
+    &::-webkit-scrollbar { width: 8px; }
+    &::-webkit-scrollbar-thumb {
+      background: var(--secondary-border-color);
+      border-radius: 4px;
+    }
   }
 }
 
@@ -1501,6 +1957,15 @@ ul.bookmark-list {
     font-weight: 700;
   }
 
+  & a.summary-activity-summary-value {
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  & a.summary-activity-summary-value:hover {
+    text-decoration: underline;
+  }
+
   & .summary-nav-form,
   & .summary-mode-switch-form,
   & .summary-toolbar-action-form {
@@ -1526,6 +1991,7 @@ ul.bookmark-list {
 
 
 .sidebar {
+  position: relative;
   max-height: var(--app-viewport-height);
   &.paginate-sticky {
     max-height: calc(var(--app-viewport-height) * 0.85);
@@ -1547,5 +2013,25 @@ ul.bookmark-list {
     & .section-title {
       height: var(--control-size);
     }
+  }
+}
+
+/* 移动端编辑态遮罩 */
+.editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--zindex-4) - 10); /* 低于编辑器元素，高于其他 */
+  background: rgba(0, 0, 0, 0.12);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 编辑器元素需要在遮罩之上 */
+@media (hover: none) and (pointer: coarse) {
+  .quick-edit-title-input,
+  .quick-edit-description-textarea,
+  .inline-edit-textarea,
+  .quick-edit-tags-container {
+    position: relative;
+    z-index: var(--zindex-4);
   }
 }

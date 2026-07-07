@@ -97,7 +97,7 @@ celerybeat-schedule
 
 # Environments
 .env
-.venv
+.venv*
 env/
 venv/
 ENV/
@@ -186,6 +186,8 @@ typings/
 /bookmarks/static/reader.js*
 # CSS compilation output
 /bookmarks/static/theme-*.css*
+# esbuild bundled defuddle (built from defuddle_entry.js)
+/bookmarks/services/vendor/defuddle.js
 # Collected static files for deployment
 /static
 # Build output, etc.
@@ -204,3 +206,7 @@ PROJECT.md
 **/.DS_Store
 .vscode
 docs/plans
+
+.claude
+.worktrees
+.ruff_cache

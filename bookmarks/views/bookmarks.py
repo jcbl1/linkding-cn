@@ -1,4 +1,4 @@
-import html
+import random as rng
 import time
 import urllib.parse
 
@@ -13,6 +13,7 @@ from django.http import (
 )
 from django.shortcuts import render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from bookmarks import queries, utils
@@ -33,16 +34,18 @@ from bookmarks.services import (
     favicon_loader,
     preview_image_loader,
     tasks,
-    website_loader,
 )
 from bookmarks.services.bookmarks import (
     archive_bookmark,
     archive_bookmarks,
+    create_html_articles,
     create_html_snapshots,
     delete_bookmarks,
     mark_bookmarks_as_read,
     mark_bookmarks_as_unread,
+    refresh_bookmarks_favicons,
     refresh_bookmarks_metadata,
+    remove_all_html_articles,
     remove_all_html_snapshots,
     restore_bookmark,
     restore_bookmarks,
@@ -203,6 +206,17 @@ def index(request: HttpRequest):
             return _handle_preference_toggle(request)
         return search_action(request)
 
+    # Turbo frame 请求只需详情上下文，跳过其余昂贵查询
+    if turbo.is_frame(request, "details-modal"):
+        details = contexts.get_details_context(
+            request, contexts.ActiveBookmarkDetailsContext
+        )
+        return render(
+            request,
+            "bookmarks/updates/details-modal-frame.html",
+            {"details": details},
+        )
+
     search = BookmarkSearch.from_request(
         request, request.GET, request.user_profile.search_preferences
     )
@@ -239,6 +253,16 @@ def archived(request: HttpRequest):
             return _handle_preference_toggle(request)
         return search_action(request)
 
+    if turbo.is_frame(request, "details-modal"):
+        details = contexts.get_details_context(
+            request, contexts.ArchivedBookmarkDetailsContext
+        )
+        return render(
+            request,
+            "bookmarks/updates/details-modal-frame.html",
+            {"details": details},
+        )
+
     search = BookmarkSearch.from_request(
         request, request.GET, request.user_profile.search_preferences
     )
@@ -271,6 +295,16 @@ def shared(request: HttpRequest):
         if "pref_action" in request.POST:
             return _handle_preference_toggle(request)
         return search_action(request)
+
+    if turbo.is_frame(request, "details-modal"):
+        details = contexts.get_details_context(
+            request, contexts.SharedBookmarkDetailsContext
+        )
+        return render(
+            request,
+            "bookmarks/updates/details-modal-frame.html",
+            {"details": details},
+        )
 
     search = BookmarkSearch.from_request(
         request, request.GET, request.user_profile.search_preferences
@@ -309,6 +343,16 @@ def trashed(request: HttpRequest):
             return _handle_preference_toggle(request)
         return search_action(request)
 
+    if turbo.is_frame(request, "details-modal"):
+        details = contexts.get_details_context(
+            request, contexts.TrashedBookmarkDetailsContext
+        )
+        return render(
+            request,
+            "bookmarks/updates/details-modal-frame.html",
+            {"details": details},
+        )
+
     # 如果用户的回收站搜索偏好为空，设置默认的删除时间降序
     if not request.user_profile.trash_search_preferences:
         request.user_profile.trash_search_preferences = {
@@ -345,6 +389,11 @@ def trashed(request: HttpRequest):
 
 def render_bookmarks_view(request: HttpRequest, template_name, context):
     context["sidebar_modules"] = _build_sidebar_modules(request, context)
+    profile = request.user_profile
+    context.setdefault("show_sidebar", profile.show_sidebar)
+    context.setdefault("sticky_side_panel", profile.sticky_side_panel)
+    context.setdefault("sticky_pagination", profile.sticky_pagination)
+    context.setdefault("sticky_header_controls", profile.sticky_header_controls)
 
     if context["details"]:
         context["page_title"] = _("Bookmark details - Linkding")
@@ -449,6 +498,48 @@ def search_action(request: HttpRequest):
 
         request.user_profile.save()
 
+    # Handle single random bookmark request
+    if "random_single" in request.POST:
+
+        search = BookmarkSearch.from_request(
+            request, request.POST, request.user_profile.search_preferences
+        )
+        # 使用当前筛选条件查询书签，排除 sort=random
+        search.sort = BookmarkSearch.SORT_ADDED_DESC
+        bookmark_query = queries.query_bookmarks(request.user, request.user_profile, search)
+        bookmark_ids = list(bookmark_query.values_list("id", flat=True))
+
+        if not bookmark_ids:
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return JsonResponse({"url": request.path})
+            return HttpResponseRedirect(request.path)
+
+        # 随机选取一个
+        random_id = rng.choice(bookmark_ids)
+        bookmark = Bookmark.objects.get(id=random_id)
+
+        target = request.POST.get("random_target", "url")
+
+        if target == "url":
+            url = bookmark.url
+        elif target == "reader":
+            url = reverse("linkding:bookmarks.read", args=[bookmark.id])
+        elif target == "snapshot":
+            if bookmark.latest_snapshot:
+                url = reverse("linkding:assets.view", args=[bookmark.latest_snapshot.id])
+            else:
+                # 无快照时回退到阅读模式
+                url = reverse("linkding:bookmarks.read", args=[bookmark.id])
+        elif target == "details":
+            # 回到书签列表并打开详情弹窗（通过 query param details=xxx）
+            url = f"{request.path}?details={random_id}"
+        else:
+            url = bookmark.url
+
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return JsonResponse({"url": url})
+        return HttpResponseRedirect(url)
+
     # Handle random sort request
     if "sort" in request.POST and request.POST["sort"] == "random":
         new_seed = int(time.time())
@@ -547,28 +638,117 @@ def mark_as_read(request: HttpRequest, bookmark_id: int | str):
     bookmark.save()
 
 
+def mark_as_unread(request: HttpRequest, bookmark_id: int | str):
+    bookmark = access.bookmark_write(request, bookmark_id)
+    bookmark.unread = True
+    bookmark.save()
+
+
+def share(request: HttpRequest, bookmark_id: int | str):
+    bookmark = access.bookmark_write(request, bookmark_id)
+    bookmark.shared = True
+    bookmark.save()
+
+
 def prefetch_favicon(request: HttpRequest):
-    if not request.user.profile.enable_favicons:
+    """前端 onerror / 懒加载的 favicon 获取端点。
+
+    使用 FaviconCache 全局缓存 + favicon_loader 获取。
+    """
+    if not request.user_profile.enable_favicons:
         return JsonResponse({"status": "disabled"})
 
     url = request.GET.get("url")
     if not url:
         return JsonResponse({"error": _("URL parameter is missing")}, status=400)
 
-    cached_favicon = favicon_loader.get_cached_favicon(url)
-    if cached_favicon:
-        return JsonResponse(
-            {"status": "success", "favicon_file": cached_favicon.filename}
-        )
+    from bookmarks.models import FaviconCache
+    from bookmarks.utils import extract_hostname, parse_domain_roots, resolve_favicon_domain
 
-    favicon_file = favicon_loader.load_favicon(url, timeout=5)
+    domain_config = parse_domain_roots(request.user_profile.custom_domain_root)
+    hostname = extract_hostname(url)
+    if not hostname:
+        return JsonResponse({"error": _("Invalid URL")}, status=400)
+
+    domain = resolve_favicon_domain(hostname, config=domain_config)
+
+    # 1. 检查 FaviconCache 状态
+    cache = FaviconCache.objects.filter(domain=domain).first()
+
+    if cache:
+        # SUCCESS: 磁盘文件存在 → 直接返回
+        if cache.status == FaviconCache.STATUS_SUCCESS and cache.favicon_file:
+            if favicon_loader._get_favicon_path(cache.favicon_file).is_file():
+                if cache.fetched_at:
+                    stale_threshold = timezone.now() - timezone.timedelta(days=1)
+                    if cache.fetched_at < stale_threshold:
+                        from bookmarks.services.tasks import _enqueue_favicon_task
+                        _enqueue_favicon_task(request.user.id, domain)
+                return JsonResponse({"status": "success", "favicon_file": cache.favicon_file})
+            # 磁盘文件丢失 → 继续到步骤 2 重新获取
+
+        # PENDING: 其他请求正在获取 → 不重复
+        elif cache.status == FaviconCache.STATUS_PENDING:
+            return JsonResponse({"status": "success", "favicon_file": "", "retry_after": 10})
+
+        # FAILED: 检查退火重试时间
+        elif cache.status == FaviconCache.STATUS_FAILED:
+            if cache.next_retry_at and cache.next_retry_at > timezone.now():
+                retry_after = int((cache.next_retry_at - timezone.now()).total_seconds())
+                return JsonResponse({"status": "success", "favicon_file": "", "retry_after": retry_after})
+            # 到了重试时间 → 继续到步骤 2
+
+        # MISSING: 永久失败 → 不重试
+        elif cache.status == FaviconCache.STATUS_MISSING:
+            return JsonResponse({"status": "success", "favicon_file": "", "retry_after": 2592000})
+
+    # 2. 尝试从 provider 获取
+    favicon_file = favicon_loader.fetch_and_save_favicon(domain, scheme="https")
+    if not favicon_file:
+        favicon_file = favicon_loader.fetch_and_save_favicon(domain, scheme="http")
 
     if favicon_file:
-        return JsonResponse({"status": "success", "favicon_file": favicon_file})
-    else:
-        return JsonResponse(
-            {"status": "error", "message": _("Failed to prefetch favicon")}
+        FaviconCache.objects.update_or_create(
+            domain=domain,
+            defaults={
+                "favicon_file": favicon_file,
+                "status": FaviconCache.STATUS_SUCCESS,
+                "fetched_at": timezone.now(),
+                "retry_count": 0,
+                "next_retry_at": None,
+            },
         )
+        return JsonResponse({"status": "success", "favicon_file": favicon_file})
+
+    # 3. 全部失败 → 退火重试
+    RETRY_DELAYS = FaviconCache.RETRY_DELAYS
+    if cache:
+        new_retry_count = cache.retry_count + 1
+    else:
+        new_retry_count = 1
+
+    if new_retry_count >= len(RETRY_DELAYS):
+        FaviconCache.objects.update_or_create(
+            domain=domain,
+            defaults={
+                "status": FaviconCache.STATUS_MISSING,
+                "favicon_file": "",
+                "retry_count": new_retry_count,
+                "next_retry_at": None,
+            },
+        )
+    else:
+        delay = RETRY_DELAYS[new_retry_count - 1]
+        FaviconCache.objects.update_or_create(
+            domain=domain,
+            defaults={
+                "status": FaviconCache.STATUS_FAILED,
+                "favicon_file": "",
+                "retry_count": new_retry_count,
+                "next_retry_at": timezone.now() + timezone.timedelta(seconds=delay),
+            },
+        )
+    return JsonResponse({"status": "success", "favicon_file": ""})
 
 
 def load_temporary_preview_image(request: HttpRequest):
@@ -710,6 +890,10 @@ def handle_action(request: HttpRequest, query: QuerySet[Bookmark] = None):
         return remove(request, request.POST["remove"])
     if "mark_as_read" in request.POST:
         return mark_as_read(request, request.POST["mark_as_read"])
+    if "mark_as_unread" in request.POST:
+        return mark_as_unread(request, request.POST["mark_as_unread"])
+    if "share" in request.POST:
+        return share(request, request.POST["share"])
     if "unshare" in request.POST:
         return unshare(request, request.POST["unshare"])
     if "create_html_snapshot" in request.POST:
@@ -766,6 +950,8 @@ def handle_action(request: HttpRequest, query: QuerySet[Bookmark] = None):
             return unshare_bookmarks(bookmark_ids, request.user)
         if bulk_action == "bulk_refresh":
             return refresh_bookmarks_metadata(bookmark_ids, request.user)
+        if bulk_action == "bulk_refresh_favicon":
+            return refresh_bookmarks_favicons(bookmark_ids, request.user)
         if bulk_action == "bulk_trash":
             return trash_bookmarks(bookmark_ids, request.user)
         if bulk_action == "bulk_restore":
@@ -774,193 +960,12 @@ def handle_action(request: HttpRequest, query: QuerySet[Bookmark] = None):
             return create_html_snapshots(bookmark_ids, request.user)
         if bulk_action == "bulk_remove_snapshot":
             return remove_all_html_snapshots(bookmark_ids, request.user)
+        if bulk_action == "bulk_article":
+            return create_html_articles(bookmark_ids, request.user)
+        if bulk_action == "bulk_remove_article":
+            return remove_all_html_articles(bookmark_ids, request.user)
 
 
 @login_required
 def close(request: HttpRequest):
     return render(request, "bookmarks/close.html")
-
-
-@login_required
-def read(request: HttpRequest, bookmark_id: int):
-    from bookmarks.services.articles import get_article_content, remove_article
-
-    bookmark = access.bookmark_read(request, bookmark_id)
-
-    bookmark_data = {
-        "id": bookmark.id,
-        "url": bookmark.url,
-        "title": bookmark.resolved_title,
-        "description": bookmark.resolved_description,
-        "notes": bookmark.notes,
-        "tag_names": bookmark.tag_names,
-        "is_archived": bookmark.is_archived,
-        "unread": bookmark.unread,
-        "shared": bookmark.shared,
-        "date_added": bookmark.date_added.isoformat() if bookmark.date_added else None,
-        "date_modified": bookmark.date_modified.isoformat() if bookmark.date_modified else None,
-        "snapshot_exists": bookmark.latest_snapshot is not None,
-        "snapshot_id": bookmark.latest_snapshot.id if bookmark.latest_snapshot else None,
-        "latest_article": bookmark.latest_article_id,
-    }
-    api_base_url = reverse("linkding:api-root").rstrip("/")
-
-    # Try to load from stored article first
-    if bookmark.latest_article:
-        asset = bookmark.latest_article
-        if asset.status == BookmarkAsset.STATUS_COMPLETE:
-            try:
-                content = get_article_content(asset)
-                return render(
-                    request,
-                    "bookmarks/read.html",
-                    {
-                        "content": content,
-                        "bookmark_id": bookmark_id,
-                        "asset_id": asset.id,
-                        "bookmark_data": bookmark_data,
-                        "api_base_url": api_base_url,
-                        "assets_base_url": reverse(
-                            "linkding:assets.view", args=[0]
-                        ).rsplit("/0", 1)[0],
-                        "bookmarks_index_url": reverse("linkding:bookmarks.index"),
-                    },
-                )
-            except Exception:
-                # Stored article file may be missing/corrupt; regenerate a new one.
-                asset = tasks.create_article(bookmark)
-                return render(
-                    request,
-                    "bookmarks/read_pending.html",
-                    {
-                        "bookmark_id": bookmark_id,
-                        "asset_id": asset.id,
-                        "api_base_url": api_base_url,
-                    },
-                )
-        elif asset.status == BookmarkAsset.STATUS_PENDING:
-            # Article is being processed — show loading page
-            return render(
-                request,
-                "bookmarks/read_pending.html",
-                {
-                    "bookmark_id": bookmark_id,
-                    "asset_id": asset.id,
-                    "api_base_url": api_base_url,
-                },
-            )
-        elif asset.status == BookmarkAsset.STATUS_FAILURE:
-            # Previous attempt failed — retry with a new asset
-            remove_article(asset)
-            new_asset = tasks.create_article(bookmark)
-            return render(
-                request,
-                "bookmarks/read_pending.html",
-                {
-                    "bookmark_id": bookmark_id,
-                    "asset_id": new_asset.id,
-                    "api_base_url": api_base_url,
-                },
-            )
-
-    # No article yet — create one via huey task
-    asset = tasks.create_article(bookmark)
-    return render(
-        request,
-        "bookmarks/read_pending.html",
-        {
-            "bookmark_id": bookmark_id,
-            "asset_id": asset.id,
-            "api_base_url": api_base_url,
-        },
-    )
-
-
-@login_required
-def reparse(request: HttpRequest, bookmark_id: int):
-    if request.method != "POST":
-        return HttpResponseBadRequest("POST required")
-
-    bookmark = access.bookmark_write(request, bookmark_id)
-
-    try:
-        content = website_loader.load_full_page(bookmark.url)
-    except Exception as e:
-        content = f"<html><body><p>{_('Unable to load page content: %(error)s') % {'error': str(e)}}</p></body></html>"
-
-    from bookmarks.services.articles import create_article
-
-    create_article(bookmark, content, title=bookmark.resolved_title)
-
-    return HttpResponseRedirect(reverse("linkding:bookmarks.read", args=[bookmark_id]))
-
-
-@login_required
-def export(request: HttpRequest, bookmark_id: int):
-    """Export article with inline annotations as HTML."""
-    from django.http import HttpResponse
-
-    from bookmarks.models import Annotation
-    from bookmarks.services.articles import get_article_content
-
-    bookmark = access.bookmark_read(request, bookmark_id)
-    format_type = request.GET.get("format", "html")
-
-    if not bookmark.latest_article:
-        return HttpResponseBadRequest("No article to export")
-
-    content = get_article_content(bookmark.latest_article)
-    annotations = Annotation.objects.filter(
-        bookmark=bookmark, article_asset=bookmark.latest_article
-    )
-
-    if format_type == "html":
-        # Inject highlights as <mark> tags into the HTML
-        for ann in annotations.order_by("-selector__start"):
-            try:
-                exact = ann.selector.get("exact", ann.selected_text)
-                color_style = {
-                    "yellow": "background-color: rgba(255,235,0,0.35)",
-                    "green": "background-color: rgba(0,200,83,0.3)",
-                    "blue": "background-color: rgba(66,165,245,0.3)",
-                    "pink": "background-color: rgba(236,64,122,0.3)",
-                }.get(ann.color, "background-color: rgba(255,235,0,0.35)")
-
-                # Simple text replacement for export
-                escaped_exact = html.escape(exact)
-                mark_tag = f'<mark style="{color_style}" data-annotation-id="{ann.id}" title="{html.escape(ann.note_content or "")}">{escaped_exact}</mark>'
-                # Find and replace the first occurrence that isn't already wrapped
-                idx = content.find(exact)
-                if idx != -1:
-                    content = content[:idx] + mark_tag + content[idx + len(exact) :]
-            except Exception:
-                continue
-
-        response = HttpResponse(content, content_type="text/html")
-        response["Content-Disposition"] = (
-            f'attachment; filename="{bookmark.resolved_title}.html"'
-        )
-        return response
-
-    elif format_type == "markdown":
-        # Simple markdown: article text + annotations as footnotes
-        from django.utils.html import strip_tags
-
-        text = strip_tags(content)
-        md = f"# {bookmark.resolved_title}\n\n{text}\n\n"
-        if annotations.exists():
-            md += "## Highlights\n\n"
-            for ann in annotations:
-                md += f"> {ann.selected_text}\n"
-                if ann.note_content:
-                    md += f"  \n  Note: {ann.note_content}\n"
-                md += "\n"
-
-        response = HttpResponse(md, content_type="text/markdown")
-        response["Content-Disposition"] = (
-            f'attachment; filename="{bookmark.resolved_title}.md"'
-        )
-        return response
-
-    else:
-        return HttpResponseBadRequest(f"Unknown format: {format_type}")

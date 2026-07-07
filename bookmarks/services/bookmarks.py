@@ -6,7 +6,7 @@ from django.utils import timezone
 from bookmarks.models import Bookmark, BookmarkAsset, User, parse_tag_string
 from bookmarks.services import auto_tagging, tasks, website_loader
 from bookmarks.services.tags import get_or_create_tags
-from bookmarks.utils import normalize_url
+from bookmarks.utils import extract_hostname, normalize_url, parse_domain_roots, resolve_favicon_domain
 
 logger = logging.getLogger(__name__)
 
@@ -89,10 +89,6 @@ def update_bookmark(bookmark: Bookmark, tag_string, current_user: User):
     if has_url_changed:
         # Update web archive snapshot, if URL changed
         tasks.create_web_archive_snapshot(current_user, bookmark, True)
-
-    is_deleted = original_bookmark.is_deleted
-    if is_deleted:
-        restore_bookmark(bookmark)
 
     return bookmark
 
@@ -276,6 +272,30 @@ def refresh_bookmarks_metadata(bookmark_ids: [int | str], current_user: User):
         tasks.refresh_favicon(current_user, bookmark)
 
 
+def refresh_bookmarks_favicons(bookmark_ids: list[int | str], current_user: User):
+    """批量刷新选中书签的 favicon，按域名去重。"""
+    sanitized_bookmark_ids = _sanitize_id_list(bookmark_ids)
+    owned_bookmarks = Bookmark.objects.filter(
+        owner=current_user, id__in=sanitized_bookmark_ids
+    )
+
+    domain_config = parse_domain_roots(current_user.profile.custom_domain_root)
+    domains_seen = set()
+    for bookmark in owned_bookmarks:
+        domain = _resolve_favicon_domain(bookmark.url, domain_config)
+        if domain and domain not in domains_seen:
+            domains_seen.add(domain)
+            tasks._enqueue_favicon_task(current_user.id, domain)
+
+
+def _resolve_favicon_domain(url: str, domain_config=None) -> str:
+    """从 URL 提取 hostname 并应用自定义域名归一化。"""
+    hostname = extract_hostname(url)
+    if not hostname:
+        return ""
+    return resolve_favicon_domain(hostname, config=domain_config)
+
+
 def create_html_snapshots(bookmark_ids: list[int | str], current_user: User):
     sanitized_bookmark_ids = _sanitize_id_list(bookmark_ids)
     owned_bookmarks = Bookmark.objects.filter(
@@ -292,6 +312,25 @@ def remove_all_html_snapshots(bookmark_ids: [int | str], current_user: User):
         bookmark__owner=current_user,
         bookmark_id__in=sanitized_bookmark_ids,
         asset_type=BookmarkAsset.TYPE_SNAPSHOT,
+    ).delete()
+
+
+def create_html_articles(bookmark_ids: list[int | str], current_user: User):
+    sanitized_bookmark_ids = _sanitize_id_list(bookmark_ids)
+    owned_bookmarks = Bookmark.objects.filter(
+        owner=current_user, id__in=sanitized_bookmark_ids
+    )
+
+    tasks.create_html_articles(owned_bookmarks)
+
+
+def remove_all_html_articles(bookmark_ids: [int | str], current_user: User):
+    sanitized_bookmark_ids = _sanitize_id_list(bookmark_ids)
+
+    BookmarkAsset.objects.filter(
+        bookmark__owner=current_user,
+        bookmark_id__in=sanitized_bookmark_ids,
+        asset_type=BookmarkAsset.TYPE_ARTICLE,
     ).delete()
 
 

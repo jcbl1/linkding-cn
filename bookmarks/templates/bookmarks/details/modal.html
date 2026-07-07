@@ -1,12 +1,23 @@
-{% load i18n %}
+{% load i18n static %}
+{% load shared %}
 <ld-details-modal class="modal active bookmark-details"
                   data-bookmark-id="{{ details.bookmark.id }}"
+                  data-bookmark-url="{{ details.bookmark.url }}"
+                  data-bookmark-title="{{ details.bookmark.resolved_title }}"
+                  data-bookmark-description="{{ details.bookmark.resolved_description|default_if_none:'' }}"
+                  data-bookmark-notes="{{ details.bookmark.notes|default_if_none:'' }}"
+                  data-bookmark-is-archived="{{ details.bookmark.is_archived|yesno:'true,false' }}"
+                  data-bookmark-unread="{{ details.bookmark.unread|yesno:'true,false' }}"
+                  data-bookmark-shared="{{ details.bookmark.shared|yesno:'true,false' }}"
+                  data-bookmark-tag-names="{{ details.bookmark.tag_names|join:' ' }}"
                   data-close-url="{{ details.close_url }}"
                   data-turbo-frame="details-modal">
   <div class="modal-overlay" data-close-modal></div>
   <div class="modal-container" role="dialog" aria-modal="true">
     <div class="modal-header">
-      <h2 class="bookmark-title">{{ details.bookmark.resolved_title }}</h2>
+      <textarea class="bookmark-title-input" rows="1"
+                placeholder="{% translate 'Click to edit title' %}"
+                {% if not details.is_editable %}disabled{% endif %}>{{ details.bookmark.resolved_title }}</textarea>
       <button class="btn btn-noborder close" aria-label="{% translate 'Close dialog' %}" data-close-modal>
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke-width="2"
              stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
@@ -16,31 +27,293 @@
         </svg>
       </button>
     </div>
-    <div class="modal-body">
-      <div class="content">
-        {% include 'bookmarks/details/form.html' %}
+
+    <div class="modal-body scrollbar">
+      <div class="detail-fields">
+        {# 第一行：原始网址（可编辑） #}
+        {% if details.is_editable %}
+          <div class="detail-url-wrapper">
+            <div class="detail-url-view">
+              {% if details.favicon_file %}
+                <img class="favicon" src="{% static details.favicon_file %}"
+                     onerror="handleFaviconError(this,'{{ details.bookmark.url|escapejs }}')"
+                     alt="">
+              {% elif details.favicon_unavailable %}
+                <img class="favicon" src="{% static 'favicon.svg' %}" alt="">
+              {% else %}
+                <img class="favicon" src="{% static 'favicon.svg' %}"
+                     data-favicon-url="{{ details.bookmark.url|escape }}" alt="">
+              {% endif %}
+              <a class="detail-url-link" href="{{ details.bookmark.url }}" rel="noopener"
+                 target="{{ details.profile.bookmark_link_target }}">{{ details.bookmark.url }}</a>
+              <button type="button" class="info-file-action-btn" id="edit-url-btn" title="{% translate 'Edit URL' %}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><use xlink:href="#ld-icon-edit"></use></svg>
+              </button>
+            </div>
+            <div class="detail-url-edit">
+              <input type="text" class="detail-url-input" value="{{ details.bookmark.url }}" />
+              <button type="button" class="info-file-action-btn" id="refresh-metadata-btn" title="{% translate 'Refresh metadata from URL' %}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+              </button>
+              <button type="button" class="btn btn-sm btn-primary" id="url-save-btn">{% translate "Save" %}</button>
+              <button type="button" class="btn btn-sm" id="url-cancel-btn">{% translate "Cancel" %}</button>
+            </div>
+          </div>
+        {% else %}
+          <div class="detail-url-view">
+            {% if details.favicon_file %}
+              <img class="favicon" src="{% static details.favicon_file %}"
+                   onerror="handleFaviconError(this,'{{ details.bookmark.url|escapejs }}')"
+                   alt="">
+            {% elif details.favicon_unavailable %}
+              <img class="favicon" src="{% static 'favicon.svg' %}" alt="">
+            {% else %}
+              <img class="favicon" src="{% static 'favicon.svg' %}"
+                   data-favicon-url="{{ details.bookmark.url|escape }}" alt="">
+            {% endif %}
+            <a class="detail-url-link" href="{{ details.bookmark.url }}" rel="noopener"
+               target="{{ details.profile.bookmark_link_target }}">{{ details.bookmark.url }}</a>
+          </div>
+        {% endif %}
+
+        {# 第二行：最新快照、阅读模式、互联网存档 #}
+        <div class="weblinks">
+          {% if details.latest_snapshot %}
+            <a class="weblink" href="{% url 'linkding:assets.view' details.latest_snapshot.id %}"
+               target="{{ details.profile.bookmark_link_target }}">
+              <svg class="favicon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              <span>{% translate "Latest snapshot" %}</span>
+            </a>
+          {% endif %}
+          <a class="weblink" href="{% url 'linkding:bookmarks.read' details.bookmark.id %}"
+             target="{{ details.profile.bookmark_link_target }}" data-turbo="false">
+            <svg class="favicon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19a9 9 0 0 1 9 0a9 9 0 0 1 9 0"/><path d="M3 6a9 9 0 0 1 9 0a9 9 0 0 1 9 0"/><path d="M3 6l0 13"/><path d="M12 6l0 13"/><path d="M21 6l0 13"/></svg>
+            <span>{% translate "Reader mode" %}</span>
+          </a>
+          {% if details.web_archive_snapshot_url %}
+            <a class="weblink" href="{{ details.web_archive_snapshot_url }}"
+               target="{{ details.profile.bookmark_link_target }}">
+              <svg class="favicon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 76 103" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polygon points="10.33,20 38.67,6 67,20" fill="currentColor" stroke="none"/><line x1="10.33" y1="26" x2="67" y2="26"/><line x1="10.33" y1="32" x2="10.33" y2="89"/><line x1="25" y1="32" x2="25" y2="89"/><line x1="48" y1="32" x2="48" y2="89"/><line x1="67" y1="32" x2="67" y2="89"/><line x1="3" y1="95" x2="73" y2="95"/><line x1="0" y1="99" x2="76" y2="99"/></svg>
+              <span>{% translate "Internet Archive" %}</span>
+            </a>
+          {% endif %}
+        </div>
+
+        {# 日期 #}
+        <div class="detail-section detail-dates">
+          {% if details.bookmark.date_added %}
+            <span class="info-date" title="{% translate 'Added' %} {{ details.bookmark.date_added }}">
+              <svg class="info-date-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+              {{ details.bookmark.date_added|date:"Y/m/d" }}
+            </span>
+          {% endif %}
+          {% if details.bookmark.date_modified %}
+            <span class="info-date" title="{% translate 'Modified' %} {{ details.bookmark.date_modified }}">
+              <svg class="info-date-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              {{ details.bookmark.date_modified|date:"Y/m/d" }}
+            </span>
+          {% endif %}
+          {% if details.bookmark.is_deleted and details.bookmark.date_deleted %}
+            <span class="info-date" title="{% translate 'Deleted' %} {{ details.bookmark.date_deleted }}">
+              <svg class="info-date-icon" width="16" height="16"><use href="#ld-icon-remove"></use></svg>
+              {{ details.bookmark.date_deleted|date:"Y/m/d" }}
+            </span>
+          {% endif %}
+        </div>
+
+        {# 高亮和批注 #}
+        {% if details.annotation_count %}
+          <div class="detail-section detail-annotation-summary">
+            <a href="{% url 'linkding:bookmarks.highlights' %}?bookmark_id={{ details.bookmark.id }}&group_by=bookmark" class="annotation-link" title="{% translate 'View highlights' %}">
+              <svg class="annotation-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16"><use xlink:href="#ld-icon-highlight"></use></svg>
+              {% blocktranslate count counter=details.annotation_count trimmed %}
+                {{ counter }} highlight
+              {% plural %}
+                {{ counter }} highlights
+              {% endblocktranslate %}
+            </a>
+            {% if details.note_count %}
+              · <a href="{% url 'linkding:bookmarks.highlights' %}?bookmark_id={{ details.bookmark.id }}&note_filter=yes&group_by=bookmark" class="annotation-link" title="{% translate 'View annotations' %}">
+                {% blocktranslate count counter=details.note_count trimmed %}
+                  {{ counter }} annotation
+                {% plural %}
+                  {{ counter }} annotations
+                {% endblocktranslate %}
+              </a>
+            {% endif %}
+          </div>
+        {% endif %}
+
+        {# 标签 #}
+        <div class="detail-section">
+          {% if details.is_editable %}
+            <div class="detail-tags-wrapper">
+              <div class="detail-tags-view">
+                {% if details.tags %}
+                  <span class="info-tags">
+                    {% for tag in details.tags %}
+                      <span class="info-tag">#{{ tag.name }}</span>
+                    {% endfor %}
+                  </span>
+                {% else %}
+                  <span class="info-placeholder">{% translate "Click to edit tags" %}</span>
+                {% endif %}
+              </div>
+            </div>
+          {% else %}
+            <div>
+              {% for tag in details.tags %}
+                <a href="{% url 'linkding:bookmarks.index' %}?{{ tag.query_string }}">#{{ tag.name }}</a>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+
+        {# 状态 chips（通过 API 局部刷新，无页面跳转） #}
+        {% if details.is_editable %}
+          <div class="detail-status-chips">
+            <button type="button"
+                    class="detail-status-chip{% if details.bookmark.is_archived %} active{% endif %}"
+                    data-chip-field="is_archived"
+                    data-chip-value="{{ details.bookmark.is_archived|yesno:'true,false' }}"
+                    data-chip-active-icon="#ld-icon-archive"
+                    data-chip-inactive-icon="#ld-icon-archive"
+                    data-chip-active-text="{% translate 'Archived' %}"
+                    data-chip-inactive-text="{% translate 'Not archived' %}">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"><use xlink:href="#ld-icon-archive"></use></svg>
+              <span>{% if details.bookmark.is_archived %}{% translate "Archived" %}{% else %}{% translate "Not archived" %}{% endif %}</span>
+            </button>
+            <button type="button"
+                    class="detail-status-chip{% if not details.bookmark.unread %} active{% endif %}"
+                    data-chip-field="unread"
+                    data-chip-value="{{ details.bookmark.unread|yesno:'true,false' }}"
+                    data-chip-active-icon="#ld-icon-read-check"
+                    data-chip-inactive-icon="#ld-icon-unread-x"
+                    data-chip-active-text="{% translate "Read" context "bookmark status" %}"
+                    data-chip-inactive-text="{% translate 'Unread' %}">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"><use xlink:href="{% if details.bookmark.unread %}#ld-icon-unread-x{% else %}#ld-icon-read-check{% endif %}"></use></svg>
+              <span>{% if details.bookmark.unread %}{% translate "Unread" %}{% else %}{% translate "Read" context "bookmark status" %}{% endif %}</span>
+            </button>
+            {% if details.profile.enable_sharing %}
+              <button type="button"
+                      class="detail-status-chip{% if details.bookmark.shared %} active{% endif %}"
+                      data-chip-field="shared"
+                      data-chip-value="{{ details.bookmark.shared|yesno:'true,false' }}"
+                      data-chip-active-icon="#ld-icon-share"
+                      data-chip-inactive-icon="#ld-icon-share-x"
+                      data-chip-active-text="{% translate 'Shared' %}"
+                      data-chip-inactive-text="{% translate 'Not shared' %}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"><use xlink:href="{% if details.bookmark.shared %}#ld-icon-share{% else %}#ld-icon-share-x{% endif %}"></use></svg>
+                <span>{% if details.bookmark.shared %}{% translate "Shared" %}{% else %}{% translate "Not shared" %}{% endif %}</span>
+              </button>
+            {% endif %}
+          </div>
+        {% endif %}
+
+        {# 文件 #}
+        {% if details.assets or details.is_editable %}
+          <div class="detail-section">
+            <div class="detail-label-row">
+              <span class="detail-label">{% translate "Files" %}</span>
+              {% if details.is_editable %}
+                <span class="detail-files-actions">
+                  {% if details.snapshots_enabled %}
+                    <button type="button" class="btn btn-link btn-sm" data-action="create-snapshot"
+                            {% if details.has_pending_assets %}disabled{% endif %}>{% translate "Create HTML snapshot" %}</button>
+                  {% endif %}
+                  {% if details.uploads_enabled %}
+                    <button type="button" class="btn btn-link btn-sm" data-action="upload-asset">{% translate "Upload file" %}</button>
+                  {% endif %}
+                </span>
+              {% endif %}
+            </div>
+            {% include 'bookmarks/details/assets_inline.html' %}
+          </div>
+        {% endif %}
+
+        {# 描述 #}
+        <div class="detail-section">
+          <div class="detail-label-row">
+            <span class="detail-label">{% translate "Description" %}</span>
+            {% if details.is_editable %}
+              <button class="btn btn-link btn-sm detail-clear-btn" data-clear-field="description">{% translate "Clear" %}</button>
+            {% endif %}
+          </div>
+          {% if details.is_editable %}
+            <textarea class="detail-textarea" data-field="description"
+                      placeholder="{% translate 'Click to edit description' %}"
+                      rows="1">{{ details.bookmark.resolved_description|default_if_none:'' }}</textarea>
+          {% else %}
+            {% if details.bookmark.resolved_description %}
+              <div class="info-value-readonly">{{ details.bookmark.resolved_description }}</div>
+            {% endif %}
+          {% endif %}
+        </div>
+
+        {# 备注 #}
+        <div class="detail-section">
+          <div class="detail-label-row">
+            <span class="detail-label">{% translate "Notes" %}</span>
+            {% if details.is_editable %}
+              <button class="btn btn-link btn-sm detail-clear-btn" data-clear-field="notes">{% translate "Clear" %}</button>
+            {% endif %}
+          </div>
+          {% if details.is_editable %}
+            <textarea class="detail-textarea detail-textarea-notes" data-field="notes"
+                      placeholder="{% translate 'Click to edit notes' %}"
+                      rows="1">{{ details.bookmark.notes|default_if_none:'' }}</textarea>
+          {% else %}
+            {% if details.bookmark.notes %}
+              <div class="info-value-readonly">{{ details.bookmark.notes }}</div>
+            {% endif %}
+          {% endif %}
+        </div>
+
+        {# 预览图 #}
+        {% if details.preview_image_enabled %}
+          {% if details.bookmark.preview_image_file or details.bookmark.preview_image_remote_url %}
+            <div class="detail-section">
+              <div class="detail-label">{% translate "Preview image" %}</div>
+              {% if details.bookmark.preview_image_file %}
+                <img class="info-preview-image" src="{% static details.bookmark.preview_image_file %}" alt=""/>
+              {% elif details.bookmark.preview_image_remote_url %}
+                <img class="info-preview-image" src="{{ details.bookmark.preview_image_remote_url }}" referrerpolicy="unsafe-url" alt="" onerror="this.closest('.detail-section').style.display='none'"/>
+              {% endif %}
+            </div>
+          {% endif %}
+        {% endif %}
       </div>
     </div>
 
+    {# ===== 底部操作栏 ===== #}
     {% if details.is_editable %}
-      <div class="modal-footer">
-        <div class="actions">
-          <div class="left-actions">
-            <a class="btn btn-wide"
-               href="{% url 'linkding:bookmarks.edit' details.bookmark.id %}?return_url={{ details.edit_return_url|urlencode }}">{% translate "Edit" %}</a>
-          </div>
-          <div class="right-actions">
-            <form action="{{ details.delete_url }}" method="post" data-turbo-action="replace">
-              {% csrf_token %}
-              <input type="hidden" name="disable_turbo" value="true">
-              <button ld-confirm-button class="btn btn-error btn-wide"
-                      type="submit" name="trash" value="{{ details.bookmark.id }}">
-                {% translate "Delete..." %}
-              </button>
-            </form>
-          </div>
+      <form class="modal-footer" action="{{ details.action_url }}" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <input type="file" name="upload_asset_file" class="d-hide" data-upload-file-input>
+        <div class="detail-actions">
+          {# 左侧：编辑 #}
+          <a class="detail-action-btn" href="{% url 'linkding:bookmarks.edit' details.bookmark.id %}?return_url={{ details.edit_return_url|urlencode }}" title="{% translate 'Edit' %}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><use xlink:href="#ld-icon-edit"></use></svg>
+          </a>
+          <span class="detail-action-spacer"></span>
+          {# 右侧：根据 is_deleted 显示不同按钮 #}
+          {% if details.bookmark.is_deleted %}
+            <button ld-confirm-button ld-confirm-question="{% translate 'Restore bookmark?' %}"
+                    class="detail-action-btn" type="submit" name="restore" value="{{ details.bookmark.id }}" data-action="restore" title="{% translate 'Restore' %}">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><use xlink:href="#ld-icon-restore"></use></svg>
+            </button>
+            <button ld-confirm-button ld-confirm-danger ld-confirm-question="{% translate 'Permanently delete? This cannot be undone.' %}"
+                    class="detail-action-btn detail-action-delete" type="submit" name="remove" value="{{ details.bookmark.id }}" title="{% translate 'Permanently delete' %}">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><use xlink:href="#ld-icon-delete"></use></svg>
+            </button>
+          {% else %}
+            <button ld-confirm-button ld-confirm-danger ld-confirm-question="{% translate 'Move to trash?' %}"
+                    class="detail-action-btn detail-action-delete" type="submit" name="trash" value="{{ details.bookmark.id }}" data-action="trash" title="{% translate 'Move to trash' %}">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><use xlink:href="#ld-icon-remove"></use></svg>
+            </button>
+          {% endif %}
         </div>
-      </div>
+      </form>
     {% endif %}
   </div>
 </ld-details-modal>

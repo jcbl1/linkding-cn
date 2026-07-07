@@ -1,11 +1,12 @@
 {% load i18n static %}
 <!DOCTYPE html>
-<html lang="{{ LANGUAGE_CODE|default:'en' }}" class="reader-mode">
+<html lang="{{ LANGUAGE_CODE|default:'en' }}" class="reader-mode" data-api-base-url="{{ api_base_url }}/">
 <head>
   <meta charset="UTF-8">
   <meta name="csrfmiddlewaretoken" content="{{ csrf_token }}">
   <title>{% translate "Reader view" %}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimal-ui">
+  <meta name="turbo-cache-control" content="cache">
   {# Include specific theme variant based on user profile setting #}
   {% if request.user_profile.theme == 'light' %}
     <link href="{% static 'theme-light.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
@@ -31,9 +32,28 @@
   {% if request.user_profile.custom_css %}
     <link href="{% url 'linkding:custom_css' %}?hash={{ request.user_profile.custom_css_hash }}" rel="stylesheet" type="text/css"/>
   {% endif %}
+  <script>
+  (function(){
+    try {
+      var s = JSON.parse(localStorage.getItem('ld:reader:settings')||'{}');
+      var t = s.theme;
+      if (!t || t === 'auto') return;
+      var urls = {light: '{% static "theme-light.css" %}?v={{ app_version }}', dark: '{% static "theme-dark.css" %}?v={{ app_version }}'};
+      document.querySelectorAll('link[href*="theme-"]').forEach(function(el){ el.remove(); });
+      var l = document.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = urls[t];
+      document.head.appendChild(l);
+    } catch(e){}
+  })();
+  </script>
 </head>
 <body class="reader-mode">
-<template id="content">{{ content|safe }}</template>
+{% include 'shared/svg_icons.html' %}
+<div id="loading-container" class="loading-container">
+  <div class="loading-spinner"></div>
+  <p class="loading-text">{% translate "Loading article..." %}</p>
+</div>
 {{ bookmark_data|json_script:"bookmark-data" }}
 {{ api_base_url|default:"/api/"|json_script:"reader-api-base-url" }}
 {{ assets_base_url|default:"/assets"|json_script:"reader-assets-base-url" }}
@@ -41,7 +61,7 @@
 <script src="{% url 'javascript-catalog' %}"></script>
 <script src="{% static 'reader.js' %}?v={{ app_version }}" type="application/javascript"></script>
 <script type="application/javascript">
-  window.renderReader({ bookmarkId: {{ bookmark_id }}, assetId: {{ asset_id }} });
+  window.renderReader({ bookmarkId: {{ bookmark_id }}, assetId: {{ asset_id }}, from: "{{ from_param }}" });
 </script>
 </body>
 </html>

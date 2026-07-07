@@ -18,6 +18,7 @@ from bookmarks.utils import (
     normalize_url,
     parse_domain_roots,
     parse_timestamp,
+    resolve_favicon_domain,
 )
 
 
@@ -535,4 +536,57 @@ class UtilsTestCase(TestCase):
         self.assertEqual(
             get_matching_domain_roots("a.docs.feishu.cn", config),
             ["feishu.cn", "docs.feishu.cn"],
+        )
+
+
+class ResolveFaviconDomainTest(TestCase):
+    def test_returns_original_when_no_config(self):
+        self.assertEqual(resolve_favicon_domain("example.com"), "example.com")
+
+    def test_returns_original_when_no_match(self):
+        self.assertEqual(
+            resolve_favicon_domain("other.com", custom_domain_root="example.com\nfoo.bar"),
+            "other.com",
+        )
+
+    def test_resolves_subdomain_to_root(self):
+        self.assertEqual(
+            resolve_favicon_domain("sub.example.com", custom_domain_root="example.com"),
+            "example.com",
+        )
+
+    def test_resolves_alias_mapping(self):
+        self.assertEqual(
+            resolve_favicon_domain("xhslink.com", custom_domain_root="xhslink.com -> xiaohongshu.com"),
+            "xiaohongshu.com",
+        )
+
+    def test_resolves_alias_subdomain(self):
+        self.assertEqual(
+            resolve_favicon_domain("sub.xhslink.com", custom_domain_root="xhslink.com -> xiaohongshu.com"),
+            "xiaohongshu.com",
+        )
+
+    def test_resolves_chain_mapping(self):
+        config = "a.com -> b.com\nb.com -> c.com"
+        self.assertEqual(resolve_favicon_domain("a.com", custom_domain_root=config), "c.com")
+
+    def test_root_domain_returns_itself(self):
+        self.assertEqual(
+            resolve_favicon_domain("example.com", custom_domain_root="example.com"),
+            "example.com",
+        )
+
+    def test_with_pre_parsed_config(self):
+        config = parse_domain_roots("xhslink.com -> xiaohongshu.com")
+        self.assertEqual(
+            resolve_favicon_domain("xhslink.com", config=config),
+            "xiaohongshu.com",
+        )
+
+    def test_pre_parsed_config_takes_priority(self):
+        config = parse_domain_roots("xhslink.com -> xiaohongshu.com")
+        self.assertEqual(
+            resolve_favicon_domain("xhslink.com", config=config, custom_domain_root="ignored"),
+            "xiaohongshu.com",
         )

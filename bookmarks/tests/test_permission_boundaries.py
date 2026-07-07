@@ -248,8 +248,6 @@ class SharedReaderWriteBoundaryTestCase(LinkdingApiTestCase, BookmarkFactoryMixi
 
         read_url = reverse("linkding:bookmarks.read", args=[bookmark.id])
         response = self.client.get(read_url)
+        # Non-owners cannot trigger article generation, so they see the unavailable page
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-        bookmark.refresh_from_db()
-        self.assertIsNotNone(bookmark.latest_article)
-        self.assertEqual(bookmark.latest_article.asset_type, BookmarkAsset.TYPE_ARTICLE)
+        self.assertContains(response, "has not generated a reader view yet")

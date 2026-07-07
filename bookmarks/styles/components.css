@@ -51,10 +51,17 @@
 
   & .section-title {
     display: flex;
+    align-items: center;
     height: var(--control-size-lg);
     gap: var(--unit-2);
     white-space: nowrap;
     width: 100%;
+
+    & h1,
+    & h2,
+    & h3 {
+      line-height: normal;
+    }
   }
 
   h1,

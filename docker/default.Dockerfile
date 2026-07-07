@@ -1,12 +1,13 @@
 FROM node:22-alpine AS node-build
 WORKDIR /etc/linkding
 # install build dependencies
-COPY rollup.config.mjs postcss.config.js package.json package-lock.json ./
+COPY rollup.config.mjs postcss.config.js esbuild.config.mjs package.json package-lock.json ./
 # Disable npm cache and install dependencies
 RUN npm ci --no-cache
 # copy files needed for JS build
 COPY bookmarks/frontend ./bookmarks/frontend
 COPY bookmarks/styles ./bookmarks/styles
+COPY bookmarks/services/vendor/defuddle_entry.js ./bookmarks/services/vendor/defuddle_entry.js
 # Disable PostCSS cache and run build
 ENV POSTCSS_DISABLE_CACHE=true
 ENV NODE_ENV=production
@@ -65,6 +66,8 @@ COPY --from=compile-icu /etc/linkding/libicu.so libicu.so
 COPY . .
 # then overwrite static assets with fresh build output
 COPY --from=node-build /etc/linkding/bookmarks/static bookmarks/static/
+# copy bundled defuddle for server-side reader processing
+COPY --from=node-build /etc/linkding/bookmarks/services/vendor/defuddle.js bookmarks/services/vendor/defuddle.js
 # Activate virtual env
 ENV VIRTUAL_ENV=/etc/linkding/.venv
 ENV PATH="/etc/linkding/.venv/bin:$PATH"

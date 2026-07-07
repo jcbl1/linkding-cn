@@ -1,39 +1,36 @@
-<form action="" method="post" style="display: inline;">
-  {% csrf_token %}
-  <input type="hidden" name="sort" value="random">
-  {% if search.q %}
-    <input type="hidden" name="q" value="{{ search.q }}">
-  {% endif %}
-  {% if search.user %}
-    <input type="hidden" name="user" value="{{ search.user }}">
-  {% endif %}
-  {% if search.bundle %}
-    <input type="hidden" name="bundle" value="{{ search.bundle.id }}">
-  {% endif %}
-  {% if search.shared != 'off' %}
-    <input type="hidden" name="shared" value="{{ search.shared }}">
-  {% endif %}
-  {% if search.unread != 'off' %}
-    <input type="hidden" name="unread" value="{{ search.unread }}">
-  {% endif %}
-  {% if search.date_filter_by %}
-    <input type="hidden" name="date_filter_by" value="{{ search.date_filter_by }}">
-  {% endif %}
-  {% if search.date_filter_start %}
-    <input type="hidden" name="date_filter_start" value="{{ search.date_filter_start }}">
-  {% endif %}
-  {% if search.date_filter_end %}
-    <input type="hidden" name="date_filter_end" value="{{ search.date_filter_end }}">
-  {% endif %}
-  {% load i18n %}
-  <button type="submit" class="btn ml-2" title="{% translate 'Random sort' %}">
-    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" stroke-width="2"
-         stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
-      <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-      <path d="M18 4l3 3l-3 3"></path>
-      <path d="M18 20l3 -3l-3 -3"></path>
-      <path d="M3 7h3a5 5 0 0 1 5 5a5 5 0 0 1 -5 5h-3"></path>
-      <path d="M21 7h-3a5 5 0 0 0 -5 5a5 5 0 0 0 5 5h3"></path>
-    </svg>
+{% load i18n %}
+{% if profile and not profile.enable_random_button %}
+  {# 随机按钮已禁用 #}
+{% elif profile and profile.random_mode == 'single' %}
+  {# 单条目随机模式：配置通过 data 属性传递给 ld-random-single Behavior #}
+  <button type="button" class="btn ml-2"
+          ld-random-single
+          data-csrf-token="{{ csrf_token }}"
+          data-random-target="{{ profile.random_target }}"
+          data-link-target="{{ profile.bookmark_link_target }}"
+          {% for key, value in filtered_params.items %}
+            data-param-{{ key|force_escape }}="{{ value|force_escape }}"
+          {% endfor %}
+          title="{% translate 'Random bookmark' %}">
+    <svg width="20" height="20"><use href="#ld-icon-shuffle"></use></svg>
   </button>
-</form> 
+{% else %}
+  {# 列表随机模式（默认，现有行为） #}
+  <form action="" method="post" style="display: inline;">
+    {% csrf_token %}
+    <input type="hidden" name="sort" value="random">
+    {% for key, value in filtered_params.items %}
+      <input type="hidden" name="{{ key|force_escape }}" value="{{ value|force_escape }}">
+    {% endfor %}
+    <button type="submit" class="btn ml-2" title="{% translate 'Random sort' %}">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" stroke-width="2"
+           stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+        <path d="M18 4l3 3l-3 3"></path>
+        <path d="M18 20l3 -3l-3 -3"></path>
+        <path d="M3 7h3a5 5 0 0 1 5 5a5 5 0 0 1 -5 5h-3"></path>
+        <path d="M21 7h-3a5 5 0 0 0 -5 5a5 5 0 0 0 5 5h3"></path>
+      </svg>
+    </button>
+  </form>
+{% endif %}

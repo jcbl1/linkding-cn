@@ -46,6 +46,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "django.middleware.gzip.GZipMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
@@ -74,6 +75,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "bookmarks.context_processors.toasts",
                 "bookmarks.context_processors.app_version",
+                "bookmarks.context_processors.user_has_shared_bookmarks",
             ],
         },
     },
@@ -289,9 +291,15 @@ USE_SQLITE = default_database["ENGINE"] == "django.db.backends.sqlite3"
 USE_SQLITE_ICU_EXTENSION = USE_SQLITE and os.path.exists(SQLITE_ICU_EXTENSION_PATH)
 
 # Favicons
-LD_DEFAULT_FAVICON_PROVIDER = "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url={url}&size=32"
-LD_DEFAULT_FAVICON_PROVIDER_CN = "https://favicon.im/{domain}?large=true"
-LD_FAVICON_PROVIDER = os.getenv("LD_FAVICON_PROVIDER", LD_DEFAULT_FAVICON_PROVIDER_CN)
+LD_DEFAULT_FAVICON_PROVIDERS = [
+    "https://favicon.im/{domain}?large=true&throw-error-on-404=true",
+    "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url={url}&size=32",
+]
+LD_FAVICON_PROVIDERS = LD_DEFAULT_FAVICON_PROVIDERS
+_favicon_provider_env = os.getenv("LD_FAVICON_PROVIDER", "")
+if _favicon_provider_env:
+    # 支持 | 分隔的多 provider 列表，单个字符串也兼容
+    LD_FAVICON_PROVIDERS = [p.strip() for p in _favicon_provider_env.split("|") if p.strip()] or LD_DEFAULT_FAVICON_PROVIDERS
 LD_FAVICON_FOLDER = os.path.join(BASE_DIR, "data", "favicons")
 LD_ENABLE_REFRESH_FAVICONS = os.getenv("LD_ENABLE_REFRESH_FAVICONS", True) in (
     True,
@@ -299,6 +307,19 @@ LD_ENABLE_REFRESH_FAVICONS = os.getenv("LD_ENABLE_REFRESH_FAVICONS", True) in (
     "true",
     "1",
 )
+
+# Quick tags icon cache
+LD_ICON_FOLDER = os.path.join(BASE_DIR, "data", "icons")
+LD_DEFAULT_PRESET_ICON_NAMES = [
+    "tabler:tags", "tabler:folder", "tabler:bookmark", "tabler:star",
+    "tabler:heart", "tabler:flag", "tabler:pin", "tabler:clock",
+    "tabler:bolt", "tabler:flame", "tabler:leaf", "tabler:world",
+    "tabler:code", "tabler:camera", "tabler:music", "tabler:tool",
+    "tabler:palette", "tabler:mood-happy",
+]
+LD_PRESET_ICON_NAMES = [
+    n.strip() for n in os.getenv("LD_PRESET_ICON_NAMES", "").split(",") if n.strip()
+] or LD_DEFAULT_PRESET_ICON_NAMES
 
 # Previews settings
 LD_PREVIEW_FOLDER = os.path.join(BASE_DIR, "data", "previews")
@@ -315,6 +336,9 @@ LD_CUSTOM_WEBSITE_LOADER_SETTINGS = os.getenv(
 )
 LD_CUSTOM_SNAPSHOT_PROCESSOR_SETTINGS = os.getenv(
     "LD_CUSTOM_SNAPSHOT_PROCESSOR_SETTINGS", "data/snapshot_processor/settings.json"
+)
+LD_CUSTOM_READER_PROCESSOR_SETTINGS = os.getenv(
+    "LD_CUSTOM_READER_PROCESSOR_SETTINGS", "data/reader_processor/settings.json"
 )
 
 # Asset / snapshot settings
@@ -353,6 +377,23 @@ LD_SNAPSHOT_DOMAIN_COOLDOWN_MAX_SEC = int(
     os.getenv("LD_SNAPSHOT_DOMAIN_COOLDOWN_MAX_SEC", 10)
 )
 LD_SNAPSHOT_DISPATCHER_TICK_SEC = int(os.getenv("LD_SNAPSHOT_DISPATCHER_TICK_SEC", 1))
+
+# Snapshot retry delays in seconds (comma-separated).
+# The number of retries equals the length of this array.
+# Example: "60,300,1500" means 3 retries with delays of 1min, 5min, 25min.
+#
+# Technical notes:
+# - Values < 30s are allowed but not recommended:
+#   - SingleFile needs 10-30s to start Chromium, so very short delays waste resources
+#   - Frequent retries may trigger anti-scraping measures on target websites
+#   - If the dispatcher loop has exited, the next retry waits for the periodic
+#     fallback task (up to 60s), so the actual delay may be longer than configured
+# - Recommended minimum: 30 seconds
+LD_SNAPSHOT_RETRY_DELAYS = [
+    int(x.strip())
+    for x in os.getenv("LD_SNAPSHOT_RETRY_DELAYS", "60,300,1500").split(",")
+    if x.strip()
+]
 
 # Monolith isn't used at the moment, as the local snapshot implementation
 # switched to single-file after the prototype. Keeping this around in case

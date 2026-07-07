@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from functools import lru_cache
@@ -21,6 +22,8 @@ from django.utils.translation import gettext as _
 from django.utils.translation import ngettext
 from django.views.i18n import LANGUAGE_QUERY_PARAMETER
 
+from bookmarks.services.icon_loader import PRESET_ICON_NAMES
+
 from bookmarks.models import (
     ApiToken,
     Bookmark,
@@ -31,6 +34,7 @@ from bookmarks.models import (
     UserProfileAutoTaggingRulesForm,
     UserProfileCustomCssForm,
     UserProfileCustomDomainRootForm,
+    UserProfileHighlightCopyFormatForm,
     UserProfileQuickSettingsForm,
 )
 from bookmarks.services import exporter, importer, tasks
@@ -111,11 +115,34 @@ def general(request: HttpRequest, status=200, context_overrides=None):
     version_info = get_version_info(get_ttl_hash())
 
     profile_quick_form = UserProfileQuickSettingsForm(instance=request.user_profile)
+    # 加载快捷标签 + 预置图标数据，注入前端渲染
+    from bookmarks.services.icon_loader import load_quick_tags_icon
+    icon_data_map = {}
+    # 快捷标签使用的图标
+    for item in profile_quick_form.bookmark_quick_tag_items:
+        icon_name = item.get("icon_name")
+        if icon_name:
+            data = load_quick_tags_icon(icon_name)
+            if data:
+                icon_data_map[icon_name] = data
+    # 预置图标（首次从 API 获取，后续从文件缓存）
+    for icon_name in PRESET_ICON_NAMES:
+        if icon_name not in icon_data_map:
+            data = load_quick_tags_icon(icon_name)
+            if data:
+                icon_data_map[icon_name] = data
+    quick_tag_icon_data_json = (
+        json.dumps(icon_data_map, ensure_ascii=False)
+        if icon_data_map else None
+    )
     custom_css_form = UserProfileCustomCssForm(instance=request.user_profile)
     auto_tagging_rules_form = UserProfileAutoTaggingRulesForm(
         instance=request.user_profile
     )
     custom_domain_root_form = UserProfileCustomDomainRootForm(
+        instance=request.user_profile
+    )
+    highlight_copy_format_form = UserProfileHighlightCopyFormatForm(
         instance=request.user_profile
     )
     global_settings_form = None
@@ -150,6 +177,7 @@ def general(request: HttpRequest, status=200, context_overrides=None):
             "custom_css_form": custom_css_form,
             "auto_tagging_rules_form": auto_tagging_rules_form,
             "custom_domain_root_form": custom_domain_root_form,
+            "highlight_copy_format_form": highlight_copy_format_form,
             "global_settings_form": global_settings_form,
             "primary_language_choices": primary_language_choices,
             "other_language_choices": other_language_choices,
@@ -162,6 +190,8 @@ def general(request: HttpRequest, status=200, context_overrides=None):
             "settings_general_url": reverse("linkding:settings.general"),
             "enable_refresh_favicons": enable_refresh_favicons,
             "has_snapshot_support": has_snapshot_support,
+            "preset_icon_names_json": json.dumps(PRESET_ICON_NAMES, ensure_ascii=False),
+            "quick_tag_icon_data_json": quick_tag_icon_data_json,
             "success_message": success_message,
             "error_message": error_message,
             "version_info": version_info,
@@ -240,6 +270,9 @@ def _form_context_key(form_id: str) -> str | None:
     return {
         "profile_quick": "profile_quick_form",
         "profile_custom_css": "custom_css_form",
+        "profile_highlight_copy_format": "highlight_copy_format_form",
+        "profile_hl_item_format": "highlight_copy_format_form",
+        "profile_hl_separator": "highlight_copy_format_form",
         "profile_auto_tagging_rules": "auto_tagging_rules_form",
         "profile_custom_domain_root": "custom_domain_root_form",
         "global_quick": "global_settings_form",
@@ -299,6 +332,9 @@ def _build_profile_quick_form_data(profile, request_post) -> dict:
             if isinstance(field, django_forms.BooleanField):
                 if field_name in request_post:
                     form_data[field_name] = request_post.get(field_name)
+                else:
+                    # BooleanField 不在 POST 中表示未勾选，显式设置为 False
+                    form_data[field_name] = False
             else:
                 if field_name in request_post:
                     form_data[field_name] = request_post.get(field_name)
@@ -331,11 +367,18 @@ def save(request: HttpRequest):
     profile_before = {
         "enable_favicons": profile.enable_favicons,
         "enable_preview_images": profile.enable_preview_images,
+        "custom_domain_root": profile.custom_domain_root,
     }
 
     if form_id == "profile_quick":
+        # 记录修改前的图标名称，用于后续清理
+        old_icon_names = {
+            qt.get("icon_name") for qt in profile.get_bookmark_quick_tags()
+            if qt.get("icon_name")
+        }
+        form_data = _build_profile_quick_form_data(profile, request.POST)
         form = UserProfileQuickSettingsForm(
-            _build_profile_quick_form_data(profile, request.POST),
+            form_data,
             instance=profile,
         )
     elif form_id == "profile_custom_css":
@@ -344,6 +387,18 @@ def save(request: HttpRequest):
         form = UserProfileAutoTaggingRulesForm(request.POST, instance=profile)
     elif form_id == "profile_custom_domain_root":
         form = UserProfileCustomDomainRootForm(request.POST, instance=profile)
+    elif form_id in ("profile_highlight_copy_format", "profile_hl_item_format", "profile_hl_separator"):
+        submitted_fields = _parse_form_fields(request.POST.get("form_fields"))
+        existing_fmt = profile.highlight_copy_format or {}
+        form_data = {
+            "highlight_copy_default_action": profile.highlight_copy_default_action,
+            "item_format": existing_fmt.get("item_format", ""),
+            "separator": existing_fmt.get("separator", ""),
+        }
+        for field_name in submitted_fields:
+            if field_name in request.POST:
+                form_data[field_name] = request.POST.get(field_name)
+        form = UserProfileHighlightCopyFormatForm(form_data, instance=profile)
     elif form_id == "global_quick":
         if not request.user.is_superuser:
             raise PermissionDenied()
@@ -360,6 +415,20 @@ def save(request: HttpRequest):
     saved_instance = form.save()
     if form_id == "profile_quick":
         _schedule_profile_side_effects(request, profile_before, saved_instance)
+        # 清理不再使用的图标缓存文件
+        new_icon_names = {
+            qt.get("icon_name") for qt in saved_instance.get_bookmark_quick_tags()
+            if qt.get("icon_name")
+        }
+        from bookmarks.services.icon_loader import cleanup_unused_icons
+        cleanup_unused_icons(new_icon_names, old_icon_names)
+    elif form_id == "profile_custom_domain_root":
+        old_domain_root = profile_before.get("custom_domain_root") or ""
+        new_domain_root = saved_instance.custom_domain_root or ""
+        if old_domain_root != new_domain_root:
+            tasks.rename_favicon_for_domain_config(
+                request.user, old_domain_root, new_domain_root
+            )
 
     return _build_form_success_response(request, form_id)
 

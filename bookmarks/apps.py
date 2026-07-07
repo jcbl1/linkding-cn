@@ -6,4 +6,4 @@ class BookmarksConfig(AppConfig):
 
     def ready(self):
         # Register signal handlers
-        pass
+        import bookmarks.signals  # noqa: F401

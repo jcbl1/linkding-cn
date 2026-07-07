@@ -5,17 +5,18 @@
 
 {% block content %}
   <div ld-bulk-edit
-       class="bookmarks-page grid columns-md-1 {% if bookmark_list.collapse_side_panel %}collapse-sidebar{% endif %}">
+       class="bookmarks-page grid columns-md-1 sidebar-closed"
+       data-sidebar-default="{{ show_sidebar|yesno:'1,0' }}">
 
     {# Bookmark list #}
     <main class="main col-2" aria-labelledby="main-heading">
-      <div class="section-header mb-0" data-sticky-on="{{ request.user_profile.sticky_header_controls|yesno:'true,false' }}">
+      <div class="section-header mb-0" data-sticky-on="{{ sticky_header_controls|yesno:'true,false' }}">
         <h1 id="main-heading">{% translate "Trash" %}<span id="bookmark-list-total">({{ bookmark_list.bookmarks_total }})</span></h1>
         <div class="header-controls">
           {% bookmark_search bookmark_list.search mode='trash' %}
           {% include 'bookmarks/bulk_edit/toggle.html' %}
           {% random_sort bookmark_list.search %}
-          {% sidebar_toggle %}
+          {% include 'bookmarks/sidebar/components/toggle_button.html' %}
         </div>
       </div>
 
@@ -23,7 +24,7 @@
             action="{{ bookmark_list.action_url|safe }}"
             method="post" autocomplete="off">
         {% csrf_token %}
-        {% include 'bookmarks/bulk_edit/bar.html' with disable_actions='bulk_trash,bulk_archive,bulk_unarchive,bulk_read,bulk_unread,bulk_share,bulk_unshare,bulk_tag,bulk_untag,bulk_refresh,bulk_snapshot' default_bulk_action='bulk_restore' %}
+        {% include 'bookmarks/bulk_edit/bar.html' with disable_actions='bulk_trash,bulk_archive,bulk_unarchive,bulk_read,bulk_unread,bulk_share,bulk_unshare,bulk_tag,bulk_untag,bulk_refresh,bulk_snapshot,bulk_article' default_bulk_action='bulk_restore' %}
 
         <div id="bookmark-list-container">
           {% include 'bookmarks/bookmark_list.html' with is_trash_page=True %}
@@ -32,7 +33,8 @@
     </main>
 
     {# Filters #}
-    <div class="scrollbar sidebar col-1 hide-md" data-sticky-on="{{ request.user_profile.sticky_side_panel|yesno:'true,false' }}">
+    <div class="scrollbar sidebar col-1" data-sticky-on="{{ sticky_side_panel|yesno:'true,false' }}">
+      {% include 'bookmarks/sidebar/components/close_button.html' %}
       {% include 'bookmarks/sidebar/index.html' %}
     </div>
   </div>

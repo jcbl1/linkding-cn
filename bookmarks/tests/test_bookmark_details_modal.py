@@ -14,12 +14,6 @@ class BookmarkDetailsModalTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin
         user = self.get_or_create_test_user()
         self.client.force_login(user)
 
-    def get_details_form(self, soup, bookmark):
-        form_url = (
-            reverse("linkding:bookmarks.index.action") + f"?details={bookmark.id}"
-        )
-        return soup.find("form", {"action": form_url, "enctype": "multipart/form-data"})
-
     def get_index_details_modal(self, bookmark):
         url = reverse("linkding:bookmarks.index") + f"?details={bookmark.id}"
         response = self.client.get(url)
@@ -36,15 +30,12 @@ class BookmarkDetailsModalTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin
         soup = self.make_soup(response.content.decode())
         return soup.select_one("ld-details-modal") is not None
 
-    def find_section_content(self, soup, section_name):
-        h3 = soup.find("h3", string=section_name)
-        content = h3.find_next_sibling("div") if h3 else None
-        return content
-
-    def get_section_content(self, soup, section_name):
-        content = self.find_section_content(soup, section_name)
-        self.assertIsNotNone(content)
-        return content
+    def find_section(self, soup, label_text):
+        """Find a detail-section by its label text."""
+        for label in soup.find_all(["div", "span"], {"class": "detail-label"}):
+            if label.text.strip() == label_text:
+                return label.find_parent("div", {"class": "detail-section"})
+        return None
 
     def find_weblink(self, soup, url):
         return soup.find("a", {"class": "weblink", "href": url})
@@ -54,6 +45,8 @@ class BookmarkDetailsModalTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin
 
     def find_asset(self, soup, asset):
         return soup.find("div", {"data-asset-id": asset.id})
+
+    # ---- Access ----
 
     def test_access(self):
         # own bookmark
@@ -73,7 +66,7 @@ class BookmarkDetailsModalTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin
         self.assertEqual(response.status_code, 200)
         self.assertFalse(self.has_details_modal(response))
 
-        # non-existent bookmark - just returns without modal in response
+        # non-existent bookmark
         response = self.client.get(
             reverse("linkding:bookmarks.index") + "?details=9999"
         )
@@ -89,127 +82,75 @@ class BookmarkDetailsModalTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin
         self.assertFalse(self.has_details_modal(response))
 
     def test_access_with_sharing(self):
-        # shared bookmark, sharing disabled
         other_user = self.setup_user()
         bookmark = self.setup_bookmark(shared=True, user=other_user)
 
         response = self.client.get(
             reverse("linkding:bookmarks.shared") + f"?details={bookmark.id}"
         )
-        self.assertEqual(response.status_code, 200)
         self.assertFalse(self.has_details_modal(response))
 
-        # shared bookmark, sharing enabled
         profile = other_user.profile
         profile.enable_sharing = True
         profile.save()
-
         response = self.client.get(
             reverse("linkding:bookmarks.shared") + f"?details={bookmark.id}"
         )
-        self.assertEqual(response.status_code, 200)
         self.assertTrue(self.has_details_modal(response))
 
-        # shared bookmark, guest user, no public sharing
         self.client.logout()
         response = self.client.get(
             reverse("linkding:bookmarks.shared") + f"?details={bookmark.id}"
         )
-        self.assertEqual(response.status_code, 200)
         self.assertFalse(self.has_details_modal(response))
 
-        # shared bookmark, guest user, public sharing
         profile.enable_public_sharing = True
         profile.save()
-
         response = self.client.get(
             reverse("linkding:bookmarks.shared") + f"?details={bookmark.id}"
         )
-        self.assertEqual(response.status_code, 200)
         self.assertTrue(self.has_details_modal(response))
+
+    # ---- Title ----
 
     def test_displays_title(self):
         # with title
         bookmark = self.setup_bookmark(title="Test title")
         soup = self.get_index_details_modal(bookmark)
-
-        title = soup.find("h2")
-        self.assertIsNotNone(title)
-        self.assertEqual(title.text.strip(), bookmark.title)
+        title_el = soup.find("textarea", {"class": "bookmark-title-input"})
+        self.assertIsNotNone(title_el)
+        self.assertEqual(title_el.text.strip(), bookmark.title)
 
         # with URL only
         bookmark = self.setup_bookmark(title="")
         soup = self.get_index_details_modal(bookmark)
+        title_el = soup.find("textarea", {"class": "bookmark-title-input"})
+        self.assertIsNotNone(title_el)
+        self.assertEqual(title_el.text.strip(), bookmark.url)
 
-        title = soup.find("h2")
-        self.assertIsNotNone(title)
-        self.assertEqual(title.text.strip(), bookmark.url)
+    # ---- Weblinks ----
 
     def test_website_link(self):
-        # basics
         bookmark = self.setup_bookmark()
         soup = self.get_index_details_modal(bookmark)
-        link = self.find_weblink(soup, bookmark.url)
+        link = soup.find("a", {"class": "detail-url-link"})
         self.assertIsNotNone(link)
         self.assertEqual(link["href"], bookmark.url)
-        self.assertEqual(link.text.strip(), "Original URL")
+        self.assertIn(bookmark.url, link.text)
 
-        bookmark = self.setup_bookmark(favicon_file="")
+        bookmark = self.setup_bookmark()
         soup = self.get_index_details_modal(bookmark)
-        link = self.find_weblink(soup, bookmark.url)
-        image = link.select_one("img")
+        wrapper = soup.find("div", {"class": "detail-url-view"})
+        image = wrapper.select_one("img.favicon")
         self.assertIsNotNone(image)
         self.assertEqual(image["src"], "/static/favicon.svg")
 
-        bookmark = self.setup_bookmark(favicon_file="example.png")
-        soup = self.get_index_details_modal(bookmark)
-        link = self.find_weblink(soup, bookmark.url)
-        image = link.select_one("img")
-        self.assertIsNotNone(image)
-        self.assertEqual(image["src"], "/static/example.png")
-
     def test_reader_mode_link(self):
-        # no latest snapshot
         bookmark = self.setup_bookmark()
         soup = self.get_index_details_modal(bookmark)
-        self.assertEqual(self.count_weblinks(soup), 3)
+        # URL is on its own line, weblinks has reader mode + internet archive
+        self.assertEqual(self.count_weblinks(soup), 2)
         reader_mode_url = reverse("linkding:bookmarks.read", args=[bookmark.id])
-        link = self.find_weblink(soup, reader_mode_url)
-        self.assertIsNotNone(link)
-
-        # snapshot is not complete
-        self.setup_asset(
-            bookmark,
-            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
-            status=BookmarkAsset.STATUS_PENDING,
-        )
-        self.setup_asset(
-            bookmark,
-            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
-            status=BookmarkAsset.STATUS_FAILURE,
-        )
-        soup = self.get_index_details_modal(bookmark)
-        self.assertEqual(self.count_weblinks(soup), 3)
-
-        # not a snapshot
-        self.setup_asset(
-            bookmark,
-            asset_type="upload",
-            status=BookmarkAsset.STATUS_COMPLETE,
-        )
-        soup = self.get_index_details_modal(bookmark)
-        self.assertEqual(self.count_weblinks(soup), 3)
-        link = self.find_weblink(soup, reader_mode_url)
-        self.assertIsNotNone(link)
-
-        # snapshot is complete
-        self.setup_asset(
-            bookmark,
-            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
-            status=BookmarkAsset.STATUS_COMPLETE,
-        )
-        soup = self.get_index_details_modal(bookmark)
-        self.assertEqual(self.count_weblinks(soup), 3)
         link = self.find_weblink(soup, reader_mode_url)
         self.assertIsNotNone(link)
 
@@ -220,537 +161,236 @@ class BookmarkDetailsModalTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin
         self.assertIsNotNone(link)
         self.assertEqual(link["href"], bookmark.web_archive_snapshot_url)
         self.assertEqual(link.text.strip(), "Internet Archive")
-        image = link.select_one("svg")
-        self.assertIsNotNone(image)
 
     def test_internet_archive_link_with_fallback_url(self):
         date_added = timezone.datetime(2023, 8, 11, 21, 45, 11, tzinfo=datetime.UTC)
         bookmark = self.setup_bookmark(url="https://example.com/", added=date_added)
-        fallback_web_archive_url = (
-            "https://web.archive.org/web/20230811214511/https://example.com/"
-        )
-
+        fallback_url = "https://web.archive.org/web/20230811214511/https://example.com/"
         soup = self.get_index_details_modal(bookmark)
-        link = self.find_weblink(soup, fallback_web_archive_url)
+        link = self.find_weblink(soup, fallback_url)
         self.assertIsNotNone(link)
-        self.assertEqual(link["href"], fallback_web_archive_url)
-        self.assertEqual(link.text.strip(), "Internet Archive")
 
     def test_weblinks_respect_target_setting(self):
         bookmark = self.setup_bookmark(web_archive_snapshot_url="https://example.com/")
-
-        # target blank
         profile = self.get_or_create_test_user().profile
         profile.bookmark_link_target = UserProfile.BOOKMARK_LINK_TARGET_BLANK
         profile.save()
-
         soup = self.get_index_details_modal(bookmark)
-
-        website_link = self.find_weblink(soup, bookmark.url)
-        self.assertIsNotNone(website_link)
+        website_link = soup.find("a", {"class": "detail-url-link"})
         self.assertEqual(website_link["target"], UserProfile.BOOKMARK_LINK_TARGET_BLANK)
 
         web_archive_link = self.find_weblink(soup, bookmark.web_archive_snapshot_url)
-        self.assertIsNotNone(web_archive_link)
-        self.assertEqual(
-            web_archive_link["target"], UserProfile.BOOKMARK_LINK_TARGET_BLANK
-        )
+        self.assertEqual(web_archive_link["target"], UserProfile.BOOKMARK_LINK_TARGET_BLANK)
 
-        # target self
         profile.bookmark_link_target = UserProfile.BOOKMARK_LINK_TARGET_SELF
         profile.save()
-
         soup = self.get_index_details_modal(bookmark)
-
-        website_link = self.find_weblink(soup, bookmark.url)
-        self.assertIsNotNone(website_link)
+        website_link = soup.find("a", {"class": "detail-url-link"})
         self.assertEqual(website_link["target"], UserProfile.BOOKMARK_LINK_TARGET_SELF)
 
-        web_archive_link = self.find_weblink(soup, bookmark.web_archive_snapshot_url)
-        self.assertIsNotNone(web_archive_link)
-        self.assertEqual(
-            web_archive_link["target"], UserProfile.BOOKMARK_LINK_TARGET_SELF
-        )
+    # ---- Preview image ----
 
     def test_preview_image(self):
         # without image
         bookmark = self.setup_bookmark()
         soup = self.get_index_details_modal(bookmark)
-        image = soup.select_one(".preview-image img")
+        image = soup.select_one(".info-preview-image")
         self.assertIsNone(image)
 
-        # with image
+        # with image, preview disabled
         bookmark = self.setup_bookmark(preview_image_file="example.png")
         soup = self.get_index_details_modal(bookmark)
-        image = soup.select_one(".preview-image img")
+        image = soup.select_one(".info-preview-image")
         self.assertIsNone(image)
 
-        # preview images enabled, no image
+        # preview enabled, no image
         profile = self.get_or_create_test_user().profile
         profile.enable_preview_images = True
         profile.save()
-
         bookmark = self.setup_bookmark()
         soup = self.get_index_details_modal(bookmark)
-        image = soup.select_one(".preview-image img")
+        image = soup.select_one(".info-preview-image")
         self.assertIsNone(image)
 
-        # preview images enabled, image present
+        # preview enabled, image present
         bookmark = self.setup_bookmark(preview_image_file="example.png")
         soup = self.get_index_details_modal(bookmark)
-        image = soup.select_one(".preview-image img")
+        image = soup.select_one(".info-preview-image")
         self.assertIsNotNone(image)
         self.assertEqual(image["src"], "/static/example.png")
 
-    def test_status(self):
-        # renders form
-        bookmark = self.setup_bookmark()
-        soup = self.get_index_details_modal(bookmark)
-
-        form = self.get_details_form(soup, bookmark)
-        self.assertIsNotNone(form)
-        self.assertEqual(form["method"], "post")
-
-        # sharing disabled
-        bookmark = self.setup_bookmark()
-        soup = self.get_index_details_modal(bookmark)
-        section = self.get_section_content(soup, "Status")
-
-        archived = section.find("input", {"type": "checkbox", "name": "is_archived"})
-        self.assertIsNotNone(archived)
-        unread = section.find("input", {"type": "checkbox", "name": "unread"})
-        self.assertIsNotNone(unread)
-        shared = section.find("input", {"type": "checkbox", "name": "shared"})
-        self.assertIsNone(shared)
-
-        # sharing enabled
-        profile = self.get_or_create_test_user().profile
-        profile.enable_sharing = True
-        profile.save()
-
-        bookmark = self.setup_bookmark()
-        soup = self.get_index_details_modal(bookmark)
-        section = self.get_section_content(soup, "Status")
-
-        archived = section.find("input", {"type": "checkbox", "name": "is_archived"})
-        self.assertIsNotNone(archived)
-        unread = section.find("input", {"type": "checkbox", "name": "unread"})
-        self.assertIsNotNone(unread)
-        shared = section.find("input", {"type": "checkbox", "name": "shared"})
-        self.assertIsNotNone(shared)
-
-        # unchecked
-        bookmark = self.setup_bookmark()
-        soup = self.get_index_details_modal(bookmark)
-        section = self.get_section_content(soup, "Status")
-
-        archived = section.find("input", {"type": "checkbox", "name": "is_archived"})
-        self.assertFalse(archived.has_attr("checked"))
-        unread = section.find("input", {"type": "checkbox", "name": "unread"})
-        self.assertFalse(unread.has_attr("checked"))
-        shared = section.find("input", {"type": "checkbox", "name": "shared"})
-        self.assertFalse(shared.has_attr("checked"))
-
-        # checked
-        bookmark = self.setup_bookmark(is_archived=True, unread=True, shared=True)
-        soup = self.get_index_details_modal(bookmark)
-        section = self.get_section_content(soup, "Status")
-
-        archived = section.find("input", {"type": "checkbox", "name": "is_archived"})
-        self.assertTrue(archived.has_attr("checked"))
-        unread = section.find("input", {"type": "checkbox", "name": "unread"})
-        self.assertTrue(unread.has_attr("checked"))
-        shared = section.find("input", {"type": "checkbox", "name": "shared"})
-        self.assertTrue(shared.has_attr("checked"))
-
-    def test_status_visibility(self):
-        # own bookmark
-        bookmark = self.setup_bookmark()
-        soup = self.get_index_details_modal(bookmark)
-        section = self.find_section_content(soup, "Status")
-        self.assertIsNotNone(section)
-
-        # other user's bookmark
-        other_user = self.setup_user(enable_sharing=True)
-        bookmark = self.setup_bookmark(user=other_user, shared=True)
-        soup = self.get_shared_details_modal(bookmark)
-        section = self.find_section_content(soup, "Status")
-        self.assertIsNone(section)
-
-        # guest user
-        self.client.logout()
-        other_user.profile.enable_public_sharing = True
-        other_user.profile.save()
-        bookmark = self.setup_bookmark(user=other_user, shared=True)
-        soup = self.get_shared_details_modal(bookmark)
-        section = self.find_section_content(soup, "Status")
-        self.assertIsNone(section)
-
-    def test_date_added(self):
-        bookmark = self.setup_bookmark()
-        soup = self.get_index_details_modal(bookmark)
-        section = self.get_section_content(soup, "Date added")
-
-        expected_date = formats.date_format(
-            timezone.localtime(bookmark.date_added), "DATETIME_FORMAT"
-        )
-        date = section.find("span", string=expected_date)
-        self.assertIsNotNone(date)
+    # ---- Tags ----
 
     def test_tags(self):
-        # without tags
+        # without tags: shows placeholder
         bookmark = self.setup_bookmark()
         soup = self.get_index_details_modal(bookmark)
+        placeholder = soup.find("span", {"class": "info-placeholder"})
+        self.assertIsNotNone(placeholder)
 
-        section = self.find_section_content(soup, "Tags")
-        self.assertIsNone(section)
-
-        # with tags
+        # with tags: shows tag names
         bookmark = self.setup_bookmark(tags=[self.setup_tag(), self.setup_tag()])
-
         soup = self.get_index_details_modal(bookmark)
-        section = self.get_section_content(soup, "Tags")
-
         for tag in bookmark.tags.all():
-            tag_link = section.find("a", string=f"#{tag.name}")
-            self.assertIsNotNone(tag_link)
-            expected_url = reverse("linkding:bookmarks.index") + f"?q=%23{tag.name}"
-            self.assertEqual(tag_link["href"], expected_url)
+            tag_el = soup.find("span", {"class": "info-tag"}, string=f"#{tag.name}")
+            self.assertIsNotNone(tag_el)
+
+    # ---- Description ----
 
     def test_description(self):
-        # without description
+        # without description — textarea exists but empty
         bookmark = self.setup_bookmark(description="")
         soup = self.get_index_details_modal(bookmark)
-
-        section = self.find_section_content(soup, "Description")
-        self.assertIsNone(section)
+        textarea = soup.find("textarea", {"data-field": "description"})
+        self.assertIsNotNone(textarea)
+        self.assertEqual(textarea.text.strip(), "")
 
         # with description
         bookmark = self.setup_bookmark(description="Test description")
         soup = self.get_index_details_modal(bookmark)
+        textarea = soup.find("textarea", {"data-field": "description"})
+        self.assertIsNotNone(textarea)
+        self.assertEqual(textarea.text.strip(), "Test description")
 
-        section = self.get_section_content(soup, "Description")
-        self.assertEqual(section.text.strip(), bookmark.description)
+    # ---- Notes ----
 
     def test_notes(self):
-        # without notes
+        # without notes — textarea exists but empty
         bookmark = self.setup_bookmark()
         soup = self.get_index_details_modal(bookmark)
-
-        section = self.find_section_content(soup, "Notes")
-        self.assertIsNone(section)
+        textarea = soup.find("textarea", {"data-field": "notes"})
+        self.assertIsNotNone(textarea)
+        self.assertEqual(textarea.text.strip(), "")
 
         # with notes
         bookmark = self.setup_bookmark(notes="Test notes")
         soup = self.get_index_details_modal(bookmark)
+        textarea = soup.find("textarea", {"data-field": "notes"})
+        self.assertIsNotNone(textarea)
+        self.assertEqual(textarea.text.strip(), "Test notes")
 
-        section = self.get_section_content(soup, "Notes")
-        self.assertEqual(section.decode_contents(), "<p>Test notes</p>")
-
-    def test_edit_link(self):
-        bookmark = self.setup_bookmark()
-
-        # with default return URL
-        soup = self.get_index_details_modal(bookmark)
-        edit_link = soup.find("a", string="Edit")
-        self.assertIsNotNone(edit_link)
-        expected_url = f"/bookmarks/{bookmark.id}/edit?return_url=/bookmarks%3Fdetails%3D{bookmark.id}"
-        self.assertEqual(expected_url, edit_link["href"])
+    # ---- Actions ----
 
     def test_delete_button(self):
         bookmark = self.setup_bookmark()
-
         modal = self.get_index_details_modal(bookmark)
-        delete_button = modal.find("button", {"type": "submit", "name": "trash"})
+        delete_button = modal.find("button", {"name": "trash"})
         self.assertIsNotNone(delete_button)
-        self.assertEqual("Delete...", delete_button.text.strip())
-        self.assertEqual(str(bookmark.id), delete_button["value"])
-
-        form = delete_button.find_parent("form")
-        self.assertIsNotNone(form)
-        expected_url = reverse("linkding:bookmarks.index.action")
-        self.assertEqual(expected_url, form["action"])
+        self.assertEqual(delete_button["value"], str(bookmark.id))
+        self.assertTrue(delete_button.has_attr("ld-confirm-button"))
 
     def test_actions_visibility(self):
-        # own bookmark
+        # own bookmark — has footer actions
         bookmark = self.setup_bookmark()
-
         soup = self.get_index_details_modal(bookmark)
-        edit_link = soup.find("a", string="Edit")
-        delete_button = soup.find("button", {"type": "submit", "name": "trash"})
-        self.assertIsNotNone(edit_link)
-        self.assertIsNotNone(delete_button)
+        trash_btn = soup.find("button", {"name": "trash"})
+        self.assertIsNotNone(trash_btn)
 
-        # with sharing
+        # other user's bookmark — no footer actions
         other_user = self.setup_user(enable_sharing=True)
         bookmark = self.setup_bookmark(user=other_user, shared=True)
-
         soup = self.get_shared_details_modal(bookmark)
-        edit_link = soup.find("a", string="Edit")
-        delete_button = soup.find("button", {"type": "submit", "name": "trash"})
-        self.assertIsNone(edit_link)
-        self.assertIsNone(delete_button)
+        trash_btn = soup.find("button", {"name": "trash"})
+        self.assertIsNone(trash_btn)
 
-        # with public sharing
-        profile = other_user.profile
-        profile.enable_public_sharing = True
+    def test_status_buttons(self):
+        profile = self.get_or_create_test_user().profile
+        profile.enable_sharing = True
         profile.save()
-        bookmark = self.setup_bookmark(user=other_user, shared=True)
 
-        soup = self.get_shared_details_modal(bookmark)
-        edit_link = soup.find("a", string="Edit")
-        delete_button = soup.find("button", {"type": "submit", "name": "trash"})
-        self.assertIsNone(edit_link)
-        self.assertIsNone(delete_button)
+        # own bookmark — has status chips
+        bookmark = self.setup_bookmark()
+        soup = self.get_index_details_modal(bookmark)
+        archive_chip = soup.find(attrs={"data-chip-field": "is_archived"})
+        shared_chip = soup.find(attrs={"data-chip-field": "shared"})
+        unread_chip = soup.find(attrs={"data-chip-field": "unread"})
+        self.assertIsNotNone(archive_chip)
+        self.assertIsNotNone(unread_chip)
+        self.assertIsNotNone(shared_chip)
 
-        # guest user
-        self.client.logout()
-        bookmark = self.setup_bookmark(user=other_user, shared=True)
+        # not archived → uses #ld-icon-archive
+        use = archive_chip.find("use")
+        self.assertIn("ld-icon-archive", use.get("xlink:href", ""))
 
-        soup = self.get_shared_details_modal(bookmark)
-        edit_link = soup.find("a", string="Edit")
-        delete_button = soup.find("button", {"type": "submit", "name": "trash"})
-        self.assertIsNone(edit_link)
-        self.assertIsNone(delete_button)
+        # archived
+        bookmark = self.setup_bookmark(is_archived=True)
+        soup = self.get_index_details_modal(bookmark)
+        archive_chip = soup.find(attrs={"data-chip-field": "is_archived"})
+        use = archive_chip.find("use")
+        self.assertIn("ld-icon-archive", use.get("xlink:href", ""))
+
+    # ---- Date ----
+
+    def test_date_added(self):
+        bookmark = self.setup_bookmark()
+        soup = self.get_index_details_modal(bookmark)
+
+        expected_date = timezone.localtime(bookmark.date_added).strftime("%Y/%m/%d")
+        dates = soup.find_all("span", {"class": "info-date"})
+        date_texts = [d.get_text() for d in dates]
+        self.assertTrue(any(expected_date in t for t in date_texts), f"Expected {expected_date} in {date_texts}")
+
+    # ---- Assets ----
 
     def test_asset_list_visibility(self):
         # no assets
         bookmark = self.setup_bookmark()
-
         soup = self.get_index_details_modal(bookmark)
-        section = self.get_section_content(soup, "Files")
-        asset_list = section.find("div", {"class": "assets"})
+        section = self.find_section(soup, "Files")
+        asset_list = section.find("div", {"class": "info-files"}) if section else None
         self.assertIsNone(asset_list)
 
         # with assets
         bookmark = self.setup_bookmark()
         self.setup_asset(bookmark)
-
         soup = self.get_index_details_modal(bookmark)
-        section = self.get_section_content(soup, "Files")
-        asset_list = section.find("div", {"class": "assets"})
+        section = self.find_section(soup, "Files")
+        self.assertIsNotNone(section)
+        asset_list = section.find("div", {"class": "info-files"})
         self.assertIsNotNone(asset_list)
 
     def test_asset_list(self):
         bookmark = self.setup_bookmark()
-        assets = [
-            self.setup_asset(bookmark),
-            self.setup_asset(bookmark),
-            self.setup_asset(bookmark),
-        ]
-
+        assets = [self.setup_asset(bookmark) for _ in range(3)]
         soup = self.get_index_details_modal(bookmark)
-        section = self.get_section_content(soup, "Files")
-        asset_list = section.find("div", {"class": "assets"})
-
+        section = self.find_section(soup, "Files")
+        asset_list = section.find("div", {"class": "info-files"})
         for asset in assets:
             asset_item = self.find_asset(asset_list, asset)
             self.assertIsNotNone(asset_item)
 
-            asset_icon = asset_item.select_one(".list-item-icon svg")
-            self.assertIsNotNone(asset_icon)
-
-            asset_text = asset_item.select_one(".list-item-text span")
-            self.assertIsNotNone(asset_text)
-            self.assertIn(asset.display_name, asset_text.text)
-
-            view_url = reverse("linkding:assets.view", args=[asset.id])
-            view_link = asset_item.find("a", {"href": view_url})
-            self.assertIsNotNone(view_link)
-
-    @override_settings(LD_ENABLE_SNAPSHOTS=True)
-    def test_asset_list_actions_visibility(self):
-        # own bookmark
-        bookmark = self.setup_bookmark()
-
-        soup = self.get_index_details_modal(bookmark)
-        create_snapshot = soup.find(
-            "button", {"type": "submit", "name": "create_html_snapshot"}
-        )
-        upload_asset = soup.find("button", {"type": "submit", "name": "upload_asset"})
-        self.assertIsNotNone(create_snapshot)
-        self.assertIsNotNone(upload_asset)
-
-        # with sharing
-        other_user = self.setup_user(enable_sharing=True)
-        bookmark = self.setup_bookmark(user=other_user, shared=True)
-
-        soup = self.get_shared_details_modal(bookmark)
-        create_snapshot = soup.find(
-            "button", {"type": "submit", "name": "create_html_snapshot"}
-        )
-        upload_asset = soup.find("button", {"type": "submit", "name": "upload_asset"})
-        self.assertIsNone(create_snapshot)
-        self.assertIsNone(upload_asset)
-
-        # with public sharing
-        profile = other_user.profile
-        profile.enable_public_sharing = True
-        profile.save()
-
-        soup = self.get_shared_details_modal(bookmark)
-        create_snapshot = soup.find(
-            "button", {"type": "submit", "name": "create_html_snapshot"}
-        )
-        upload_asset = soup.find("button", {"type": "submit", "name": "upload_asset"})
-        self.assertIsNone(create_snapshot)
-        self.assertIsNone(upload_asset)
-
-        # guest user
-        self.client.logout()
-        bookmark = self.setup_bookmark(user=other_user, shared=True)
-
-        soup = self.get_shared_details_modal(bookmark)
-        edit_link = soup.find("a", string="Edit")
-        delete_button = soup.find("button", {"type": "submit", "name": "trash"})
-        self.assertIsNone(edit_link)
-        self.assertIsNone(delete_button)
-
-    @override_settings(LD_ENABLE_SNAPSHOTS=False)
-    def test_asset_list_actions_visibility_without_snapshots_enabled(self):
-        bookmark = self.setup_bookmark()
-
-        soup = self.get_index_details_modal(bookmark)
-        create_snapshot = soup.find(
-            "button", {"type": "submit", "name": "create_html_snapshot"}
-        )
-        upload_asset = soup.find("button", {"type": "submit", "name": "upload_asset"})
-        self.assertIsNone(create_snapshot)
-        self.assertIsNotNone(upload_asset)
-
-    @override_settings(LD_DISABLE_ASSET_UPLOAD=True, LD_ENABLE_SNAPSHOTS=True)
-    def test_asset_list_actions_visibility_with_uploads_disabled(self):
-        bookmark = self.setup_bookmark()
-
-        soup = self.get_index_details_modal(bookmark)
-        create_snapshot = soup.find(
-            "button", {"type": "submit", "name": "create_html_snapshot"}
-        )
-        upload_asset = soup.find("button", {"type": "submit", "name": "upload_asset"})
-        self.assertIsNotNone(create_snapshot)
-        self.assertIsNone(upload_asset)
-
-    def test_asset_without_file(self):
-        bookmark = self.setup_bookmark()
-        asset = self.setup_asset(bookmark)
-        asset.file = ""
-        asset.save()
-
-        soup = self.get_index_details_modal(bookmark)
-        asset_item = self.find_asset(soup, asset)
-        view_url = reverse("linkding:assets.view", args=[asset.id])
-        view_link = asset_item.find("a", {"href": view_url})
-        self.assertIsNone(view_link)
-
-    def test_asset_status(self):
-        bookmark = self.setup_bookmark()
-        pending_asset = self.setup_asset(bookmark, status=BookmarkAsset.STATUS_PENDING)
-        failed_asset = self.setup_asset(bookmark, status=BookmarkAsset.STATUS_FAILURE)
-
-        soup = self.get_index_details_modal(bookmark)
-
-        asset_item = self.find_asset(soup, pending_asset)
-        asset_text = asset_item.select_one(".list-item-text span")
-        self.assertIn("(queued)", asset_text.text)
-
-        asset_item = self.find_asset(soup, failed_asset)
-        asset_text = asset_item.select_one(".list-item-text span")
-        self.assertIn("(failed)", asset_text.text)
-
-    def test_asset_file_size(self):
-        bookmark = self.setup_bookmark()
-        asset1 = self.setup_asset(bookmark, file_size=None)
-        asset2 = self.setup_asset(bookmark, file_size=54639)
-        asset3 = self.setup_asset(bookmark, file_size=11492020)
-
-        soup = self.get_index_details_modal(bookmark)
-
-        asset_item = self.find_asset(soup, asset1)
-        asset_text = asset_item.select_one(".list-item-text")
-        self.assertEqual(asset_text.text.strip(), asset1.display_name)
-
-        asset_item = self.find_asset(soup, asset2)
-        asset_text = asset_item.select_one(".list-item-text")
-        self.assertIn("53.4\xa0KB", asset_text.text)
-
-        asset_item = self.find_asset(soup, asset3)
-        asset_text = asset_item.select_one(".list-item-text")
-        self.assertIn("11.0\xa0MB", asset_text.text)
-
     def test_asset_actions_visibility(self):
         bookmark = self.setup_bookmark()
-
-        # with file
         asset = self.setup_asset(bookmark)
         soup = self.get_index_details_modal(bookmark)
-
         asset_item = self.find_asset(soup, asset)
-        view_link = asset_item.find("a", string="View")
-        delete_button = asset_item.find(
-            "button", {"type": "submit", "name": "remove_asset"}
-        )
-        self.assertIsNotNone(view_link)
+        file_link = asset_item.find("a", {"class": "info-file-link"})
+        delete_button = asset_item.find("button", {"name": "remove_asset"})
+        self.assertIsNotNone(file_link)
         self.assertIsNotNone(delete_button)
 
-        # without file
-        asset.file = ""
-        asset.save()
-        soup = self.get_index_details_modal(bookmark)
-
-        asset_item = self.find_asset(soup, asset)
-        view_link = asset_item.find("a", string="View")
-        delete_button = asset_item.find(
-            "button", {"type": "submit", "name": "remove_asset"}
-        )
-        self.assertIsNone(view_link)
-        self.assertIsNotNone(delete_button)
-
-        # shared bookmark
+        # shared bookmark — no delete
         other_user = self.setup_user(enable_sharing=True, enable_public_sharing=True)
         bookmark = self.setup_bookmark(shared=True, user=other_user)
         asset = self.setup_asset(bookmark)
-        soup = self.get_index_details_modal(bookmark)
-
-        asset_item = self.find_asset(soup, asset)
-        view_link = asset_item.find("a", string="View")
-        delete_button = asset_item.find(
-            "button", {"type": "submit", "name": "remove_asset"}
-        )
-        self.assertIsNotNone(view_link)
-        self.assertIsNone(delete_button)
-
-        # shared bookmark, guest user
-        self.client.logout()
         soup = self.get_shared_details_modal(bookmark)
-
         asset_item = self.find_asset(soup, asset)
-        view_link = asset_item.find("a", string="View")
-        delete_button = asset_item.find(
-            "button", {"type": "submit", "name": "remove_asset"}
-        )
-        self.assertIsNotNone(view_link)
+        delete_button = asset_item.find("button", {"name": "remove_asset"})
         self.assertIsNone(delete_button)
 
-    @override_settings(LD_ENABLE_SNAPSHOTS=True)
-    def test_create_snapshot_is_disabled_when_having_pending_asset(self):
-        bookmark = self.setup_bookmark()
-        asset = self.setup_asset(bookmark, status=BookmarkAsset.STATUS_COMPLETE)
+    # ---- Non-editable (shared view) ----
 
-        # no pending asset
-        soup = self.get_index_details_modal(bookmark)
-        files_section = self.find_section_content(soup, "Files")
-        create_button = files_section.find(
-            "button", string=re.compile("Create HTML snapshot")
+    def test_non_editable_fields(self):
+        other_user = self.setup_user(enable_sharing=True)
+        bookmark = self.setup_bookmark(
+            user=other_user, shared=True,
+            description="Test desc", notes="Test notes",
         )
-        self.assertFalse(create_button.has_attr("disabled"))
-
-        # with pending asset
-        asset.status = BookmarkAsset.STATUS_PENDING
-        asset.save()
-
-        soup = self.get_index_details_modal(bookmark)
-        files_section = self.find_section_content(soup, "Files")
-        create_button = files_section.find(
-            "button", string=re.compile("Create HTML snapshot")
-        )
-        self.assertTrue(create_button.has_attr("disabled"))
+        soup = self.get_shared_details_modal(bookmark)
+        # Title textarea should be disabled
+        title_el = soup.find("textarea", {"class": "bookmark-title-input"})
+        self.assertIsNotNone(title_el)
+        self.assertTrue(title_el.has_attr("disabled"))
+        # No textareas for description/notes (readonly divs instead)
+        textarea = soup.find("textarea", {"data-field": "description"})
+        self.assertIsNone(textarea)

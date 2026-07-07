@@ -1,0 +1,664 @@
+/* ═══════════════════════════════════════════════════
+   Highlights & Notes management page
+   Style aligned with reader sidebar annotation tab
+   ═══════════════════════════════════════════════════ */
+
+/* ── Toolbar ── */
+
+.highlights-toolbar {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--unit-1);
+  flex-wrap: wrap;
+
+  /* Search container — search input + filter dropdown merged, like bookmark list */
+  .search-container {
+    flex: 1 1 0;
+    display: flex;
+    max-width: 300px;
+    position: relative;
+
+    & form {
+      width: 100%;
+    }
+
+    & .dropdown {
+      position: static;
+    }
+
+    & .menu {
+      left: 0;
+      right: 0;
+    }
+
+    & input[type="search"] {
+      height: var(--control-size);
+      -webkit-appearance: none;
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+
+    & .dropdown-toggle {
+      border-top-left-radius: 0;
+      border-bottom-left-radius: 0;
+      margin-left: -1px;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .search-container {
+      max-width: initial;
+    }
+  }
+}
+
+/* ── Filter dropdown menu ── */
+/* .menu-panel base styles are in theme/menus.css */
+
+.highlights-color-dots-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--unit-2);
+  flex-wrap: wrap;
+}
+
+/* Color dots — match reader highlight toolbar:
+   size = var(--unit-6), white checkmark via CSS borders */
+.color-dot-filter {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--unit-6);
+  height: var(--unit-6);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.color-dot-filter:not(.all-colors) {
+  background-color: var(--primary-color);
+}
+
+.color-dot-filter:hover {
+  opacity: 0.8;
+}
+
+.color-dot-filter.active {
+  opacity: 1;
+}
+
+/* White checkmark via CSS borders (same as reader .ld-annotation-color-btn[data-active]) */
+.color-dot-filter.active:not(.all-colors)::after {
+  content: "";
+  position: absolute;
+  width: calc(var(--unit-6) * 0.45);
+  height: calc(var(--unit-6) * 0.25);
+  border: 2px solid #fff;
+  border-top: none;
+  border-right: none;
+  transform: translateY(-1px) rotate(-45deg);
+  box-sizing: border-box;
+  filter: drop-shadow(0 0 1px rgba(0,0,0,0.5));
+}
+
+/* "All" dot: conic-gradient multi-color拼色 */
+.color-dot-filter.all-colors {
+  background: conic-gradient(
+    rgba(255,235,0,0.85) 0% 20%,
+    rgba(0,200,83,0.85) 20% 40%,
+    rgba(66,165,245,0.85) 40% 60%,
+    rgba(236,64,122,0.85) 60% 80%,
+    var(--primary-color) 80% 100%
+  );
+}
+
+/* White checkmark for "All" dot too */
+.color-dot-filter.all-colors.active::after {
+  content: "";
+  position: absolute;
+  width: calc(var(--unit-6) * 0.45);
+  height: calc(var(--unit-6) * 0.25);
+  border: 2px solid #fff;
+  border-top: none;
+  border-right: none;
+  transform: translateY(-1px) rotate(-45deg);
+  box-sizing: border-box;
+  filter: drop-shadow(0 0 1px rgba(0,0,0,0.5));
+}
+
+/* ── Bulk edit bar ── */
+
+.highlights-bulk-bar {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 0.2s, opacity 0.2s;
+  margin-bottom: 0;
+}
+
+.highlights-page.bulk-active .highlights-bulk-bar {
+  max-height: 100px;
+  opacity: 1;
+  border-bottom: solid 1px var(--secondary-border-color);
+  margin-bottom: var(--unit-4);
+  padding: var(--unit-2) 0;
+}
+
+.highlights-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--unit-2);
+  flex-wrap: wrap;
+
+  .form-select {
+    width: auto;
+    max-width: 180px;
+  }
+
+  .bulk-edit-checkbox.all {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+    padding: var(--unit-2);
+  }
+}
+
+.highlights-bulk-msg {
+  font-size: var(--font-size-sm);
+  transition: opacity 0.3s;
+
+  &.success {
+    color: var(--success-color);
+  }
+
+  &.error {
+    color: var(--error-color);
+  }
+}
+
+/* Hide bulk checkboxes by default */
+.highlights-page .bulk-edit-checkbox:not(.all) {
+  display: none;
+  padding: 0;
+  min-width: 16px;
+}
+.highlights-page.bulk-active .bulk-edit-checkbox:not(.all) {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ── Search summary ── */
+
+.highlights-summary {
+  padding-left: 2px;
+  padding-bottom: var(--unit-2);
+  margin-bottom: 0px !important;
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+  border-bottom: 1px solid var(--secondary-border-color);
+}
+
+/* ── Group header ── */
+
+.highlight-group-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--unit-2);
+  margin-top: var(--unit-4);
+  margin-bottom: var(--unit-1);
+  padding-bottom: var(--unit-1);
+  border-bottom: 1px solid var(--secondary-border-color);
+
+  &:first-child {
+    margin-top: 0;
+  }
+
+  h3 {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    a {
+      color: inherit;
+      text-decoration: none;
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+  }
+
+  .highlight-group-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: none;
+    color: var(--icon-color);
+    cursor: pointer;
+    border-radius: var(--border-radius);
+    padding: 0;
+    margin-left: auto;
+    transition: transform 0.15s;
+    flex-shrink: 0;
+  }
+
+  .highlight-group-count {
+    font-size: var(--font-size-sm);
+    color: var(--tertiary-text-color);
+    white-space: nowrap;
+  }
+
+  .highlight-group-color-bar {
+    width: 4px;
+    align-self: stretch;
+    border-radius: 2px;
+    flex-shrink: 0;
+    min-height: 1em;
+  }
+}
+
+/* ── Highlight list ── */
+
+.highlights-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.highlights-list.collapsed {
+  display: none;
+}
+
+.highlight-group-header.collapsed .highlight-group-toggle {
+  transform: rotate(-90deg);
+}
+
+/* ── Single highlight item ──
+   Aligned with reader sidebar .annotation-item style:
+   - text: font-size-sm, secondary-text-color
+   - note: 0.75rem, input-text-color
+   - actions: font-size-sm, below content with indent */
+
+.highlight-item {
+  position: relative;
+  display: flex;
+  gap: var(--unit-2);
+  padding: var(--unit-2) var(--unit-3) var(--unit-1);
+  border-bottom: 1px solid var(--secondary-border-color);
+  margin-top: 0px;
+  transition: background 0.15s;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: var(--body-color-contrast);
+  }
+
+  /* Color bar — matches reader: width 3px, stretch, rounded */
+  .highlight-color-bar {
+    width: 3px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    align-self: stretch;
+    min-height: 1em;
+  }
+
+  /* Content area */
+  .highlight-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Bookmark title (in meta row, after date) */
+  .highlight-bookmark-title {
+    font-size: var(--font-size-sm);
+    color: var(--tertiary-text-color);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+
+    &:hover {
+      color: var(--primary-color);
+      text-decoration: underline;
+    }
+  }
+
+  /* Highlighted text */
+  .highlight-text {
+    flex: 1;
+    font-size: 16px;
+    color: var(--secondary-text-color);
+    line-height: 1.5;
+    word-break: break-word;
+    min-width: 0;
+  }
+
+  /* Text row: color bar + text */
+  .highlight-text-row {
+    display: flex;
+    gap: var(--unit-2);
+    align-items: flex-start;
+  }
+
+  /* Note textarea */
+  .highlight-note-textarea {
+    margin-top: var(--unit-1);
+    padding-left: calc(3px + var(--unit-2));
+    width: 100%;
+    font-size: 16px;
+    color: var(--input-text-color, var(--text-color));
+    background: var(--input-bg-color, var(--body-color));
+    border: 1px solid transparent;
+    border-radius: var(--border-radius);
+    box-sizing: border-box;
+    font-family: var(--base-font-family);
+    line-height: 1.5;
+    overflow: hidden;
+    resize: none;
+    outline: none;
+
+    &::placeholder {
+      color: var(--tertiary-text-color);
+      font-style: italic;
+    }
+
+    &:focus {
+      border-color: var(--input-border-color, var(--border-color));
+      background: var(--input-bg-color, var(--body-color));
+    }
+
+    /* Empty note: hidden by default, shown via .note-visible class */
+    &[data-empty] {
+      display: none;
+    }
+
+    &[data-empty].note-visible {
+      display: block;
+    }
+  }
+
+  /* Actions row — matches reader .annotation-actions */
+  .highlight-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--unit-2);
+    padding-left: calc(3px + var(--unit-2));
+    margin-top: var(--unit-1);
+    position: relative;
+  }
+
+  .highlight-date {
+    font-size: var(--font-size-sm);
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+  }
+
+  /* Action buttons — collapse to 0 width when hidden, expand on hover */
+  .highlight-actions {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    width: 0;
+    overflow: hidden;
+    opacity: 0;
+    flex-shrink: 0;
+    margin-left: auto;
+    transition: opacity 0.15s;
+
+    .highlight-item:hover &,
+    .highlights-page.bulk-active & {
+      opacity: 1;
+      width: auto;
+      gap: var(--unit-2);
+      overflow: visible;
+    }
+  }
+}
+
+/* ── Action buttons ── */
+
+.highlight-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  color: var(--icon-color);
+  cursor: pointer;
+  border-radius: var(--border-radius);
+  padding: 0;
+  text-decoration: none;
+  transition: color 0.15s;
+
+  &:hover {
+    color: var(--text-color);
+    text-decoration: none;
+  }
+
+  &.disabled {
+    opacity: 0.3;
+    cursor: default;
+    pointer-events: none;
+  }
+
+  &.delete:hover {
+    color: var(--error-color);
+  }
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+/* Color picker — aligned with reader sidebar .annotation-color-wrap / .color-picker-* */
+.highlight-color-picker-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.highlight-color-dot {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.highlight-color-popup {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  left: auto;
+  background: var(--body-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  box-shadow: var(--box-shadow);
+  padding: var(--unit-1);
+  z-index: var(--zindex-3);
+  white-space: nowrap;
+
+  &.open {
+    display: flex;
+    gap: var(--unit-1);
+  }
+}
+
+.highlight-color-option {
+  position: relative;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: opacity 0.15s;
+
+  &:hover {
+    opacity: 0.86;
+  }
+
+  &.selected::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: calc(1.1rem * 0.45);
+    height: calc(1.1rem * 0.25);
+    border: 2px solid #fff;
+    border-top: none;
+    border-right: none;
+    transform: translate(-50%, -65%) rotate(-45deg);
+    box-sizing: border-box;
+  }
+}
+
+/* ── Sticky header (toolbar + summary) ── */
+
+.highlights-sticky-header[data-sticky-on="true"] {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--body-color);
+  padding-top: var(--unit-2);
+  margin-top: calc(-1 * var(--unit-2));
+}
+
+/* ── Sticky pagination ── */
+
+.highlights-pagination[data-sticky-on="true"] {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  background: var(--body-color);
+  padding: var(--unit-h) 0;
+  border-top: 1px solid var(--secondary-border-color);
+}
+
+/* ── Toolbar container query for progressive hiding ── */
+
+.highlights-toolbar {
+  container-type: inline-size;
+}
+
+.highlights-inline-filters {
+  display: flex;
+  align-items: center;
+}
+
+/* Hide Group by first when space tightens */
+@container (max-width: 620px) {
+  .highlights-inline-group {
+    display: none;
+  }
+}
+
+/* Hide Sort by too when even tighter */
+@container (max-width: 460px) {
+  .highlights-inline-sort {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .highlights-toolbar {
+    flex-wrap: nowrap;
+
+    .search-container {
+      flex: 1;
+      max-width: none;
+      min-width: 0;
+    }
+
+  }
+
+  .highlights-card-view {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Sidebar: Colors module ── */
+
+.sidebar-colors-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--unit-1) 0;
+  padding: var(--unit-1) 0;
+}
+
+.sidebar-color-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--unit-1) 0;
+  cursor: pointer;
+  border-radius: var(--border-radius);
+  transition: background 0.12s;
+  color: inherit;
+  text-decoration: none;
+
+  &:hover {
+    background: var(--body-color-contrast);
+  }
+}
+
+.sidebar-color-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* White checkmark for active colors */
+.sidebar-color-cell.is-active .sidebar-color-circle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 5px;
+  border: 2px solid #fff;
+  border-top: none;
+  border-right: none;
+  transform: translate(-50%, -65%) rotate(-45deg);
+  box-sizing: border-box;
+  filter: drop-shadow(0 0 1px rgba(0,0,0,0.5));
+}
+
+/* "All" dot: conic-gradient */
+.sidebar-color-circle.all-colors {
+  background: conic-gradient(
+    rgba(255,235,0,0.85) 0% 20%,
+    rgba(0,200,83,0.85) 20% 40%,
+    rgba(66,165,245,0.85) 40% 60%,
+    rgba(236,64,122,0.85) 60% 80%,
+    var(--primary-color) 80% 100%
+  );
+}
+
+.sidebar-color-count {
+  font-size: var(--font-size-xs);
+  color: var(--secondary-text-color);
+}
+

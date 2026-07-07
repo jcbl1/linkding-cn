@@ -4,6 +4,7 @@ from django.urls import include, path, re_path
 from django.views.i18n import JavaScriptCatalog, set_language
 
 from bookmarks import feeds, views
+from bookmarks.views import tag_tree
 from bookmarks.admin import linkding_admin_site
 from bookmarks.api import routes as api_routes
 
@@ -33,13 +34,13 @@ urlpatterns = [
         "bookmarks/<int:bookmark_id>/edit", views.bookmarks.edit, name="bookmarks.edit"
     ),
     path(
-        "bookmarks/<int:bookmark_id>/read", views.bookmarks.read, name="bookmarks.read"
+        "bookmarks/<int:bookmark_id>/read", views.reader.read, name="bookmarks.read"
     ),
     path(
-        "bookmarks/<int:bookmark_id>/reparse", views.bookmarks.reparse, name="bookmarks.reparse"
+        "bookmarks/<int:bookmark_id>/reparse", views.reader.reparse, name="bookmarks.reparse"
     ),
     path(
-        "bookmarks/<int:bookmark_id>/export", views.bookmarks.export, name="bookmarks.export"
+        "bookmarks/<int:bookmark_id>/export", views.reader.export, name="bookmarks.export"
     ),
     path(
         "bookmarks/<int:bookmark_id>/trash",
@@ -76,6 +77,14 @@ urlpatterns = [
     path("bundles/preview", views.bundles.preview, name="bundles.preview"),
     # Tags
     path("tags", views.tags.tags_index, name="tags.index"),
+    # Tag tree AJAX
+    path("tag-tree/children", tag_tree.tag_tree_children, name="tag_tree.children"),
+    # Highlights
+    path(
+        "bookmarks/highlights",
+        views.highlights.index,
+        name="bookmarks.highlights",
+    ),
     path("tags/new", views.tags.tag_new, name="tags.new"),
     path("tags/<int:tag_id>/edit", views.tags.tag_edit, name="tags.edit"),
     path("tags/merge", views.tags.tag_merge, name="tags.merge"),
@@ -114,10 +123,21 @@ urlpatterns = [
         "api/bookmarks/<int:bookmark_id>/annotations/",
         include(api_routes.bookmark_annotation_router.urls),
     ),
+    # 阅读进度 API（GET 获取 / PATCH 保存，支持 sendBeacon POST）
+    path(
+        "api/bookmarks/<int:bookmark_id>/reading-progress/",
+        api_routes.ReadingProgressView.as_view(),
+        name="bookmark_reading_progress",
+    ),
     path("api/annotations/", include(api_routes.annotation_router.urls)),
     path("api/tags/", include(api_routes.tag_router.urls)),
     path("api/bundles/", include(api_routes.bundle_router.urls)),
     path("api/user/", include(api_routes.user_router.urls)),
+    path(
+        "api/render-markdown/",
+        api_routes.render_markdown_api,
+        name="api.render_markdown",
+    ),
     # Feeds
     path("feeds/<str:feed_key>/all", feeds.AllBookmarksFeed(), name="feeds.all"),
     path(

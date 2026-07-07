@@ -5,7 +5,6 @@
 <div class="bookmarks-form">
   {% csrf_token %}
   {{ form.auto_close }}
-  {{ form.favicon_file }}
   <!-- 标题 -->
   <div class="form-group">
     <div class="d-flex justify-between align-baseline">
@@ -265,21 +264,6 @@
         checkUrlRequestId++;
         const requestId = checkUrlRequestId;
 
-        {% if request.user_profile.enable_favicons %}
-        // Prefetch favicon
-        const faviconUrl = encodeURIComponent(currentUrl);
-        const faviconRequestUrl = `{% url 'linkding:bookmarks.prefetch_favicon' %}?url=${faviconUrl}`;
-        const faviconInput = document.getElementById('{{ form.favicon_file.id_for_label }}');
-        fetch(faviconRequestUrl)
-            .then(response => response.json())
-            .then(data => {
-              if (data.status === 'success' && data.favicon_file) {
-                faviconInput.value = data.favicon_file;
-              }
-            })
-            .catch(error => console.error('Favicon prefetch failed:', error));
-        {% endif %}
-
         toggleLoadingIcon(urlInput, true);
 
         const websiteUrl = encodeURIComponent(currentUrl);
@@ -318,8 +302,12 @@
 
               notesDetails.open = !!existingBookmark.notes;
               document.querySelector('details.description').open = !!existingBookmark.description;
-              updateInput(titleInput, existingBookmark.title);
-              updateInput(descriptionInput, existingBookmark.description);
+              if (!isTitleModified) {
+                updateInput(titleInput, existingBookmark.title);
+              }
+              if (!isDescriptionModified) {
+                updateInput(descriptionInput, existingBookmark.description);
+              }
               updateInput(notesInput, existingBookmark.notes);
               updateInput(tagsInput, existingBookmark.tag_names.join(" "));
               updateCheckbox(unreadCheckbox, existingBookmark.unread);

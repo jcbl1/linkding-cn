@@ -1,14 +1,19 @@
 import gzip
 import logging
+import time
 from pathlib import Path
 
 from django.conf import settings
+from django.db import IntegrityError, OperationalError, transaction
 from django.http import Http404, StreamingHttpResponse
+from django.utils.dateparse import parse_datetime
+from django.utils.translation import gettext as _
 from rest_framework import mixins, status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.routers import DefaultRouter, SimpleRouter
+from rest_framework.views import APIView
 
 from bookmarks import queries
 from bookmarks.api.serializers import (
@@ -16,6 +21,7 @@ from bookmarks.api.serializers import (
     BookmarkAssetSerializer,
     BookmarkBundleSerializer,
     BookmarkSerializer,
+    ReadingProgressSerializer,
     TagSerializer,
     UserProfileSerializer,
 )
@@ -25,6 +31,7 @@ from bookmarks.models import (
     BookmarkAsset,
     BookmarkBundle,
     BookmarkSearch,
+    ReadingProgress,
     Tag,
     User,
 )
@@ -138,6 +145,12 @@ class BookmarkViewSet(
         bookmarks.trash_bookmark(bookmark)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @action(methods=["post"], detail=True)
+    def restore(self, request, pk):
+        bookmark = self.get_object()
+        bookmarks.restore_bookmark(bookmark)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     @action(methods=["get"], detail=False)
     def check(self, request: HttpRequest):
         url = request.GET.get("url")
@@ -232,6 +245,17 @@ class BookmarkViewSet(
             {"message": "Snapshot uploaded successfully."},
             status=status.HTTP_201_CREATED,
         )
+
+    @action(methods=["get"], detail=True, url_path="notes_html")
+    def notes_html(self, request: HttpRequest, pk):
+        """返回书签笔记的渲染后 HTML"""
+        bookmark = self.get_object()
+        if not bookmark.notes:
+            return Response({"html": ""})
+
+        from bookmarks.templatetags.shared import render_markdown
+        html = render_markdown({}, bookmark.notes)
+        return Response({"html": str(html)})
 
 class BookmarkAssetViewSet(
     viewsets.GenericViewSet,
@@ -348,6 +372,16 @@ class UserViewSet(viewsets.GenericViewSet):
     def profile(self, request: HttpRequest):
         return Response(UserProfileSerializer(request.user.profile).data)
 
+    @action(methods=["patch"], detail=False, url_path="profile/reader-settings")
+    def reader_settings(self, request: HttpRequest):
+        profile = request.user.profile
+        settings = request.data
+        if not isinstance(settings, dict):
+            return Response({"error": "Expected a JSON object"}, status=400)
+        profile.reader_settings = {**profile.reader_settings, **settings}
+        profile.save(update_fields=["reader_settings"])
+        return Response(profile.reader_settings)
+
 
 class BookmarkBundleViewSet(
     viewsets.GenericViewSet,
@@ -427,6 +461,139 @@ bookmark_annotation_router.register(
 annotation_router = SimpleRouter()
 annotation_router.register("", AnnotationViewSet, basename="annotation")
 
+
+class ReadingProgressView(APIView):
+    """阅读进度 API：GET 返回当前进度（无记录时返回默认值），PATCH 保存进度（支持冲突检测）。"""
+
+    request: HttpRequest
+
+    def _get_bookmark(self, bookmark_id):
+        return access.bookmark_read(self.request, bookmark_id)
+
+    def _get_progress_for_update(self, bookmark):
+        """获取或新建 ReadingProgress 实例，返回 (instance, created)。
+        不使用 select_for_update()：SQLite 不支持行级锁，PostgreSQL 上 base_date_modified 已足够防冲突。"""
+        progress = ReadingProgress.objects.filter(
+            user=self.request.user,
+            bookmark=bookmark,
+        ).first()
+        if progress is not None:
+            return progress, False
+
+        return (
+            ReadingProgress(user=self.request.user, bookmark=bookmark),
+            True,
+        )
+
+    def _is_stale_update(self, progress, created, base_date_modified):
+        """乐观锁冲突检测。
+        - 新建记录 → 不冲突
+        - 客户端未提供 base_date_modified → last-write-wins，不冲突
+        - 客户端提供了过期的 base_date_modified → 冲突（409）
+        由 _save_reading_progress 中的 has_base_date_modified 守卫调用，
+        确保未发送 base_date_modified 的请求不会触发 409。"""
+        if created or not progress.date_modified:
+            return False
+        # 客户端未提供 base_date_modified → last-write-wins
+        if not base_date_modified:
+            return False
+
+        if isinstance(base_date_modified, str):
+            base_date_modified = parse_datetime(base_date_modified)
+        if not base_date_modified:
+            return False
+
+        return progress.date_modified > base_date_modified
+
+    def get(self, request: HttpRequest, bookmark_id: int):
+        """获取阅读进度。无记录时返回全部默认值，避免客户端 404 处理。"""
+        bookmark = self._get_bookmark(bookmark_id)
+        progress = ReadingProgress.objects.filter(
+            user=request.user,
+            bookmark=bookmark,
+        ).first()
+        if progress is None:
+            return Response(
+                {
+                    "id": None,
+                    "bookmark": bookmark.id,
+                    "article_asset": None,
+                    "text_position_start": None,
+                    "text_quote_exact": "",
+                    "text_quote_prefix": "",
+                    "text_quote_suffix": "",
+                    "element_selector": None,
+                    "progress": 0,
+                    "scroll_top": 0,
+                    "scroll_height": 0,
+                    "client_width": 0,
+                    "client_height": 0,
+                    "date_created": None,
+                    "date_modified": None,
+                }
+            )
+        serializer = ReadingProgressSerializer(
+            progress,
+            context={"request": request, "user": request.user, "bookmark": bookmark},
+        )
+        return Response(serializer.data)
+
+    def patch(self, request: HttpRequest, bookmark_id: int):
+        """保存阅读进度。支持 base_date_modified 冲突检测（409 = 过期更新）。"""
+        bookmark = self._get_bookmark(bookmark_id)
+        # sendBeacon 发送 form-urlencoded，需 dict() 化
+        if hasattr(request.data, "dict"):
+            data = request.data.dict()
+        else:
+            data = request.data.copy()
+
+        has_base_date_modified = "base_date_modified" in data
+        base_date_modified = data.get("base_date_modified")
+        if base_date_modified == "":
+            base_date_modified = None
+            data["base_date_modified"] = None
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                return self._save_reading_progress(bookmark, data, has_base_date_modified, base_date_modified)
+            except (IntegrityError, OperationalError):
+                if attempt < max_retries - 1:
+                    time.sleep(0.1 * (2 ** attempt))  # 0.1s, 0.2s, 0.4s
+                else:
+                    raise
+
+    def _save_reading_progress(self, bookmark, data, has_base_date_modified, base_date_modified):
+        with transaction.atomic():
+            progress, created = self._get_progress_for_update(bookmark)
+            # 冲突检测：服务端记录比客户端基准更新 → 拒绝本次写入
+            if has_base_date_modified and self._is_stale_update(
+                progress, created, base_date_modified
+            ):
+                return Response(
+                    {
+                        "detail": _("Reading progress has been updated elsewhere."),
+                        "date_modified": progress.date_modified,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            serializer = ReadingProgressSerializer(
+                progress,
+                data=data,
+                partial=True,
+                context={"request": self.request, "user": self.request.user, "bookmark": bookmark},
+            )
+            serializer.is_valid(raise_exception=True)
+            serializer.save(user=self.request.user, bookmark=bookmark)
+            return Response(serializer.data)
+
+    def put(self, request: HttpRequest, bookmark_id: int):
+        return self.patch(request, bookmark_id)
+
+    def post(self, request: HttpRequest, bookmark_id: int):
+        """sendBeacon 使用 POST，委托给 patch 处理。"""
+        return self.patch(request, bookmark_id)
+
 tag_router = SimpleRouter()
 tag_router.register("", TagViewSet, basename="tag")
 
@@ -438,3 +605,15 @@ bundle_router.register("", BookmarkBundleViewSet, basename="bundle")
 
 bookmark_asset_router = SimpleRouter()
 bookmark_asset_router.register("", BookmarkAssetViewSet, basename="bookmark_asset")
+
+
+@api_view(["POST"])
+def render_markdown_api(request):
+    """接受 Markdown 文本，返回渲染后的 HTML（需要登录）"""
+    markdown_text = request.data.get("markdown", "")
+    if not markdown_text:
+        return Response({"html": ""})
+    from bookmarks.templatetags.shared import render_markdown
+
+    html = render_markdown({}, markdown_text)
+    return Response({"html": str(html)})

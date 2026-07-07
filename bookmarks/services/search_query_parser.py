@@ -27,7 +27,7 @@ class Token:
 
 
 class SearchQueryTokenizer:
-    FIELD_NAMES = ("title", "desc", "notes", "url", "domain")
+    FIELD_NAMES = ("title", "desc", "notes", "url", "domain", "hl", "ann")
 
     def __init__(self, query: str):
         self.query = query.strip()
@@ -144,64 +144,22 @@ class SearchQueryTokenizer:
 
         return keyword
 
-    def read_parenthesized_content(self) -> str | None:
-        """Read content between matching parentheses, handling escapes and nested pairs."""
-        if self.current_char != "(":
-            return None
-
-        content = []
-        depth = 1
-        self.advance()  # skip opening parenthesis
-
-        while self.current_char:
-            if self.current_char == "\\":
-                next_char = self.peek()
-                if next_char:
-                    content.append(next_char)
-                    self.advance()
-                    self.advance()
-                    continue
-                # Keep trailing backslash as literal
-                content.append(self.current_char)
-                self.advance()
-                continue
-
-            if self.current_char == "(":
-                depth += 1
-                content.append(self.current_char)
-                self.advance()
-                continue
-
-            if self.current_char == ")":
-                depth -= 1
-                if depth == 0:
-                    self.advance()  # skip closing parenthesis
-                    return "".join(content)
-                content.append(self.current_char)
-                self.advance()
-                continue
-
-            content.append(self.current_char)
-            self.advance()
-
-        return None
-
-    def read_field_term(self) -> tuple[str, str] | None:
-        """Read field term syntax like field:(value)."""
+    def try_read_field_term(self) -> tuple[str, str] | None:
+        """Read field term syntax like field:keyword or field:"phrase"."""
         for field_name in self.FIELD_NAMES:
-            prefix = f"{field_name}:("
+            prefix = f"{field_name}:"
             if self.query.startswith(prefix, self.position):
-                # Move cursor to opening parenthesis
-                for _ in range(len(prefix) - 1):
+                # Move cursor past the prefix
+                for _ in range(len(prefix)):
                     self.advance()
 
-                content = self.read_parenthesized_content()
-                if content is None:
-                    raise SearchQueryParseError(
-                        str(_("Expected RPAREN, got EOF")), self.position
-                    )
+                if self.current_char in "\"'":
+                    value = self.read_quoted_string(self.current_char)
+                else:
+                    value = self.read_term()
 
-                return (field_name, content)
+                if value:
+                    return (field_name, value)
 
         return None
 
@@ -241,7 +199,7 @@ class SearchQueryTokenizer:
                 if keyword:
                     tokens.append(Token(TokenType.SPECIAL_KEYWORD, keyword, start_pos))
             else:
-                field_term = self.read_field_term()
+                field_term = self.try_read_field_term()
                 if field_term is not None:
                     tokens.append(Token(TokenType.FIELD_TERM, field_term, start_pos))
                     continue
@@ -467,10 +425,12 @@ def _expression_to_string(expr: SearchExpression, parent_type: type = None) -> s
         return f"!{expr.keyword}"
 
     elif isinstance(expr, FieldTermExpression):
-        escaped = (
-            expr.term.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-        )
-        return f"{expr.field}:({escaped})"
+        # 需要引号保护的情况：空格、括号、#、! 等会被 tokenizer 断词的字符
+        needs_quote = any(c in expr.term for c in " ()#!") or '"' in expr.term
+        if needs_quote:
+            escaped = expr.term.replace("\\", "\\\\").replace('"', '\\"')
+            return f'{expr.field}:"{escaped}"'
+        return f"{expr.field}:{expr.term}"
 
     elif isinstance(expr, NotExpression):
         # Don't pass parent type to children

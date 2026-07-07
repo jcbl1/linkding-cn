@@ -77,8 +77,10 @@ class BundlePreviewViewTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         soup = self.make_soup(response.content.decode())
 
         list_item = soup.select_one("li[ld-bookmark-item]")
-        actions = list_item.select(".actions > *")
-        self.assertEqual(len(actions), 1)
+        self.assertIsNotNone(list_item)
+        # The bookmark title should be visible
+        title_link = list_item.select_one("a.title-link")
+        self.assertIsNotNone(title_link)
 
     def test_preview_ignores_archived_bookmarks(self):
         active_bookmark = self.setup_bookmark(title="Active Bookmark")

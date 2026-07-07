@@ -1,4 +1,4 @@
-const SEARCH_HISTORY_KEY = "searchHistory";
+const SEARCH_HISTORY_KEY = "ld:search:history";
 const MAX_ENTRIES = 30;
 
 export class SearchHistory {

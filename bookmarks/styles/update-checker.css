@@ -1,0 +1,103 @@
+/* ── Dot base ── */
+.ld-update-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--primary-color);
+}
+
+/* ── Dot on nav anchor buttons ── */
+.ld-update-anchor {
+  position: relative;
+
+  .ld-update-dot {
+    position: absolute;
+    top: 4px;
+    right: -2px;
+    pointer-events: none;
+  }
+}
+
+/* ── Dot inside menu item text ── */
+.ld-update-trigger {
+  position: relative;
+  padding-right: 14px;
+
+  .ld-update-dot {
+    position: absolute;
+    top: 4px;
+    right: 2px;
+  }
+}
+
+/* ── Modal overlay ── */
+.ld-update-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--modal-overlay-bg-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--unit-4);
+}
+
+.ld-update-modal {
+  background: var(--modal-container-bg-color);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-3);
+  width: 560px;
+  max-width: 100%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ld-update-modal-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--unit-3);
+  padding: var(--unit-4) var(--unit-4) 0;
+
+  h3 {
+    margin: 0;
+    font-size: var(--font-size-lg);
+  }
+
+  .ld-update-modal-date {
+    color: var(--gray-500);
+    font-size: var(--font-size-sm);
+    white-space: nowrap;
+  }
+}
+
+.ld-update-modal-body {
+  padding: var(--unit-3) var(--unit-4);
+  overflow-y: auto;
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+
+  h1, h2, h3 {
+    font-size: var(--font-size-base);
+    margin-top: var(--unit-2);
+  }
+
+  ul {
+    padding-left: var(--unit-4);
+  }
+
+  li {
+    margin-bottom: var(--unit-1);
+  }
+}
+
+.ld-update-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--unit-2);
+  padding: var(--unit-2) var(--unit-4) var(--unit-4);
+  border-top: 1px solid var(--border-color);
+}

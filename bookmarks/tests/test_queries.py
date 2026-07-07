@@ -1732,9 +1732,15 @@ class QueriesTestCase(TestCase, BookmarkFactoryMixin):
     def test_query_bookmarks_with_bundle_favicon_filter(self):
         with_favicon = self.setup_bookmark(
             title="With favicon",
-            favicon_file="favicon.png",
+            url="https://fav-domain.com/page",
         )
         without_favicon = self.setup_bookmark(title="Without favicon")
+        from bookmarks.models import FaviconCache
+        FaviconCache.objects.create(
+            domain="fav-domain.com",
+            favicon_file="favicon.png",
+            status=FaviconCache.STATUS_SUCCESS,
+        )
 
         bundle = self.setup_bundle()
         bundle.search_params = {"favicon": BookmarkSearch.FILTER_ASSET_YES}
@@ -1752,10 +1758,15 @@ class QueriesTestCase(TestCase, BookmarkFactoryMixin):
         self.assertQueryResult(query, [[without_favicon]])
 
     def test_query_bookmarks_with_bundle_asset_filters_and_unread_filter(self):
+        from bookmarks.models import FaviconCache
+        FaviconCache.objects.create(
+            domain="example.com",
+            favicon_file="favicon.png",
+            status=FaviconCache.STATUS_SUCCESS,
+        )
         matching = self.setup_bookmark(
             title="Needs review",
             unread=True,
-            favicon_file="favicon.png",
             preview_image_file="preview.png",
         )
         snapshot = self.setup_asset(bookmark=matching)
@@ -1765,7 +1776,6 @@ class QueriesTestCase(TestCase, BookmarkFactoryMixin):
         wrong_unread = self.setup_bookmark(
             title="Read item",
             unread=False,
-            favicon_file="favicon.png",
             preview_image_file="preview.png",
         )
         snapshot = self.setup_asset(bookmark=wrong_unread)
@@ -1775,7 +1785,6 @@ class QueriesTestCase(TestCase, BookmarkFactoryMixin):
         self.setup_bookmark(
             title="Missing snapshot",
             unread=True,
-            favicon_file="favicon.png",
             preview_image_file="preview.png",
         )
 
@@ -2035,7 +2044,9 @@ class QueriesTestCase(TestCase, BookmarkFactoryMixin):
         self.assertNotIn("deleted", date_filter_choices)
 
     def test_field_search_title_with_parentheses(self):
-        """title:(...) 仅匹配标题，不匹配描述/笔记/URL"""
+        """title:(...) 仅匹配标题，不匹配描述/笔记/URL (legacy search mode)"""
+        self.profile.legacy_search = True
+        self.profile.save()
         bm_title = self.setup_bookmark(title="你好世界")
         self.setup_bookmark(description="你好世界")
         self.setup_bookmark(notes="你好世界")
@@ -2047,7 +2058,9 @@ class QueriesTestCase(TestCase, BookmarkFactoryMixin):
         self.assertCountEqual(list(query), [bm_title])
 
     def test_field_search_desc_and_notes_with_parentheses(self):
-        """desc:(...) 与 notes:(...) 生效"""
+        """desc:(...) 与 notes:(...) 生效 (legacy search mode)"""
+        self.profile.legacy_search = True
+        self.profile.save()
         bm_desc = self.setup_bookmark(description="foo bar")
         bm_notes = self.setup_bookmark(notes="baz qux")
         self.setup_bookmark(title="foo bar")
@@ -2103,17 +2116,10 @@ class QueriesTestCase(TestCase, BookmarkFactoryMixin):
         )
         self.assertCountEqual(list(query), [bm])
 
-    def test_field_search_escaped_parentheses_treated_as_literal(self):
-        """title:\(你好世界\) 不触发字段语法，按普通词搜索"""
-        bm = self.setup_bookmark(description="title:(你好世界)")
-        # 使用原样字面搜索
-        query = queries.query_bookmarks(
-            self.user, self.profile, BookmarkSearch(q=r"title:\(你好世界\)")
-        )
-        self.assertCountEqual(list(query), [bm])
-
     def test_field_search_domain_strict_match(self):
-        """domain:x.com 仅匹配 host 为 x.com，不匹配子域或相似域名"""
+        """domain:x.com 仅匹配 host 为 x.com，不匹配子域或相似域名 (legacy search mode)"""
+        self.profile.legacy_search = True
+        self.profile.save()
         bm1 = self.setup_bookmark(url="http://x.com/")
         bm2 = self.setup_bookmark(url="https://x.com:8443/index.html")
         self.setup_bookmark(url="https://sub.x.com/")

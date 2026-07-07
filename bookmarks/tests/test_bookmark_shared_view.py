@@ -725,10 +725,10 @@ class BookmarkSharedViewTestCase(
         tag_menu = soup.find(attrs={"aria-label": "Tags menu"})
         self.assertIsNotNone(tag_menu)
 
-    def test_tag_menu_not_visible_for_unauthenticated_user(self):
+    def test_tag_menu_visible_for_unauthenticated_user(self):
         response = self.client.get(reverse("linkding:bookmarks.shared"))
         html = response.content.decode()
 
         soup = self.make_soup(html)
         tag_menu = soup.find(attrs={"aria-label": "Tags menu"})
-        self.assertIsNone(tag_menu)
+        self.assertIsNotNone(tag_menu)

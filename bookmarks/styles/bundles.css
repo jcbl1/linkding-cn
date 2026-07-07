@@ -1,22 +1,31 @@
 .bundles-page {
   .crud-table {
+    .list-item-content .d-flex {
+      max-width: unset;
+    }
+
     .drag-handle {
       touch-action: none;
       -webkit-user-drag: none;
       display: flex;
       align-items: center;
       padding-right: var(--unit-2);
-      
+      cursor: grab;
+      border-radius: var(--border-radius);
+      transition: background-color 0.2s;
+
       svg {
-        cursor: grab;
         color: var(--secondary-text-color);
       }
-    }
 
-    .list-item {
-      /* 禁止选中文本 */
-      user-select: none;
-      -webkit-user-select: none; /* iOS Safari */
+      &:hover,
+      &:active {
+        background-color: var(--secondary-bg-color);
+      }
+
+      @media (max-width: 768px) {
+        min-width: 26px;
+      }
     }
 
     tr.dragging,
@@ -34,17 +43,60 @@
   }
 }
 
+/* 仅在 bundle 编辑页：body/content 撑满视口 */
+body:has(.bundles-editor-page) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+body:has(.bundles-editor-page) > .content.container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .bundles-editor-page {
   &.grid {
     gap: var(--unit-9);
+    /* 让页面布局决定高度，撑满视口 */
+    height: 100%;
+  }
+
+  /* main：flex column，form 滚动，footer 固定底部 */
+  & > main {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+
+    & .section-header {
+      margin-bottom: 0;
+    }
+  }
+
+  form.scrollbar {
+    flex: 1;
+    min-height: 0;
   }
 
   .form-footer {
-    position: sticky;
-    bottom: 0;
+    flex-shrink: 0;
     border-top: solid 1px var(--secondary-border-color);
     background: var(--body-color);
     padding: var(--unit-3) 0;
+  }
+
+  .form-group {
+    & .form-row-inline {
+      display: flex;
+      align-items: center;
+      gap: var(--unit-1);
+    }
+    .form-label-inline {
+      margin-bottom: 0;
+      white-space: nowrap;
+    }
   }
 
   .radio-group {
@@ -63,17 +115,6 @@
     & .form-icon {
       top: 0;
       position: relative;
-    }
-  }
-  .form-group {
-    & .form-row-inline {
-      display: flex;
-      align-items: center;
-      gap: var(--unit-1);
-    }
-    .form-label-inline {
-      margin-bottom: 0;
-      white-space: nowrap;
     }
   }
 }

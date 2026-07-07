@@ -1,5 +1,12 @@
 import { Behavior, registerBehavior } from "./runtime.js";
 import { gettext } from "../utils/i18n.js";
+import { hashIconSvg } from "../utils/svg.js";
+import {
+  DEFAULT_ITEM_FORMAT,
+  DEFAULT_SEPARATOR,
+  renderCopyText,
+  renderByAction,
+} from "../utils/highlight-copy-format.js";
 import {
   clearStoredSettingsDraft,
   getStoredSettingsDraft,
@@ -10,6 +17,37 @@ import {
   setStoredSettingsScrollPosition,
 } from "../state/settings-preferences";
 import Sortable from 'sortablejs';
+
+// 快捷标签新增行的 HTML 模板
+function quickTagRowTemplate() {
+  return `
+    <button type="button" class="settings-module-handle" aria-label="${gettext("Drag to reorder")}">
+      <svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-grip"></use></svg>
+    </button>
+    <div class="settings-qt-controls">
+      <button type="button" class="settings-qt-chip-btn" data-qt-field="display_position" data-qt-value="direct" title="${gettext("Display position")}">${gettext("direct")}</button>
+      <button type="button" class="settings-qt-chip-btn" data-qt-field="display_mode" data-qt-value="icon" title="${gettext("Display mode")}">${gettext("icon")}</button>
+      <button type="button" class="settings-qt-delete-btn" title="${gettext("Delete")}">
+        <svg width="14" height="14"><use href="#ld-icon-remove"></use></svg>
+      </button>
+    </div>
+    <label class="form-switch settings-switch">
+      <input type="checkbox" data-qt-enabled checked>
+      <i class="form-icon"></i>
+    </label>
+    <div class="settings-qt-main">
+      <button type="button" class="settings-qt-icon-btn" data-qt-icon="" title="${gettext("Pick icon")}">
+        ${hashIconSvg(16, "settings-qt-icon-placeholder")}
+      </button>
+      <span class="settings-qt-label-view is-empty" title="${gettext("Click to edit name")}">${gettext("Name")}</span>
+      <input type="text" class="settings-qt-label-input form-input" value="" placeholder="${gettext("Name")}">
+    </div>
+    <div class="settings-qt-sub">
+      <div class="settings-qt-tags-wrapper">
+        <span class="settings-qt-tags-view is-empty">${gettext("tag1 tag2")}</span>
+      </div>
+    </div>`;
+}
 
 // 依赖行显隐规则表：集中定义触发条件和更新函数，避免条件分散造成耦合。
 const DEPENDENT_STATE_RULES = [
@@ -45,6 +83,14 @@ const DEPENDENT_STATE_RULES = [
   },
   {
     matches(form, hasField) {
+      return hasField("enable_preview_images");
+    },
+    apply(behavior, form) {
+      behavior.updatePreviewImagePlaceholderState(form);
+    },
+  },
+  {
+    matches(form, hasField) {
       return form.matches("[data-sharing-settings-form]") || hasField("sharing_mode");
     },
     apply(behavior, form) {
@@ -57,6 +103,14 @@ const DEPENDENT_STATE_RULES = [
     },
     apply(behavior, form) {
       behavior.updateSidebarState(form);
+    },
+  },
+  {
+    matches(form, hasField) {
+      return hasField("enable_random_button") || hasField("random_mode");
+    },
+    apply(behavior, form) {
+      behavior.updateRandomModeState(form);
     },
   },
 ];
@@ -81,6 +135,9 @@ class SettingsPageBehavior extends Behavior {
     this.scrollContainer = window;
     this.sidebarModuleForms = Array.from(
       element.querySelectorAll("[data-sidebar-modules-form]"),
+    );
+    this.bookmarkToolbarForms = Array.from(
+      element.querySelectorAll("[data-bookmark-toolbar-form]"),
     );
     this.directoryClickHandlers = new Map();
     this.panelToggleButtons = Array.from(
@@ -178,15 +235,105 @@ class SettingsPageBehavior extends Behavior {
       });
 
       this.sortableInstances.push(sortable);
-    
+
       this.syncSidebarModules(form);  // 初始同步
     });
 
+    // 书签工具栏拖拽排序（工具栏模块 + 各配置面板）
+    this.bookmarkToolbarForms.forEach((form) => {
+      // 工具栏模块排序
+      const toolbarList = form.querySelector("[data-bookmark-toolbar-list]");
+      if (toolbarList) {
+        const sortable = Sortable.create(toolbarList, {
+          handle: ".settings-module-handle",
+          animation: 150,
+          ghostClass: "is-dragging",
+          swapThreshold: 0.65,
+          onEnd: () => {
+            this.syncBookmarkToolbarModules(form);
+            this.syncToolbarConfigPanels(form);
+            this.queueSubmit(form);
+          },
+        });
+        this.sortableInstances.push(sortable);
+      }
+      this.syncBookmarkToolbarModules(form);
+      this.syncToolbarConfigPanels(form);
+
+      // 书签动作排序
+      const actionsList = form.querySelector("[data-bookmark-actions-list]");
+      if (actionsList) {
+        const sortable = Sortable.create(actionsList, {
+          handle: ".settings-module-handle",
+          animation: 150,
+          ghostClass: "is-dragging",
+          swapThreshold: 0.65,
+          onEnd: () => {
+            this.syncBookmarkActions(form);
+            this.queueSubmit(form);
+          },
+        });
+        this.sortableInstances.push(sortable);
+        this.syncBookmarkActions(form);
+      }
+
+      const statusesList = form.querySelector("[data-bookmark-statuses-list]");
+      if (statusesList) {
+        const sortable = Sortable.create(statusesList, {
+          handle: ".settings-module-handle",
+          animation: 150,
+          ghostClass: "is-dragging",
+          swapThreshold: 0.65,
+          onEnd: () => {
+            this.syncBookmarkStatuses(form);
+            this.queueSubmit(form);
+          },
+        });
+        this.sortableInstances.push(sortable);
+        this.syncBookmarkStatuses(form);
+      }
+
+      const quickEditsList = form.querySelector("[data-bookmark-quick-edits-list]");
+      if (quickEditsList) {
+        const sortable = Sortable.create(quickEditsList, {
+          handle: ".settings-module-handle",
+          animation: 150,
+          ghostClass: "is-dragging",
+          swapThreshold: 0.65,
+          onEnd: () => {
+            this.syncBookmarkQuickEdits(form);
+            this.queueSubmit(form);
+          },
+        });
+        this.sortableInstances.push(sortable);
+        this.syncBookmarkQuickEdits(form);
+      }
+
+      // 快捷标签拖拽排序
+      const quickTagsList = form.querySelector("[data-bookmark-quick-tags-list]");
+      if (quickTagsList) {
+        const sortable = Sortable.create(quickTagsList, {
+          handle: ".settings-module-handle",
+          animation: 150,
+          ghostClass: "is-dragging",
+          swapThreshold: 0.65,
+          onEnd: () => {
+            this.syncBookmarkQuickTags(form);
+            this.queueSubmit(form);
+          },
+        });
+        this.sortableInstances.push(sortable);
+        this.syncBookmarkQuickTags(form);
+      }
+    });
+
+    this.initializeQuickTags();
     this.initializeHelpPopovers();
     this.initializeLanguageControls();
     this.initializeDirectoryLinks();
     this.initializePanelToggles();
     this.initializeDraftForms();
+    this.initializeCopyFormatPreview();
     this.applyDependentState();
     this.queueAdaptiveControlLayoutsUpdate();
     this.restoreStoredScrollPosition();
@@ -197,6 +344,9 @@ class SettingsPageBehavior extends Behavior {
   destroy() {
     this.element.removeEventListener("change", this.onChange);
     this.element.removeEventListener("submit", this.onSubmit);
+    if (this._onQuickTagClick) {
+      this.element.removeEventListener("click", this._onQuickTagClick);
+    }
     this.scrollContainer.removeEventListener("scroll", this.onScroll);
     this.scrollContainer.removeEventListener("wheel", this.onManualScrollIntent);
     this.scrollContainer.removeEventListener(
@@ -352,6 +502,10 @@ class SettingsPageBehavior extends Behavior {
 
   // 事件处理：表单字段变更后联动状态与保存策略。
   onChange(event) {
+    // 图标选择器关闭时 popup.remove() 会触发搜索框的 change 事件；
+    // selectIcon 中已通过 queueSubmit 提交，此处跳过避免重复 save。
+    if (this._suppressChangeFromIconPicker) return;
+
     const form = event.target.closest("form");
     if (!form || !this.element.contains(form)) {
       return;
@@ -368,6 +522,15 @@ class SettingsPageBehavior extends Behavior {
 
     if (form.matches("[data-sidebar-modules-form]")) {
       this.syncSidebarModules(form);
+    }
+
+    if (form.matches("[data-bookmark-toolbar-form]")) {
+      this.syncBookmarkToolbarModules(form);
+      this.syncToolbarConfigPanels(form);
+      this.syncBookmarkActions(form);
+      this.syncBookmarkStatuses(form);
+      this.syncBookmarkQuickEdits(form);
+      this.syncBookmarkQuickTags(form);
     }
 
     this.applyDependentState(form);
@@ -407,6 +570,14 @@ class SettingsPageBehavior extends Behavior {
 
     if (form.matches("[data-sidebar-modules-form]")) {
       this.syncSidebarModules(form);
+    }
+
+    if (form.matches("[data-bookmark-toolbar-form]")) {
+      this.syncBookmarkToolbarModules(form);
+      this.syncBookmarkActions(form);
+      this.syncBookmarkStatuses(form);
+      this.syncBookmarkQuickEdits(form);
+      this.syncBookmarkQuickTags(form);
     }
 
     this.applyDependentState(form);
@@ -574,6 +745,7 @@ class SettingsPageBehavior extends Behavior {
       }
 
       this.clearErrors(form);
+      this.clearSidebarStateFromLocalStorage(form);
       if (this.isDraftForm(form)) {
         this.clearStoredDraft(form);
         this.setDraftRestored(form, false);
@@ -795,6 +967,21 @@ class SettingsPageBehavior extends Behavior {
     this.setRowVisibility(row, enabled);
   }
 
+  updatePreviewImagePlaceholderState(form = null) {
+    if (!(form instanceof HTMLFormElement)) {
+      form = this.element.querySelector(
+        'form input[name="enable_preview_images"]',
+      )?.form;
+    }
+    if (!form) {
+      return;
+    }
+
+    const row = form.querySelector('[data-setting-row="preview_image_placeholders"]');
+    const enabled = Boolean(form.querySelector('[name="enable_preview_images"]')?.checked);
+    this.setRowVisibility(row, enabled);
+  }
+
   updateSidebarState(form = null) {
     const sidebarForm = this.element.querySelector("[data-sidebar-modules-form]");
     if (!(sidebarForm instanceof HTMLFormElement)) {
@@ -817,15 +1004,8 @@ class SettingsPageBehavior extends Behavior {
       input.disabled = false;
     }
 
-    if (modulesRow instanceof HTMLElement) {
-      modulesRow
-        .querySelectorAll('[data-module-enabled], .settings-module-handle')
-        .forEach((control) => {
-          if (control instanceof HTMLInputElement || control instanceof HTMLButtonElement) {
-            control.disabled = !visible;
-          }
-        });
-    }
+    // Modules remain editable even when sidebar is collapsed,
+    // because the sidebar can still be opened via the drawer button.
 
   }
 
@@ -850,6 +1030,36 @@ class SettingsPageBehavior extends Behavior {
     } else {
       autoSettings.classList.add("is-hidden");
     }
+  }
+
+  updateRandomModeState(form = null) {
+    if (!(form instanceof HTMLFormElement)) {
+      form = this.element.querySelector(
+        'form input[name="random_mode"]',
+      )?.form;
+    }
+    if (!form) {
+      return;
+    }
+
+    const enabled = Boolean(form.querySelector('[name="enable_random_button"]')?.checked);
+    const modeRow = form.querySelector('[data-setting-row="random_mode"]');
+    const targetRow = form.querySelector('[data-setting-row="random_target"]');
+    const mode = this.getCheckedRadioValue(form, "random_mode");
+
+    this.setRowVisibility(modeRow, enabled);
+    this.setRowVisibility(targetRow, enabled && mode === "single");
+  }
+
+  // 设置页保存后，删除 localStorage 中的 sidebar 状态，
+  // 让下次页面加载使用服务器设置（data-sidebar-default）。
+  // 这样 toolbar toggle 的 localStorage 不会与设置页冲突。
+  clearSidebarStateFromLocalStorage(form) {
+    if (!form.matches("[data-sidebar-modules-form]")) return;
+    try {
+      localStorage.removeItem("ld:sidebar-state:bookmarks");
+      localStorage.removeItem("ld:sidebar-state:highlights");
+    } catch {}
   }
 
   // 语言设置：主选项与"其他语言"下拉的联动提交。
@@ -938,6 +1148,88 @@ class SettingsPageBehavior extends Behavior {
     this.draftRestoreButtons.forEach((button) => {
       button.addEventListener("click", this.onRestoreDraftClick);
     });
+  }
+
+  // --- Highlight copy format preview ---
+  initializeCopyFormatPreview() {
+    const itemInput = this.element.querySelector("[data-hl-copy-preview-input]");
+    const itemPreview = this.element.querySelector("[data-hl-copy-preview]");
+    const sepInput = this.element.querySelector("[data-hl-sep-preview-input]");
+    const sepPreview = this.element.querySelector("[data-hl-sep-preview]");
+    if (!itemInput || !itemPreview) return;
+
+    const SAMPLE_HIGHLIGHT = "The quick brown fox jumps over the lazy dog";
+    const SAMPLE_NOTE = "This is an important passage worth remembering";
+
+    const warn = (msg) => {
+      const span = document.createElement("span");
+      span.className = "hl-copy-warn";
+      span.textContent = msg;
+      return span;
+    };
+
+    const renderHighlightOnly = (fmt) => renderByAction(fmt, SAMPLE_HIGHLIGHT, "", "highlight");
+
+    const renderNoteOnly = (fmt) => renderByAction(fmt, "", SAMPLE_NOTE, "note");
+
+    const updateItemPreview = () => {
+      const fmt = itemInput.value || DEFAULT_ITEM_FORMAT;
+      const hasHL = fmt.includes("${highlight}");
+      const hasAnn = fmt.includes("${annotation}");
+
+      const hlEl = itemPreview.querySelector('[data-preview="highlight"]');
+      if (hlEl) {
+        hlEl.textContent = "";
+        if (hasHL) hlEl.appendChild(document.createTextNode(renderHighlightOnly(fmt)));
+        else hlEl.appendChild(warn(gettext("${highlight} not found")));
+      }
+
+      const noteEl = itemPreview.querySelector('[data-preview="note"]');
+      if (noteEl) {
+        noteEl.textContent = "";
+        if (hasAnn) noteEl.appendChild(document.createTextNode(renderNoteOnly(fmt)));
+        else noteEl.appendChild(warn(gettext("${annotation} not found")));
+      }
+
+      const bothEl = itemPreview.querySelector('[data-preview="both"]');
+      if (bothEl) {
+        bothEl.textContent = renderCopyText(fmt, SAMPLE_HIGHLIGHT, SAMPLE_NOTE);
+        if (!hasHL || !hasAnn) {
+          const missing = [];
+          if (!hasHL) missing.push("${highlight}");
+          if (!hasAnn) missing.push("${annotation}");
+          bothEl.appendChild(document.createTextNode("\n"));
+          bothEl.appendChild(warn(missing.join(", ") + " " + gettext("not found")));
+        }
+      }
+    };
+
+    const updateSepPreview = () => {
+      if (!sepInput || !sepPreview) return;
+      const fmt = itemInput.value || DEFAULT_ITEM_FORMAT;
+      const sep = sepInput.value || DEFAULT_SEPARATOR;
+      const item1 = renderCopyText(fmt, SAMPLE_HIGHLIGHT, SAMPLE_NOTE);
+      const item2 = renderCopyText(fmt, "Second highlight text", "Another annotation");
+      const batchEl = sepPreview.querySelector('[data-preview="batch"]');
+      if (batchEl) batchEl.textContent = item1 + sep + item2;
+    };
+
+    const updateAll = () => { updateItemPreview(); updateSepPreview(); };
+
+    // Initial render
+    updateAll();
+
+    // Focus-gated listeners
+    const setupFocusPreview = (input, updateFn) => {
+      if (!input) return;
+      let timer = null;
+      const debounced = () => { clearTimeout(timer); timer = setTimeout(updateFn, 500); };
+      input.addEventListener("focus", () => { updateFn(); input.addEventListener("input", debounced); });
+      input.addEventListener("blur", () => { clearTimeout(timer); input.removeEventListener("input", debounced); });
+      input.addEventListener("input", (e) => { if (e.isTrusted === false) updateFn(); });
+    };
+    setupFocusPreview(itemInput, updateAll);
+    setupFocusPreview(sepInput, updateSepPreview);
   }
 
   // 草稿管理：文本框原生拖拽拉伸时，稳定页面滚动位置。
@@ -1106,6 +1398,7 @@ class SettingsPageBehavior extends Behavior {
     }
 
     input.value = draft;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
     input.focus();
     input.setSelectionRange(draft.length, draft.length);
     this.setDraftRestored(form, true);
@@ -1122,6 +1415,7 @@ class SettingsPageBehavior extends Behavior {
 
     const baseline = this.getDraftBaseline(input);
     input.value = baseline;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
     input.focus();
     input.setSelectionRange(baseline.length, baseline.length);
     this.clearStoredDraft(form);
@@ -1221,7 +1515,9 @@ class SettingsPageBehavior extends Behavior {
 
   // 侧栏模块：将可拖拽顺序和启用状态序列化为隐藏字段。
   syncSidebarModules(form) {
-    const hiddenInput = form.querySelector('[name="sidebar_modules"]');
+    // Scope to THIS form — avoids cross-contamination when both
+    // bookmarks and highlights sidebar forms exist on the same page.
+    const hiddenInput = form.querySelector('input[name$="_sidebar_modules"]');
     const items = Array.from(
       form.querySelectorAll("[data-sidebar-modules-list] .settings-module-item"),
     ).map((item) => ({
@@ -1232,6 +1528,485 @@ class SettingsPageBehavior extends Behavior {
     if (hiddenInput) {
       hiddenInput.value = JSON.stringify(items);
     }
+  }
+
+  // 工具栏模块：将可拖拽顺序和启用状态序列化为隐藏字段。
+  syncBookmarkToolbarModules(form) {
+    const hiddenInput = form.querySelector('[name="bookmark_toolbar_modules"]');
+    const items = Array.from(
+      form.querySelectorAll("[data-bookmark-toolbar-list] .settings-module-item"),
+    ).map((item) => ({
+      key: item.dataset.toolbarModuleKey,
+      enabled: Boolean(item.querySelector("[data-toolbar-module-enabled]")?.checked),
+    }));
+
+    if (hiddenInput) {
+      hiddenInput.value = JSON.stringify(items);
+    }
+  }
+
+  // 配置面板：跟随工具栏模块的顺序和启用状态。
+  syncToolbarConfigPanels(form) {
+    const modules = Array.from(
+      form.querySelectorAll("[data-bookmark-toolbar-list] .settings-module-item"),
+    ).map((el) => ({
+      key: el.dataset.toolbarModuleKey,
+      enabled: Boolean(el.querySelector("[data-toolbar-module-enabled]")?.checked),
+    }));
+
+    const configCard = form.querySelector("[data-toolbar-config-card]");
+    if (!configCard) return;
+
+    // 按工具栏顺序重排配置面板
+    for (const mod of modules) {
+      const panel = configCard.querySelector(
+        `[data-toolbar-config-panel="${mod.key}"]`,
+      );
+      if (panel) {
+        panel.style.display = mod.enabled ? "" : "none";
+        configCard.appendChild(panel);
+      }
+    }
+
+    // 日期模块禁用时，同步设置 bookmark_date_display 为 hidden
+    const dateMod = modules.find((m) => m.key === "date");
+    if (dateMod) {
+      const hiddenRadio = form.querySelector(
+        '[name="bookmark_date_display"][value="hidden"]',
+      );
+      const currentChecked = form.querySelector(
+        '[name="bookmark_date_display"]:checked',
+      );
+      if (!dateMod.enabled && hiddenRadio) {
+        hiddenRadio.checked = true;
+      } else if (dateMod.enabled && currentChecked?.value === "hidden") {
+        // 重新启用时恢复为 relative
+        const relative = form.querySelector(
+          '[name="bookmark_date_display"][value="relative"]',
+        );
+        if (relative) relative.checked = true;
+      }
+    }
+
+    // 全部禁用时隐藏整个配置卡片
+    const anyEnabled = modules.some((m) => m.enabled);
+    configCard.style.display = anyEnabled ? "" : "none";
+  }
+
+  // 书签动作：将可拖拽顺序和启用状态序列化为隐藏字段。
+  syncBookmarkActions(form) {
+    const hiddenInput = form.querySelector('[name="bookmark_actions"]');
+    const items = Array.from(
+      form.querySelectorAll("[data-bookmark-actions-list] .settings-module-item"),
+    ).map((item) => ({
+      key: item.dataset.actionKey,
+      enabled: Boolean(item.querySelector("[data-action-enabled]")?.checked),
+    }));
+
+    if (hiddenInput) {
+      hiddenInput.value = JSON.stringify(items);
+    }
+  }
+
+  // 书签状态：将可拖拽顺序和启用状态序列化为隐藏字段。
+  syncBookmarkStatuses(form) {
+    const hiddenInput = form.querySelector('[name="bookmark_statuses"]');
+    const items = Array.from(
+      form.querySelectorAll("[data-bookmark-statuses-list] .settings-module-item"),
+    ).map((item) => ({
+      key: item.dataset.statusKey,
+      enabled: Boolean(item.querySelector("[data-status-enabled]")?.checked),
+    }));
+
+    if (hiddenInput) {
+      hiddenInput.value = JSON.stringify(items);
+    }
+  }
+
+  // 快捷编辑：将可拖拽顺序和启用状态序列化为隐藏字段。
+  syncBookmarkQuickEdits(form) {
+    const hiddenInput = form.querySelector('[name="bookmark_quick_edits"]');
+    const items = Array.from(
+      form.querySelectorAll("[data-bookmark-quick-edits-list] .settings-module-item"),
+    ).map((item) => ({
+      key: item.dataset.quickEditKey,
+      enabled: Boolean(item.querySelector("[data-quick-edit-enabled]")?.checked),
+    }));
+
+    if (hiddenInput) {
+      hiddenInput.value = JSON.stringify(items);
+    }
+  }
+
+  // 快捷标签：序列化所有 quick tag 条目到隐藏字段。
+  syncBookmarkQuickTags(form) {
+    const hiddenInput = form.querySelector('[name="bookmark_quick_tags"]');
+    if (!hiddenInput) return;
+
+    const items = Array.from(
+      form.querySelectorAll("[data-bookmark-quick-tags-list] .settings-qt-row"),
+    ).map((row) => this._serializeQuickTag(row));
+
+    hiddenInput.value = JSON.stringify(items);
+  }
+
+  _serializeQuickTag(row) {
+    const tagNames = Array.from(row.querySelectorAll(".settings-qt-tags-view .qt-tag"))
+      .map((chip) => chip.textContent.trim())
+      .filter(Boolean);
+    const tag_name = tagNames.join(" ");
+    const labelEl = row.querySelector(".settings-qt-label-view");
+    const label = labelEl ? labelEl.textContent.trim() : tag_name;
+    const iconBtn = row.querySelector("[data-qt-icon]");
+    const icon_name = iconBtn ? (iconBtn.dataset.qtIcon || "") : "";
+    const posBtn = row.querySelector('[data-qt-field="display_position"]');
+    const display_position = posBtn ? (posBtn.dataset.qtValue || "direct") : "direct";
+    const modeBtn = row.querySelector('[data-qt-field="display_mode"]');
+    const display_mode = modeBtn ? (modeBtn.dataset.qtValue || "icon") : "icon";
+    const enabled = Boolean(row.querySelector("[data-qt-enabled]")?.checked);
+
+    return {
+      tag_name,
+      tag_names: tagNames,
+      label,
+      short_label: tagNames[0] ? tagNames[0][0] : "",
+      icon_name,
+      display_position,
+      display_mode,
+      enabled,
+    };
+  }
+
+
+  _renderQuickTagChips(tagsView, tagNames) {
+    tagsView.replaceChildren();
+    if (tagNames.length === 0) {
+      tagsView.textContent = gettext("tag1 tag2");
+      tagsView.classList.add("is-empty");
+    } else {
+      tagNames.forEach((tag) => {
+        const el = document.createElement("span");
+        el.classList.add("qt-tag");
+        el.textContent = tag;
+        tagsView.appendChild(el);
+      });
+      tagsView.classList.remove("is-empty");
+    }
+  }
+
+  // 快捷标签：初始化按钮和事件委托。
+  initializeQuickTags() {
+    this.element.querySelectorAll("[data-qt-add]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const form = btn.closest("form");
+        const list = form?.querySelector("[data-bookmark-quick-tags-list]");
+        if (!list) return;
+        const row = this._createQuickTagRow(list.children.length);
+        list.appendChild(row);
+        this.syncBookmarkQuickTags(form);
+        this.queueSubmit(form);
+      });
+    });
+
+    this._onQuickTagClick = this._onQuickTagClick.bind(this);
+    this.element.addEventListener("click", this._onQuickTagClick);
+  }
+
+  _onQuickTagClick(event) {
+    const target = event.target;
+    if (!target || !target.closest) return;
+
+    // tags 编辑（优先匹配，因为 .qt-tag 在 tags-view 内）
+    const tagsView = target.closest(".settings-qt-tags-view");
+    if (tagsView) {
+      const wrapper = tagsView.closest(".settings-qt-tags-wrapper");
+      if (!wrapper || wrapper.classList.contains("is-editing")) return;
+
+      // 读取当前标签
+      const currentTags = Array.from(tagsView.querySelectorAll(".qt-tag"))
+        .map((el) => el.textContent.trim());
+
+      // 切换到编辑态
+      wrapper.classList.add("is-editing");
+
+      // 创建 autocomplete（与 _startEditTags 相同模式：插入为 tagsView 的兄弟节点）
+      const autocomplete = document.createElement("ld-tag-autocomplete");
+      autocomplete.setAttribute("input-value", currentTags.join(" "));
+      autocomplete.setAttribute("input-placeholder", gettext("tag1 tag2"));
+      tagsView.parentNode.insertBefore(autocomplete, tagsView.nextSibling);
+
+      let input = null;
+
+      const commit = () => {
+        const newTags = input
+          ? (input.value || "").split(/\s+/).map((t) => t.trim()).filter(Boolean)
+          : currentTags;
+
+        autocomplete.remove();
+        wrapper.classList.remove("is-editing");
+
+        // 更新显示态
+        this._renderQuickTagChips(tagsView, newTags);
+
+        const form = wrapper.closest("form");
+        this.syncBookmarkQuickTags(form);
+        this.queueSubmit(form);
+      };
+
+      const cancel = () => {
+        autocomplete.remove();
+        wrapper.classList.remove("is-editing");
+      };
+
+      const onReady = () => {
+        input = autocomplete.querySelector("input");
+        if (!input) return;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+
+        input.addEventListener("blur", () => {
+          setTimeout(() => {
+            if (autocomplete.contains(document.activeElement)) return;
+            commit();
+          }, 150);
+        });
+
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            cancel();
+          }
+        });
+      };
+
+      if (autocomplete.updateComplete) {
+        autocomplete.updateComplete.then(onReady);
+      } else {
+        requestAnimationFrame(onReady);
+      }
+      return;
+    }
+
+    const iconBtn = target.closest(".settings-qt-icon-btn");
+    if (iconBtn) {
+      event.preventDefault();
+      this._openIconPicker(iconBtn);
+      return;
+    }
+
+    const labelView = target.closest(".settings-qt-label-view");
+    if (labelView) {
+      event.preventDefault();
+      const row = labelView.closest(".settings-qt-row");
+      const input = row.querySelector(".settings-qt-label-input");
+      if (!input) return;
+      row.classList.add("is-label-editing");
+      input.focus();
+      input.select();
+      const commit = () => {
+        const val = input.value.trim();
+        labelView.textContent = val || gettext("Name");
+        labelView.classList.toggle("is-empty", !val);
+        row.classList.remove("is-label-editing");
+        const form = row.closest("form");
+        this.syncBookmarkQuickTags(form);
+        this.queueSubmit(form);
+      };
+      input.onblur = commit;
+      input.onkeydown = (e) => {
+        if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+        if (e.key === "Escape") { e.preventDefault(); input.value = labelView.textContent; input.blur(); }
+      };
+      return;
+    }
+
+    const chipBtn = target.closest(".settings-qt-chip-btn");
+    if (chipBtn) {
+      event.preventDefault();
+      const field = chipBtn.dataset.qtField;
+      const current = chipBtn.dataset.qtValue;
+      const labels = { direct: gettext("direct"), submenu: gettext("submenu"), icon: gettext("icon"), text: gettext("text") };
+      if (field === "display_position") {
+        chipBtn.dataset.qtValue = current === "direct" ? "submenu" : "direct";
+        chipBtn.textContent = labels[chipBtn.dataset.qtValue];
+      } else if (field === "display_mode") {
+        chipBtn.dataset.qtValue = current === "icon" ? "text" : "icon";
+        chipBtn.textContent = labels[chipBtn.dataset.qtValue];
+      }
+      const form = chipBtn.closest("form");
+      this.syncBookmarkQuickTags(form);
+      this.queueSubmit(form);
+      return;
+    }
+
+    const deleteBtn = target.closest(".settings-qt-delete-btn");
+    if (deleteBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      Behavior.interacting = true;
+      const row = deleteBtn.closest(".settings-qt-row");
+      const form = deleteBtn.closest("form");
+      deleteBtn.setAttribute("ld-confirm-question", "确认删除？");
+      deleteBtn.setAttribute("ld-confirm-danger", "");
+      const popup = document.createElement("ld-confirm-popup");
+      popup._button = deleteBtn;
+      popup._onConfirm = () => {
+        row.remove();
+        this.syncBookmarkQuickTags(form);
+        this.queueSubmit(form);
+      };
+      document.body.appendChild(popup);
+      return;
+    }
+  }
+
+  _createQuickTagRow(index) {
+    const li = document.createElement("li");
+    li.classList.add("settings-module-item", "settings-qt-row");
+    li.dataset.qtIndex = String(index);
+    li.innerHTML = quickTagRowTemplate();
+    return li;
+  }
+
+  _openIconPicker(button) {
+    document.querySelectorAll(".settings-qt-icon-picker-popup").forEach((el) => el.remove());
+
+    const popup = document.createElement("div");
+    popup.classList.add("settings-qt-icon-picker-popup");
+
+    const currentIcon = button.dataset.qtIcon || "";
+    popup.innerHTML = `
+      <input type="text" class="form-input qt-icon-picker-search" placeholder="${gettext("Search for more icons")}" value="">
+      <div class="qt-icon-picker-grid"></div>
+    `;
+
+    // 追加到主行内（absolute 相对于主行定位，跟随滚动）
+    const mainRow = button.closest(".settings-qt-main");
+    if (!mainRow) return;
+    const mainWidth = mainRow.offsetWidth;
+    const mainStyle = getComputedStyle(mainRow);
+    popup.style.top = "calc(100% + 4px)";
+    popup.style.left = mainStyle.paddingLeft;
+    popup.style.width = `${mainWidth}px`;
+    mainRow.appendChild(popup);
+
+    const input = popup.querySelector(".qt-icon-picker-search");
+    const grid = popup.querySelector(".qt-icon-picker-grid");
+    let debounceTimer = null;
+
+    const DEFAULT_ICON = "__default__";
+
+    const selectIcon = (iconName) => {
+      if (iconName && iconName !== DEFAULT_ICON) {
+        button.dataset.qtIcon = iconName;
+        button.innerHTML = `<iconify-icon icon="${iconName}" width="16" height="16"></iconify-icon>`;
+      } else {
+        button.dataset.qtIcon = "";
+        button.innerHTML = hashIconSvg(16, "settings-qt-icon-placeholder");
+      }
+      // 先执行保存，再移除 popup —— 避免 popup.remove() 触发的 change 事件
+      // (搜索框失焦/移除) 导致 onChange 内产生多余的 queueSubmit 调用。
+      const form = button.closest("form");
+      this.syncBookmarkQuickTags(form);
+      this.queueSubmit(form);
+      this._suppressChangeFromIconPicker = true;
+      popup.remove();
+      this._suppressChangeFromIconPicker = false;
+    };
+
+    const iconDataMap = window.__ldIconData || {};
+
+    const renderItem = (iconName, isDefault) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.classList.add("qt-icon-picker-item");
+      const selected = isDefault ? !currentIcon : iconName === currentIcon;
+      if (selected) item.classList.add("is-selected");
+      if (isDefault) {
+        item.innerHTML = hashIconSvg(20, "action-icon");
+      } else {
+        const cached = iconDataMap[iconName];
+        if (cached && cached.body) {
+          const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          svg.setAttribute("width", "20");
+          svg.setAttribute("height", "20");
+          svg.setAttribute("viewBox", `0 0 ${cached.width || 24} ${cached.height || 24}`);
+          svg.innerHTML = cached.body;
+          item.appendChild(svg);
+        } else {
+          const icon = document.createElement("iconify-icon");
+          icon.setAttribute("icon", iconName);
+          icon.setAttribute("width", "20");
+          icon.setAttribute("height", "20");
+          item.appendChild(icon);
+        }
+      }
+      // 阻止 mousedown 时浏览器默认的焦点切换行为，避免干扰后续 click 事件触发
+      item.addEventListener("mousedown", (e) => e.preventDefault());
+      item.addEventListener("click", () => selectIcon(isDefault ? "" : iconName));
+      grid.appendChild(item);
+    };
+
+    // 收集当前已使用的自定义图标
+    const usedIcons = new Set();
+    const form = button.closest("form");
+    if (form) {
+      form.querySelectorAll("[data-qt-icon]").forEach((btn) => {
+        const name = btn.dataset.qtIcon;
+        if (name) usedIcons.add(name);
+      });
+    }
+
+    const presetIconNames = window.__ldPresetIconNames || [];
+
+    const showPresets = () => {
+      grid.innerHTML = "";
+      renderItem("", true);
+      // 已使用的自定义图标（非预置）
+      const usedNonPreset = [...usedIcons].filter((name) => !presetIconNames.includes(name));
+      if (usedNonPreset.length) {
+        usedNonPreset.forEach((name) => renderItem(name, false));
+      }
+      // 预置图标
+      presetIconNames.forEach((iconName) => renderItem(iconName, false));
+    };
+
+    const searchIcons = async (query) => {
+      if (!query) {
+        showPresets();
+        return;
+      }
+      grid.innerHTML = `<div class="qt-icon-picker-hint">${gettext("Loading...")}</div>`;
+      try {
+        const resp = await fetch(`https://api.iconify.design/search?query=${encodeURIComponent(query)}&limit=48`);
+        const data = await resp.json();
+        if (!data.icons || data.icons.length === 0) {
+          grid.innerHTML = `<div class="qt-icon-picker-hint">${gettext("No icons found")}</div>`;
+          return;
+        }
+        grid.innerHTML = "";
+        data.icons.forEach((iconName) => renderItem(iconName, false));
+      } catch {
+        grid.innerHTML = `<div class="qt-icon-picker-hint">${gettext("Search failed")}</div>`;
+      }
+    };
+
+    showPresets();
+
+    input.addEventListener("input", () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => searchIcons(input.value.trim()), 300);
+    });
+
+    const onDocClick = (e) => {
+      if (!popup.contains(e.target) && e.target !== button) {
+        popup.remove();
+        document.removeEventListener("click", onDocClick);
+      }
+    };
+    setTimeout(() => document.addEventListener("click", onDocClick), 0);
+
+    input.focus();
   }
 
   // 目录导航：点击锚点跳转并短时锁定高亮，避免平滑滚动期间抖动。
@@ -1355,7 +2130,7 @@ class SettingsPageBehavior extends Behavior {
     button.setAttribute("aria-label", gettext("More info"));
     button.setAttribute("aria-expanded", "false");
     button.innerHTML =
-      '<svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M580.27008 273.07008c0 37.66272-30.5664 68.27008-68.27008 68.27008s-68.27008-30.59712-68.27008-68.27008a68.27008 68.27008 0 0 1 136.54016 0zM546.12992 750.94016v-307.2A34.10944 34.10944 0 0 0 512 409.6H375.47008v68.27008h102.4v273.07008h-102.4V819.2h273.05984v-68.25984h-102.4z" fill="currentColor"></path></svg>';
+      '<svg width="20" height="20"><use href="#ld-icon-info"></use></svg>';
 
     const popover = document.createElement("div");
     popover.className = "settings-help-popover";
