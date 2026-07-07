@@ -298,6 +298,29 @@ Values: `Integer` | Default = `15728640`
 When a bookmarked URL points directly to a PDF file, linkding downloads the PDF instead of creating an HTML snapshot.
 This option limits the maximum download size in bytes for those PDF snapshot downloads.
 
+### `LD_SNAPSHOT_RETRY_DELAYS`
+
+Values: `String` (comma-separated integers) | Default = `60,300,1500`
+
+Configures the retry delays (in seconds) for failed HTML snapshot attempts.
+The number of retries equals the number of values in this list.
+
+**Examples:**
+- `60,300,1500` — 3 retries with delays of 1 min, 5 min, 25 min (default)
+- `30,60` — 2 retries with delays of 30 sec, 1 min
+- `60` — 1 retry with a 1 min delay
+
+**Technical notes:**
+
+- **Values < 30 seconds are allowed but not recommended:**
+  - SingleFile needs 10–30 seconds to start Chromium and load the page, so very short delays will likely waste resources without improving success rates
+  - Frequent retries may trigger anti-scraping measures on target websites
+  - If the dispatcher loop has already exited, the next retry has to wait for the periodic fallback task (runs every 60 seconds), so the actual delay may be longer than configured
+
+- **Recommended minimum:** 30 seconds
+
+- **Recommended values for most use cases:** `60,300,1500` (1 min, 5 min, 25 min)
+
 ### `LD_SINGLEFILE_OPTIONS`
 
 Values: `String` | Default = None

@@ -32,7 +32,10 @@ export class FocusTrapController {
 
     this.onKeyDown = this.onKeyDown.bind(this);
 
-    this.firstFocusableElement?.focus({ focusVisible: keyboardActive });
+    // Only auto-focus for keyboard navigation to avoid triggering the mobile virtual keyboard
+    if (keyboardActive) {
+      this.firstFocusableElement?.focus({ focusVisible: true });
+    }
     this.element.addEventListener("keydown", this.onKeyDown);
   }
 

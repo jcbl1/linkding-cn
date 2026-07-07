@@ -1,0 +1,854 @@
+{% extends "bookmarks/layout.html" %}
+{% load i18n static shared pagination %}
+
+{% block title %}{% translate "Highlights - Linkding" %}{% endblock %}
+
+{% block content %}
+<div class="highlights-page crud-page grid columns-md-1 sidebar-closed"
+     data-sidebar-default="{{ show_sidebar|yesno:'1,0' }}"
+     ld-highlights-bulk-edit>
+
+  {# ── Header ── #}
+  <main class="main col-2" aria-labelledby="main-heading">
+    <div class="crud-header">
+      <h1 id="main-heading">{% translate "Highlights & Annotations" %}</h1>
+    </div>
+
+    {# ── Toolbar: search + filter + bulk toggle + random ── #}
+    <div class="highlights-sticky-header" data-sticky-on="{{ sticky_header_controls|yesno:'true,false' }}">
+    <div class="highlights-toolbar">
+      {# Search input + filter dropdown (merged, like bookmark list) #}
+      <div class="search-container">
+        <form method="get" action="{% url 'linkding:bookmarks.highlights' %}">
+          <input type="hidden" name="colors" value="{{ colors_raw }}">
+          <input type="hidden" name="note_filter" value="{{ note_filter }}">
+          <input type="hidden" name="sort" value="{{ sort }}">
+          <input type="hidden" name="group_by" value="{{ group_by }}">
+          <input type="hidden" name="date_filter_by" value="{{ date_filter_by }}">
+          <input type="hidden" name="date_filter_start" value="{{ date_filter_start }}">
+          <input type="hidden" name="date_filter_end" value="{{ date_filter_end }}">
+          <input type="hidden" name="bookmark_id" value="{{ bookmark_id }}">
+          <input type="search" name="q" class="form-input"
+                 placeholder="{% translate 'Search highlights and annotations...' %}"
+                 value="{{ search_q }}" />
+          <input type="submit" value="{% translate 'Search' %}" class="d-none">
+        </form>
+
+        {# Filter settings dropdown #}
+        <ld-dropdown class="dropdown dropdown-right highlights-filter-dropdown">
+          <button type="button" class="btn dropdown-toggle{% if has_modified_filters %} badge{% endif %}" title="{% translate 'Filter settings' %}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" stroke-width="2"
+                 stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+              <path d="M4 10a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"></path>
+              <path d="M6 4v4"></path>
+              <path d="M6 12v8"></path>
+              <path d="M10 16a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"></path>
+              <path d="M12 4v10"></path>
+              <path d="M12 18v2"></path>
+              <path d="M16 7a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"></path>
+              <path d="M18 4v1"></path>
+              <path d="M18 9v11"></path>
+            </svg>
+          </button>
+          <div class="menu menu-panel" tabindex="0">
+            <form id="highlights-filter-form" method="post" action="{% url 'linkding:bookmarks.highlights' %}">
+              {% csrf_token %}
+              <input type="hidden" name="q" value="{{ search_q }}">
+              <input type="hidden" name="colors" value="{{ colors_raw }}" data-colors-hidden>
+              <input type="hidden" name="bookmark_id" value="{{ bookmark_id }}">
+
+              {# 排序依据 #}
+              <div class="form-group">
+                <label class="form-label{% if sort != 'date_created' %} text-bold{% endif %}">{% translate "Sort by" %}</label>
+                <select name="sort" class="form-select select-sm">
+                  {% for value, label in sort_choices %}
+                    <option value="{{ value }}" {% if sort == value %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              {# 聚合依据 #}
+              <div class="form-group">
+                <label class="form-label{% if group_by != 'none' %} text-bold{% endif %}">{% translate "Group by" %}</label>
+                <select name="group_by" class="form-select select-sm">
+                  {% for value, label in group_choices %}
+                    <option value="{{ value }}" {% if group_by == value %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              {# 批注筛选 #}
+              <div class="form-group radio-group" role="radiogroup">
+                <label class="form-label{% if note_filter %} text-bold{% endif %}">{% translate "Annotation filter" %}</label>
+                {% for value, label in note_filter_choices %}
+                  <label class="form-radio form-inline">
+                    <input type="radio" name="note_filter" value="{{ value }}" {% if note_filter == value %}checked{% endif %}>
+                    <i class="form-icon"></i> {{ label }}
+                  </label>
+                {% endfor %}
+              </div>
+
+              {# 颜色筛选（圆点切换） #}
+              <div class="form-group">
+                <label class="form-label{% if colors %} text-bold{% endif %}">{% translate "Color filter" %}</label>
+                <div class="highlights-color-dots-filter">
+                  <span class="color-dot-filter all-colors {% if not colors %}active{% endif %}" data-color-value="" title="{% translate 'All' %}"></span>
+                  {% for stat in color_stats %}
+                    <span class="color-dot-filter {% if stat.selected or not colors %}active{% endif %}"
+                          style="background-color: {{ stat.css_color }};"
+                          data-color-value="{{ stat.key }}"
+                          title="{{ stat.label }}"></span>
+                  {% endfor %}
+                </div>
+              </div>
+
+              {# 日期筛选 #}
+              <div class="form-group radio-group" role="radiogroup">
+                <label class="form-label{% if date_filter_by %} text-bold{% endif %}">{% translate "Date filter" %}</label>
+                {% for value, label in date_filter_choices %}
+                  <label class="form-radio form-inline">
+                    <input type="radio" name="date_filter_by" value="{{ value }}" {% if date_filter_by == value %}checked{% endif %}>
+                    <i class="form-icon"></i> {{ label }}
+                  </label>
+                {% endfor %}
+              </div>
+              <div id="date-filter-fields" class="form-group" style="display: {% if date_filter_by %}block{% else %}none{% endif %}">
+                <div class="form-group">
+                  <div class="form-row-inline">
+                    <label for="date-filter-start" class="form-label-inline">{% translate "Start date" %}</label>
+                    <input type="date" id="date-filter-start" name="date_filter_start" class="form-input input-sm" value="{{ date_filter_start }}">
+                  </div>
+                </div>
+                <div class="form-group">
+                  <div class="form-row-inline">
+                    <label for="date-filter-end" class="form-label-inline">{% translate "End date" %}</label>
+                    <input type="date" id="date-filter-end" name="date_filter_end" class="form-input input-sm" value="{{ date_filter_end }}">
+                  </div>
+                </div>
+              </div>
+
+              <div class="actions">
+                {% if request.user.is_authenticated %}
+                  <button type="submit" class="btn btn-sm" name="save">{% translate "Save as default" %}</button>
+                {% endif %}
+                <button type="submit" class="btn btn-sm btn-primary" name="apply">{% translate "Apply" %}</button>
+              </div>
+            </form>
+          </div>
+        </ld-dropdown>
+      </div>
+
+      {# Inline Sort by + Group by (visible when space allows) #}
+      <form class="highlights-inline-filters ml-2" method="get" action="{% url 'linkding:bookmarks.highlights' %}">
+        <input type="hidden" name="q" value="{{ search_q }}">
+        <input type="hidden" name="colors" value="{{ colors_raw }}">
+        <input type="hidden" name="note_filter" value="{{ note_filter }}">
+        <input type="hidden" name="date_filter_by" value="{{ date_filter_by }}">
+        <input type="hidden" name="date_filter_start" value="{{ date_filter_start }}">
+        <input type="hidden" name="date_filter_end" value="{{ date_filter_end }}">
+        <input type="hidden" name="bookmark_id" value="{{ bookmark_id }}">
+        <div class="highlights-inline-sort">
+          <label class="form-label text-assistive" for="inline-sort">{% translate "Sort by" %}</label>
+          <div class="input-group">
+            <span class="input-group-addon text-secondary">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M3 9l4 -4l4 4m-4 -4v14"/><path d="M21 15l-4 4l-4 -4m4 4v-14"/></svg>
+            </span>
+            <select id="inline-sort" name="sort" class="form-select" data-submit-on-change>
+              {% for value, label in sort_choices %}
+                <option value="{{ value }}" {% if sort == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="highlights-inline-group ml-2">
+          <label class="form-label text-assistive" for="inline-group">{% translate "Group by" %}</label>
+          <div class="input-group">
+            <span class="input-group-addon text-secondary">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M4 4h6v6h-6z"/><path d="M14 4h6v6h-6z"/><path d="M4 14h6v6h-6z"/><path d="M14 14h6v6h-6z"/></svg>
+            </span>
+            <select id="inline-group" name="group_by" class="form-select" data-submit-on-change>
+              {% for value, label in group_choices %}
+                <option value="{{ value }}" {% if group_by == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </form>
+
+      {# Bulk edit toggle #}
+      <button class="btn highlights-bulk-toggle ml-2" title="{% translate 'Bulk edit' %}">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20px" height="20px" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+          <path d="M7 7h-1a2 2 0 0 0 -2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2 -2v-1"/>
+          <path d="M20.385 6.585a2.1 2.1 0 0 0 -2.97 -2.97l-8.415 8.385v3h3l8.385 -8.415z"/>
+          <path d="M16 5l3 3"/>
+        </svg>
+      </button>
+
+      {# Random sort button #}
+      <a class="btn ml-2" title="{% translate 'Random sort' %}"
+         href="{% url 'linkding:bookmarks.highlights' %}?{% if search_q %}q={{ search_q|urlencode }}&{% endif %}{% if colors_raw %}colors={{ colors_raw|urlencode }}&{% endif %}{% if note_filter %}note_filter={{ note_filter }}&{% endif %}sort=random{% if group_by != 'none' %}&group_by={{ group_by }}{% endif %}{% if date_filter_by %}&date_filter_by={{ date_filter_by }}{% endif %}{% if date_filter_start %}&date_filter_start={{ date_filter_start }}{% endif %}{% if date_filter_end %}&date_filter_end={{ date_filter_end }}{% endif %}{% if bookmark_id %}&bookmark_id={{ bookmark_id }}{% endif %}">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" stroke-width="2"
+             stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+          <path d="M18 4l3 3l-3 3"></path>
+          <path d="M18 20l3 -3l-3 -3"></path>
+          <path d="M3 7h3a5 5 0 0 1 5 5a5 5 0 0 1 -5 5h-3"></path>
+          <path d="M21 7h-3a5 5 0 0 0 -5 5a5 5 0 0 0 5 5h3"></path>
+        </svg>
+      </a>
+      {% include 'bookmarks/sidebar/components/toggle_button.html' %}
+    </div>
+
+    {# ── Search summary ── #}
+    <p class="highlights-summary text-secondary text-small">
+      {% blocktranslate trimmed with total=summary.total_annotations notes=summary.total_notes bms=summary.total_bookmarks %}
+        {{ total }} highlights, {{ notes }} annotations, across {{ bms }} bookmarks
+      {% endblocktranslate %}
+    </p>
+    </div>
+
+    {# ── Main form: bulk bar + list (single form so bulk checkboxes are submitted) ── #}
+    <form class="highlights-main-form" method="post" action="?{{ query_string }}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="">
+      <input type="hidden" name="return_url" value="{{ request.get_full_path }}">
+
+      {# ── Bulk edit bar ── #}
+      <div class="highlights-bulk-bar">
+        <div class="highlights-bulk-actions">
+          <label class="form-checkbox bulk-edit-checkbox all">
+            <input type="checkbox" data-bulk-all>
+            <i class="form-icon"></i>
+          </label>
+          <select name="bulk_action" class="form-select select-sm">
+            <option value="bulk_delete">{% translate "Delete highlights" %}</option>
+            <option value="bulk_clear_note">{% translate "Clear annotations" %}</option>
+            <option value="bulk_change_color">{% translate "Change color" %}</option>
+            <option value="bulk_copy_highlight">{% translate "Copy highlights" %}</option>
+            <option value="bulk_copy_note">{% translate "Copy annotations" %}</option>
+            <option value="bulk_copy_all">{% translate "Copy all" %}</option>
+          </select>
+          {# Color picker for bulk_change_color #}
+          <select name="bulk_new_color" class="form-select select-sm highlights-bulk-color-select" style="display:none;">
+            {% for color_key, color_label in color_choices %}
+              <option value="{{ color_key }}">{{ color_label }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" name="bulk_execute" class="btn btn-link btn-sm"
+                  ld-confirm-danger
+                  ld-confirm-question="{% translate 'Are you sure?' %}"
+                  onclick="this.closest('form').querySelector('input[name=action]').value='bulk_execute';"
+                  disabled>
+            {% translate "Execute" %}
+          </button>
+          <button type="button" class="btn btn-link btn-sm highlights-bulk-cancel">
+            {% translate "Cancel" %}
+          </button>
+          <span class="highlights-bulk-msg d-none"></span>
+          <span class="highlights-bulk-count d-none" data-total="{{ summary.total_annotations }}"></span>
+          <label class="form-checkbox select-across d-none">
+            <input type="checkbox" name="bulk_select_across">
+            <i class="form-icon"></i>
+            {% translate "All pages" %} (<span class="total">{{ summary.total_annotations }}</span>)
+          </label>
+        </div>
+      </div>
+
+      {# ── Annotation list ── #}
+      {% if not annotations_page.object_list %}
+        <div class="empty">
+          {% if search_q or colors or note_filter or date_filter_by %}
+            <p class="empty-title h5">{% translate "No highlights match your filters" %}</p>
+            <p class="empty-subtitle"><a href="{% url 'linkding:bookmarks.highlights' %}">{% translate "Clear filters" %}</a></p>
+          {% else %}
+            <p class="empty-title h5">{% translate "No highlights yet" %}</p>
+            <p class="empty-subtitle">{% translate "Select text in the reading mode to create highlights and annotations" %}</p>
+          {% endif %}
+        </div>
+      {% else %}
+        {% for group_label, color_key, bookmark_id, group_annotations in groups %}
+          {% if group_by != 'none' and group_label %}
+            <div class="highlight-group-header">
+              {% if group_by == 'color' and color_key %}
+                <span class="highlight-group-color-bar"
+                      style="background-color: {% if color_key == 'yellow' %}rgba(255,235,0,0.7){% elif color_key == 'green' %}rgba(0,200,83,0.7){% elif color_key == 'blue' %}rgba(66,165,245,0.7){% elif color_key == 'pink' %}rgba(236,64,122,0.7){% else %}var(--primary-color){% endif %};"></span>
+              {% endif %}
+              <h3>
+                {% if bookmark_id %}
+                  <a data-turbo="false" href="{% url 'linkding:bookmarks.read' bookmark_id %}?from=highlights">{{ group_label }}</a>
+                {% else %}
+                  {{ group_label }}
+                {% endif %}
+              </h3>
+              <span class="highlight-group-count">({{ group_annotations|length }})</span>
+              <button type="button" class="highlight-group-toggle" title="{% translate 'Collapse' %}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M6 9l6 6l6 -6"/></svg>
+              </button>
+            </div>
+          {% endif %}
+
+          <ul class="highlights-list" role="list">
+            {% for ann in group_annotations %}
+              <li class="highlight-item" data-annotation-id="{{ ann.id }}">
+                {# Checkbox (hidden until bulk mode) #}
+                <label class="form-checkbox bulk-edit-checkbox">
+                  <input type="checkbox" name="annotation_id" value="{{ ann.id }}" data-bulk-item>
+                  <i class="form-icon"></i>
+                </label>
+
+                {# Content #}
+                <div class="highlight-content">
+                  {# Text row: color bar + highlighted text #}
+                  <div class="highlight-text-row">
+                    <div class="highlight-color-bar"
+                         style="background-color: {% if ann.color == 'yellow' %}rgba(255,235,0,0.35){% elif ann.color == 'green' %}rgba(0,200,83,0.3){% elif ann.color == 'blue' %}rgba(66,165,245,0.3){% elif ann.color == 'pink' %}rgba(236,64,122,0.3){% else %}color-mix(in srgb, var(--primary-color) 35%, transparent){% endif %};"></div>
+                    <div class="highlight-text">{{ ann.selected_text }}</div>
+                  </div>
+
+                  {# Inline-editable note #}
+                  <textarea class="highlight-note-textarea"
+                            placeholder="{% translate 'Please enter note' %}"
+                            rows="1"
+                            data-annotation-id="{{ ann.id }}"
+                            {% if not ann.note_content %}data-empty{% endif %}>{{ ann.note_content }}</textarea>
+
+                  {# Actions row: date + action buttons #}
+                  <div class="highlight-meta">
+                    <span class="highlight-date">{{ ann.date_created|date:"Y/m/d H:i" }}</span>
+                    {% if group_by != 'bookmark' %}
+                      <a class="highlight-bookmark-title" data-turbo="false" href="{% url 'linkding:bookmarks.read' ann.bookmark_id %}?from=highlights" title="{{ ann.bookmark.resolved_title }}">{{ ann.bookmark.resolved_title }}</a>
+                    {% endif %}
+                    <span class="highlight-actions">
+                      {# 跳转到原文 #}
+                      {% if ann.article_asset %}
+                        <a class="highlight-action-btn" title="{% translate 'Locate in article' %}"
+                           data-turbo="false"
+                           href="{% url 'linkding:bookmarks.read' ann.bookmark_id %}?from=highlights#annotation-{{ ann.id }}">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/><path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0"/></svg>
+                        </a>
+                      {% else %}
+                        <span class="highlight-action-btn disabled" title="{% translate 'Article unavailable' %}">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"></path><path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"></path><path d="M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6"></path><path d="M3 3l18 18"></path></svg>
+                        </span>
+                      {% endif %}
+
+                      {# 编辑批注文本框 #}
+                      <button type="button" class="highlight-action-btn" title="{% translate 'Edit note' %}"
+                              data-toggle-note>
+                        <svg width="16" height="16"><use href="#ld-icon-highlight"></use></svg>
+                      </button>
+
+                      {# 更改颜色 (dropdown) #}
+                      <span class="highlight-color-picker-wrap">
+                        <button type="button" class="highlight-action-btn" title="{% translate 'Change color' %}"
+                                data-color-picker-toggle>
+                          <span class="highlight-color-dot" style="background-color: {% if ann.color == 'yellow' %}rgba(255,235,0,0.7){% elif ann.color == 'green' %}rgba(0,200,83,0.7){% elif ann.color == 'blue' %}rgba(66,165,245,0.7){% elif ann.color == 'pink' %}rgba(236,64,122,0.7){% else %}var(--primary-color){% endif %};"></span>
+                        </button>
+                        <span class="highlight-color-popup" data-color-popup>
+                          {% for color_key, color_label in color_choices %}
+                            <span class="highlight-color-option {% if ann.color == color_key %}selected{% endif %}"
+                                  style="background-color: {% if color_key == 'yellow' %}rgba(255,235,0,0.7){% elif color_key == 'green' %}rgba(0,200,83,0.7){% elif color_key == 'blue' %}rgba(66,165,245,0.7){% elif color_key == 'pink' %}rgba(236,64,122,0.7){% else %}var(--primary-color){% endif %};"
+                                  data-annotation-id="{{ ann.id }}"
+                                  data-new-color="{{ color_key }}"></span>
+                          {% endfor %}
+                        </span>
+                      </span>
+
+                      {# 复制 #}
+                      <button type="button" class="highlight-action-btn" title="{% translate 'Copy' %}"
+                              data-copy-annotation="{{ ann.id }}">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"></path><path d="M8 8m0 2a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2z"></path><path d="M16 8v-2a2 2 0 0 0 -2 -2h-8a2 2 0 0 0 -2 2v8a2 2 0 0 0 2 2h2"></path></svg>
+                      </button>
+
+                      {# 删除 #}
+                      <button type="submit" class="highlight-action-btn delete"
+                              ld-confirm-button ld-confirm-danger
+                              ld-confirm-question="{% translate 'Delete this highlight?' %}"
+                              title="{% translate 'Delete' %}"
+                              name="annotation_id" value="{{ ann.id }}"
+                              onclick="this.closest('form').querySelector('input[name=action]').value='delete';">
+                        <svg width="16" height="16"><use href="#ld-icon-remove"></use></svg>
+                      </button>
+                    </span>
+                  </div>
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endfor %}
+      {% endif %}
+    </form>
+
+    {# Pagination #}
+    {% if annotations_page.object_list %}
+      <div class="highlights-pagination"{% if sticky_pagination %} data-sticky-on="true"{% endif %}>
+        {% pagination annotations_page %}
+      </div>
+    {% endif %}
+  </main>
+
+  {# Sidebar #}
+  <div class="scrollbar sidebar col-1{% if sticky_pagination %} paginate-sticky{% endif %}" data-sticky-on="{{ sticky_side_panel|yesno:'true,false' }}">
+    {% include 'bookmarks/sidebar/components/close_button.html' %}
+    {% include 'bookmarks/highlights/sidebar/index.html' %}
+  </div>
+</div>
+
+{# ── Inline JS for interactions ── #}
+{% if hl_copy_item_format %}{{ hl_copy_item_format|json_script:"ld-hl-item-format" }}{% endif %}
+{% if hl_copy_separator %}{{ hl_copy_separator|json_script:"ld-hl-separator" }}{% endif %}
+<script>
+(function() {
+  'use strict';
+
+  var ITEM_FORMAT = '> ${highlight}\n\n${annotation}';
+  var SEPARATOR = '\n\n---\n\n';
+  {% if hl_copy_item_format %}try { var _f = JSON.parse(document.getElementById('ld-hl-item-format').textContent); if (_f) ITEM_FORMAT = _f; } catch(e) {}{% endif %}
+  {% if hl_copy_separator %}try { var _s = JSON.parse(document.getElementById('ld-hl-separator').textContent); if (_s) SEPARATOR = _s; } catch(e) {}{% endif %}
+  var COPY_DEFAULT_ACTION = "{{ highlight_copy_default_action|default:'both' }}";
+
+  // --- Note auto-save on blur ---
+  document.querySelectorAll('.highlight-note-textarea').forEach(function(ta) {
+    var timer = null;
+    ta.addEventListener('input', function() {
+      ta.style.height = 'auto';
+      ta.style.height = ta.scrollHeight + 'px';
+    });
+    ta.addEventListener('focus', function() {
+      ta.removeAttribute('data-empty');
+      ta.classList.add('note-visible');
+    });
+    ta.addEventListener('blur', function() {
+      if (!ta.value.trim()) {
+        ta.setAttribute('data-empty', '');
+        ta.classList.remove('note-visible');
+      }
+      clearTimeout(timer);
+      timer = setTimeout(function() {
+        var annId = ta.dataset.annotationId;
+        var csrf = document.cookie.match(/csrftoken=([^;]+)/);
+        var formData = new FormData();
+        formData.append('action', 'update_note');
+        formData.append('annotation_id', annId);
+        formData.append('note_content', ta.value);
+        if (csrf) formData.append('csrfmiddlewaretoken', csrf[1]);
+        fetch(window.location.href, {
+          method: 'POST',
+          body: formData,
+          headers: {'X-Requested-With': 'XMLHttpRequest'},
+          redirect: 'manual',
+        });
+      }, 300);
+    });
+    // Init height (only if visible)
+    if (!ta.hasAttribute('data-empty')) {
+      ta.style.height = 'auto';
+      ta.style.height = ta.scrollHeight + 'px';
+    }
+  });
+
+  // --- Toggle note textarea via button or item click ---
+  function toggleNoteTextarea(item) {
+    var ta = item.querySelector('.highlight-note-textarea');
+    if (!ta) return;
+    if (ta.hasAttribute('data-empty')) {
+      ta.removeAttribute('data-empty');
+    }
+    ta.classList.add('note-visible');
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = ta.value.length;
+  }
+
+  document.querySelectorAll('[data-toggle-note]').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var item = btn.closest('.highlight-item');
+      if (item) toggleNoteTextarea(item);
+    });
+  });
+
+  // --- Group collapse/expand ---
+  document.querySelectorAll('.highlight-group-toggle').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var header = btn.closest('.highlight-group-header');
+      var list = header.nextElementSibling;
+      if (!list || !list.classList.contains('highlights-list')) return;
+      var collapsed = list.classList.toggle('collapsed');
+      header.classList.toggle('collapsed', collapsed);
+    });
+  });
+
+  // --- Inline filter auto-submit ---
+  document.querySelectorAll('[data-submit-on-change]').forEach(function(el) {
+    el.addEventListener('change', function() {
+      el.closest('form').submit();
+    });
+  });
+
+  // --- Color picker toggle ---
+  document.querySelectorAll('[data-color-picker-toggle]').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var wrap = btn.closest('.highlight-color-picker-wrap');
+      var popup = wrap.querySelector('[data-color-popup]');
+      document.querySelectorAll('[data-color-popup]').forEach(function(p) {
+        if (p !== popup) p.classList.remove('open');
+      });
+      popup.classList.toggle('open');
+    });
+  });
+
+  // --- Color picker option click ---
+  document.querySelectorAll('.highlight-color-option').forEach(function(opt) {
+    opt.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var annId = opt.dataset.annotationId;
+      var newColor = opt.dataset.newColor;
+      var csrf = document.cookie.match(/csrftoken=([^;]+)/);
+      var formData = new FormData();
+      formData.append('action', 'change_color');
+      formData.append('annotation_id', annId);
+      formData.append('new_color', newColor);
+      if (csrf) formData.append('csrfmiddlewaretoken', csrf[1]);
+      fetch(window.location.href, {
+        method: 'POST',
+        body: formData,
+        headers: {'X-Requested-With': 'XMLHttpRequest'},
+        redirect: 'manual',
+      }).then(function() { location.reload(); });
+    });
+  });
+
+  // Close popups on outside click
+  document.addEventListener('click', function() {
+    document.querySelectorAll('[data-color-popup]').forEach(function(p) {
+      p.classList.remove('open');
+    });
+  });
+
+  // --- Copy annotation (single item) ---
+  document.querySelectorAll('[data-copy-annotation]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var item = btn.closest('.highlight-item');
+      var text = item.querySelector('.highlight-text').textContent.trim();
+      var note = item.querySelector('.highlight-note-textarea').value.trim();
+      var copy = linkding.renderByAction(ITEM_FORMAT, text, note, COPY_DEFAULT_ACTION);
+      navigator.clipboard.writeText(copy).then(function() {
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"></path><path d="M5 12l5 5l10 -10"></path></svg>';
+        setTimeout(function() {
+          btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"></path><path d="M8 8m0 2a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2z"></path><path d="M16 8v-2a2 2 0 0 0 -2 -2h-8a2 2 0 0 0 -2 2v8a2 2 0 0 0 2 2h2"></path></svg>';
+        }, 1500);
+      });
+    });
+  });
+
+  // --- Color filter dots ---
+  var allColorDot = document.querySelector('.color-dot-filter.all-colors');
+  var individualDots = document.querySelectorAll('.color-dot-filter:not(.all-colors)');
+  var colorsHidden = document.querySelector('[data-colors-hidden]');
+
+  function updateColorsFromDots() {
+    if (!colorsHidden) return;
+    var anyInactive = false;
+    var selected = [];
+    individualDots.forEach(function(dot) {
+      if (dot.classList.contains('active')) {
+        selected.push(dot.dataset.colorValue);
+      } else {
+        anyInactive = true;
+      }
+    });
+    // Sync "All" state
+    if (allColorDot) {
+      if (anyInactive) {
+        allColorDot.classList.remove('active');
+      } else {
+        allColorDot.classList.add('active');
+      }
+    }
+    // Hidden input: "all" = no color filter, otherwise comma-separated
+    if (!anyInactive) {
+      colorsHidden.value = 'all';
+    } else {
+      colorsHidden.value = selected.join(',');
+    }
+  }
+
+  // "All" dot click: toggle all individual dots
+  if (allColorDot) {
+    allColorDot.addEventListener('click', function() {
+      var activate = !allColorDot.classList.contains('active');
+      individualDots.forEach(function(d) {
+        if (activate) d.classList.add('active');
+        else d.classList.remove('active');
+      });
+      updateColorsFromDots();
+    });
+  }
+
+  // Individual dot click
+  individualDots.forEach(function(dot) {
+    dot.addEventListener('click', function() {
+      dot.classList.toggle('active');
+      updateColorsFromDots();
+    });
+  });
+
+  // --- Bulk edit with cross-page sessionStorage support ---
+  var BULK_STORAGE_KEY = 'linkding:highlights-bulk-edit';
+  var page = document.querySelector('.highlights-page');
+  var bulkToggle = document.querySelector('.highlights-bulk-toggle');
+  var bulkCancel = document.querySelector('.highlights-bulk-cancel');
+  var bulkAllCheckbox = document.querySelector('[data-bulk-all]');
+  var bulkItemCheckboxes = document.querySelectorAll('[data-bulk-item]');
+  var bulkExecuteBtn = document.querySelector('button[name="bulk_execute"]');
+  var bulkCountEl = document.querySelector('.highlights-bulk-count');
+  var bulkMsgEl = document.querySelector('.highlights-bulk-msg');
+  var bulkSelectAcross = document.querySelector('label.select-across');
+  var bulkActionSelect = document.querySelector('select[name="bulk_action"]');
+  var bulkColorSelect = document.querySelector('.highlights-bulk-color-select');
+  var mainForm = document.querySelector('.highlights-main-form');
+
+  // --- sessionStorage helpers ---
+  function loadBulkState() {
+    try { var r = sessionStorage.getItem(BULK_STORAGE_KEY); return r ? JSON.parse(r) : null; } catch(e) { return null; }
+  }
+  function saveBulkState(state) {
+    try { sessionStorage.setItem(BULK_STORAGE_KEY, JSON.stringify(state)); } catch(e) {}
+  }
+  function clearBulkState() {
+    sessionStorage.removeItem(BULK_STORAGE_KEY);
+  }
+  function addBulkId(id) {
+    var s = loadBulkState() || { selectAll: false, ids: [] };
+    if (!s.ids.includes(id)) s.ids.push(id);
+    saveBulkState(s);
+  }
+  function removeBulkId(id) {
+    var s = loadBulkState(); if (!s || !s.ids) return;
+    s.ids = s.ids.filter(function(x) { return x !== id; });
+    s.selectAll = false;
+    saveBulkState(s);
+  }
+
+  function showBulkMsg(text, isError) {
+    if (!bulkMsgEl) return;
+    bulkMsgEl.textContent = text;
+    bulkMsgEl.className = 'highlights-bulk-msg' + (isError ? ' error' : ' success');
+    clearTimeout(bulkMsgEl._timer);
+    bulkMsgEl._timer = setTimeout(function() {
+      bulkMsgEl.className = 'highlights-bulk-msg d-none';
+    }, 2000);
+  }
+
+  function updateBulkState() {
+    var s = loadBulkState();
+    var pageChecked = document.querySelectorAll('[data-bulk-item]:checked').length;
+    var totalCount = 0;
+    if (s && s.selectAll) {
+      totalCount = parseInt(document.querySelector('.highlights-bulk-count')?.dataset?.total || '{{ summary.total_annotations }}', 10) || 0;
+    } else if (s && s.ids) {
+      totalCount = s.ids.length;
+    }
+    var hasSelection = totalCount > 0 || pageChecked > 0;
+
+    var allChecked = bulkItemCheckboxes.length > 0 && Array.from(bulkItemCheckboxes).every(function(cb) { return cb.checked; });
+    bulkAllCheckbox.checked = allChecked;
+    if (bulkExecuteBtn) bulkExecuteBtn.disabled = !hasSelection;
+
+    if (bulkCountEl) {
+      var displayCount = totalCount > 0 ? totalCount : pageChecked;
+      if (displayCount > 0) {
+        bulkCountEl.textContent = 'Selected(' + displayCount + ')';
+        bulkCountEl.classList.remove('d-none');
+      } else {
+        bulkCountEl.classList.add('d-none');
+      }
+    }
+    if (bulkSelectAcross) {
+      if (s && s.selectAll) {
+        bulkSelectAcross.classList.remove('d-none');
+        bulkSelectAcross.querySelector('input').checked = true;
+      } else if (allChecked) {
+        bulkSelectAcross.classList.remove('d-none');
+      } else {
+        bulkSelectAcross.classList.add('d-none');
+        bulkSelectAcross.querySelector('input').checked = false;
+      }
+    }
+  }
+
+  function restoreBulkState() {
+    var s = loadBulkState();
+    if (!s || (!s.selectAll && (!s.ids || s.ids.length === 0))) return;
+
+    // Activate bulk mode
+    page.classList.add('bulk-active');
+
+    if (s.selectAll) {
+      bulkItemCheckboxes.forEach(function(cb) { cb.checked = true; });
+      bulkAllCheckbox.checked = true;
+    } else {
+      var idSet = new Set(s.ids.map(String));
+      bulkItemCheckboxes.forEach(function(cb) { cb.checked = idSet.has(cb.value); });
+      var allChecked = bulkItemCheckboxes.length > 0 && Array.from(bulkItemCheckboxes).every(function(cb) { return cb.checked; });
+      bulkAllCheckbox.checked = allChecked;
+    }
+    updateBulkState();
+  }
+
+  // Restore on page load
+  restoreBulkState();
+
+  // Toggle / Cancel
+  if (bulkToggle) {
+    bulkToggle.addEventListener('click', function() {
+      page.classList.toggle('bulk-active');
+      if (!page.classList.contains('bulk-active')) {
+        clearBulkState();
+        bulkItemCheckboxes.forEach(function(cb) { cb.checked = false; });
+        if (bulkAllCheckbox) bulkAllCheckbox.checked = false;
+        updateBulkState();
+      }
+    });
+  }
+
+  if (bulkCancel) {
+    bulkCancel.addEventListener('click', function() {
+      page.classList.remove('bulk-active');
+      clearBulkState();
+      bulkItemCheckboxes.forEach(function(cb) { cb.checked = false; });
+      if (bulkAllCheckbox) bulkAllCheckbox.checked = false;
+      updateBulkState();
+    });
+  }
+
+  // Select all on current page
+  if (bulkAllCheckbox) {
+    bulkAllCheckbox.addEventListener('change', function() {
+      var checked = bulkAllCheckbox.checked;
+      bulkItemCheckboxes.forEach(function(cb) { cb.checked = checked; });
+      if (checked) {
+        saveBulkState({ selectAll: true, ids: [] });
+      } else {
+        saveBulkState({ selectAll: false, ids: [] });
+      }
+      updateBulkState();
+    });
+  }
+
+  // Individual checkbox change
+  bulkItemCheckboxes.forEach(function(cb) {
+    cb.addEventListener('change', function() {
+      var s = loadBulkState();
+      if (s && s.selectAll) {
+        // Was selectAll, now toggling individual: collect currently checked
+        var selectedIds = [];
+        bulkItemCheckboxes.forEach(function(c) { if (c.checked) selectedIds.push(c.value); });
+        saveBulkState({ selectAll: false, ids: selectedIds });
+      } else if (cb.checked) {
+        addBulkId(cb.value);
+      } else {
+        removeBulkId(cb.value);
+      }
+      var allChecked = bulkItemCheckboxes.length > 0 && Array.from(bulkItemCheckboxes).every(function(c) { return c.checked; });
+      bulkAllCheckbox.checked = allChecked;
+      updateBulkState();
+    });
+  });
+
+  // Show color select when bulk_change_color is chosen
+  if (bulkActionSelect && bulkColorSelect) {
+    bulkActionSelect.addEventListener('change', function() {
+      bulkColorSelect.style.display = bulkActionSelect.value === 'bulk_change_color' ? '' : 'none';
+    });
+  }
+
+  // --- Form submit: inject cross-page IDs + handle copy/destructive ---
+  var bulkConfirmed = false;
+  if (mainForm) {
+    mainForm.addEventListener('submit', function(e) {
+      var action = bulkActionSelect ? bulkActionSelect.value : '';
+      var actionInput = mainForm.querySelector('input[name=action]');
+      if (!actionInput || actionInput.value !== 'bulk_execute') return;
+
+      // Already confirmed via popup — let it through
+      if (bulkConfirmed) { bulkConfirmed = false; return; }
+
+      // Remove any previously injected hidden inputs
+      mainForm.querySelectorAll('input[name="bulk_session_ids"]').forEach(function(el) { el.remove(); });
+
+      var s = loadBulkState();
+      if (s && s.selectAll) {
+        // selectAll: let select_across checkbox handle it on the server
+      } else if (s && s.ids && s.ids.length > 0) {
+        // Inject all selected IDs (including from other pages) as hidden inputs
+        s.ids.forEach(function(id) {
+          var inp = document.createElement('input');
+          inp.type = 'hidden';
+          inp.name = 'bulk_session_ids';
+          inp.value = id;
+          mainForm.appendChild(inp);
+        });
+      }
+
+      // Copy operations: execute directly without confirm
+      if (action.startsWith('bulk_copy_')) {
+        e.preventDefault();
+        var checked = document.querySelectorAll('[data-bulk-item]:checked');
+        var hasHL = ITEM_FORMAT.indexOf('${highlight}') !== -1;
+        var hasAnn = ITEM_FORMAT.indexOf('${annotation}') !== -1;
+        var parts = [];
+        checked.forEach(function(cb) {
+          var item = cb.closest('.highlight-item');
+          if (!item) return;
+          var text = item.querySelector('.highlight-text').textContent.trim();
+          var note = item.querySelector('.highlight-note-textarea').value.trim();
+          if (action === 'bulk_copy_highlight') {
+            parts.push(linkding.renderCopyText(hasAnn ? '> ${highlight}' : ITEM_FORMAT, text, ''));
+          } else if (action === 'bulk_copy_note') {
+            parts.push(linkding.renderCopyText(hasHL ? '${annotation}' : ITEM_FORMAT, '', note));
+          } else {
+            parts.push(linkding.renderCopyText(ITEM_FORMAT, text, note));
+          }
+        });
+        navigator.clipboard.writeText(parts.join(SEPARATOR)).then(function() {
+          showBulkMsg('{% translate "Copied!" %}', false);
+        }).catch(function() {
+          showBulkMsg('{% translate "Copy failed" %}', true);
+        });
+        return;
+      }
+
+      // Destructive operations: show ld-confirm-popup
+      e.preventDefault();
+      var popup = document.createElement('ld-confirm-popup');
+      popup._button = bulkExecuteBtn;
+      popup._onConfirm = function() {
+        bulkConfirmed = true;
+        clearBulkState();
+        mainForm.requestSubmit(bulkExecuteBtn);
+      };
+      document.body.appendChild(popup);
+    });
+  }
+
+  // --- Date filter UI: show/hide date range inputs ---
+  var dateFilterRadios = document.querySelectorAll('input[name="date_filter_by"]');
+  var dateFilterFields = document.getElementById('date-filter-fields');
+  if (dateFilterRadios.length && dateFilterFields) {
+    dateFilterRadios.forEach(function(radio) {
+      radio.addEventListener('change', function() {
+        dateFilterFields.style.display = radio.value ? 'block' : 'none';
+      });
+    });
+  }
+
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% load shared %}
+{% htmlmin %}
+<div class="tag-tree" ld-tag-tree>
+  {% if tag_cloud.has_selected_tags %}
+    <p class="selected-tags">
+      {% for tag in tag_cloud.selected_tags %}
+        <a href="{{ tag.query_string }}"
+           class="text-bold mr-2">
+          <span>-{{ tag.name }}</span>
+        </a>
+      {% endfor %}
+    </p>
+  {% endif %}
+  <ul class="tag-tree-roots">
+    {% for node in tag_cloud.tag_tree %}
+      {% include "bookmarks/sidebar/modules/tags/tree_node.html" with node=node %}
+    {% endfor %}
+  </ul>
+</div>
+{% endhtmlmin %}

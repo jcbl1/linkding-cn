@@ -16,19 +16,13 @@ class LayoutTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         response = self.client.get(reverse("linkding:bookmarks.index"))
         html = response.content.decode()
 
-        self.assertInHTML(
-            f"""
-            <a href="{reverse("linkding:bookmarks.shared")}" class="menu-link">Shared</a>
-        """,
-            html,
-            count=0,
-        )
+        # The "Shared bookmarks" link is always visible in the nav menu
         self.assertInHTML(
             f"""
             <a href="{reverse("linkding:bookmarks.shared")}" class="menu-link">Shared bookmarks</a>
         """,
             html,
-            count=0,
+            count=2,
         )
 
         self.user.profile.enable_sharing = True
@@ -36,13 +30,6 @@ class LayoutTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         response = self.client.get(reverse("linkding:bookmarks.index"))
         html = response.content.decode()
 
-        self.assertInHTML(
-            f"""
-            <a href="{reverse("linkding:bookmarks.shared")}" class="menu-link">Shared</a>
-        """,
-            html,
-            count=0,
-        )
         self.assertInHTML(
             f"""
             <a href="{reverse("linkding:bookmarks.shared")}" class="menu-link">Shared bookmarks</a>

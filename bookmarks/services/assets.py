@@ -288,7 +288,7 @@ def _generate_asset_filename(
         else:
             return "_"
 
-    formatted_datetime = asset.date_created.strftime("%Y-%m-%d_%H%M%S")
+    formatted_datetime = timezone.localtime(asset.date_created).strftime("%Y-%m-%d_%H%M%S")
     sanitized_filename = "".join(sanitize_char(char) for char in filename)
 
     # Calculate the length of fixed parts of the final filename

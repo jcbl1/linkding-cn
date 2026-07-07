@@ -130,7 +130,7 @@ class BookmarkEditViewTestCase(TestCase, BookmarkFactoryMixin):
 
         self.assertInHTML(
             f"""
-            <input type="text" name="title" value="{bookmark.title}" maxlength="512" autocomplete="off" 
+            <input type="text" name="title" value="{bookmark.title}" autocomplete="off"
                     class="form-input" id="id_title">
         """,
             html,

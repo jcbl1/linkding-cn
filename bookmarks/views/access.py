@@ -6,7 +6,9 @@ from bookmarks.type_defs import HttpRequest
 
 def bookmark_read(request: HttpRequest, bookmark_id: int | str):
     try:
-        bookmark = Bookmark.objects.get(pk=int(bookmark_id))
+        bookmark = Bookmark.objects.prefetch_related(
+            "tags", "bookmarkasset_set"
+        ).get(pk=int(bookmark_id))
     except Bookmark.DoesNotExist:
         raise Http404("Bookmark does not exist") from None
 

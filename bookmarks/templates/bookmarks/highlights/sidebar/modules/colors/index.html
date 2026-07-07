@@ -1,0 +1,33 @@
+{% extends "bookmarks/sidebar/components/module_base.html" %}
+{% load i18n %}
+
+{% block section_attrs %}
+  class="sidebar-colors"
+  aria-labelledby="colors-heading"
+{% endblock %}
+
+{% block toggle_storage_key %}highlightsColorsSectionState{% endblock %}
+{% block heading_id %}colors-heading{% endblock %}
+{% block title %}{% translate "Colors" %}{% endblock %}
+
+{% block menu %}{% endblock %}
+
+{% block content %}
+  <div class="sidebar-colors-grid">
+    {# "All" option #}
+    <a href="{{ color_all_url }}"
+       class="sidebar-color-cell {% if not colors %}is-active{% endif %}">
+      <span class="sidebar-color-circle all-colors"></span>
+      <span class="sidebar-color-count">{{ color_total }}</span>
+    </a>
+
+    {# Individual colors #}
+    {% for stat in color_stats %}
+      <a href="{{ stat.url }}"
+         class="sidebar-color-cell {% if stat.selected %}is-active{% endif %}">
+        <span class="sidebar-color-circle" style="background-color: {{ stat.css_color }};"></span>
+        <span class="sidebar-color-count">{{ stat.count }}</span>
+      </a>
+    {% endfor %}
+  </div>
+{% endblock %}

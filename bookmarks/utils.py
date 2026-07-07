@@ -178,6 +178,20 @@ def get_clean_url(url: str) -> str:
     return clean_url
 
 
+def clean_query_params(params) -> str:
+    """移除空值参数后编码，避免 URL 中出现 ?q= 这样的残留。
+    接受 QueryDict 或普通 dict，返回编码后的 query string。
+    """
+    from django.http import QueryDict
+
+    cleaned = QueryDict("", mutable=True)
+    for key in params:
+        value = params[key]
+        if value not in (None, ""):
+            cleaned[key] = value
+    return cleaned.urlencode()
+
+
 def get_safe_return_url(return_url: str, fallback_url: str):
     # Use fallback if URL is none or URL is not on same domain
     if not return_url or not re.match(r"^/[a-z]+", return_url):
@@ -543,6 +557,22 @@ def get_alias_domains_for_root(root: str, config: DomainConfig) -> list[str]:
     return domains
 
 
+def resolve_favicon_domain(
+    hostname: str, config: DomainConfig | None = None, custom_domain_root: str = ""
+) -> str:
+    """将 hostname 按自定义域名规则归一化，用于 favicon 获取。
+
+    优先使用预解析的 config；未提供时从 custom_domain_root 字符串解析。
+    返回归一化后的域名；无匹配时返回原始 hostname。
+    """
+    if config is None:
+        if not custom_domain_root:
+            return hostname
+        config = parse_domain_roots(custom_domain_root)
+    matches = get_matching_domain_roots(hostname, config)
+    return matches[0] if matches else hostname
+
+
 def build_domain_filter_value_with_aliases(
     hostname: str,
     include_subdomains: bool,
@@ -575,3 +605,22 @@ def get_sidebar_domain_filter_value(url: str, custom_domain_root: str = "") -> s
     return build_domain_filter_value_with_aliases(
         matching_roots[-1], include_subdomains=True, config=config
     )
+
+
+# SVG 净化：移除 XSS 向量，保留合法 SVG 元素
+_DANGEROUS_TAGS = re.compile(
+    r"<\s*/?\s*(script|iframe|object|embed|form|input|style|link|meta)\b[^>]*>",
+    re.IGNORECASE,
+)
+_EVENT_ATTRS = re.compile(r"\bon\w+\s*=", re.IGNORECASE)
+_JS_PROTOCOL = re.compile(r"javascript\s*:", re.IGNORECASE)
+
+
+def sanitize_svg_body(svg_body: str) -> str:
+    """清理 SVG body，移除 <script>、on* 事件处理器、javascript: 协议。"""
+    if not isinstance(svg_body, str):
+        return ""
+    svg_body = _DANGEROUS_TAGS.sub("", svg_body)
+    svg_body = _EVENT_ATTRS.sub("", svg_body)
+    svg_body = _JS_PROTOCOL.sub("", svg_body)
+    return svg_body

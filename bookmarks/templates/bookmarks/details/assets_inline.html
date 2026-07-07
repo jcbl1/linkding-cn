@@ -1,0 +1,48 @@
+{% load i18n %}
+{% if details.assets %}
+  <div class="info-files">
+    {% for asset in details.assets %}
+      <div class="info-file-item" data-asset-id="{{ asset.id }}">
+        <div class="info-file-icon {{ asset.icon_classes }}">
+          {% include 'bookmarks/details/asset_icon.html' %}
+        </div>
+        {% if asset.file %}
+          <a class="info-file-link" href="{% url 'linkding:assets.view' asset.id %}" target="_blank" title="{{ asset.display_name }}">
+            {{ asset.display_name }}
+            {% if asset.status == 'pending' %}<span class="info-file-status"> ({% translate "queued" %})</span>{% endif %}
+            {% if asset.status == 'failure' %}<span class="info-file-status info-file-failed"> ({% translate "failed" %})</span>{% endif %}
+          </a>
+        {% else %}
+          <span class="info-file-name" title="{{ asset.display_name }}">
+            {{ asset.display_name }}
+            {% if asset.status == 'pending' %}<span class="info-file-status"> ({% translate "queued" %})</span>{% endif %}
+            {% if asset.status == 'failure' %}<span class="info-file-status info-file-failed"> ({% translate "failed" %})</span>{% endif %}
+          </span>
+        {% endif %}
+        {% if asset.file_size %}
+          <span class="info-file-size">{{ asset.file_size|filesizeformat }}</span>
+        {% endif %}
+        {% if details.is_editable %}
+          <div class="info-file-actions">
+            <button type="button" class="info-file-action-btn" data-action="rename-asset" data-asset-id="{{ asset.id }}" title="{% translate 'Rename' %}">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><use xlink:href="#ld-icon-edit"></use></svg>
+            </button>
+            <form action="{{ details.action_url }}" method="post" style="display:inline">
+              {% csrf_token %}
+              <button ld-confirm-button ld-confirm-question="{% translate 'Remove this file?' %}"
+                      type="submit" class="info-file-action-btn info-file-action-delete" name="remove_asset" value="{{ asset.id }}"
+                      title="{% translate 'Remove' %}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><use xlink:href="#ld-icon-remove"></use></svg>
+              </button>
+            </form>
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  {% if not details.is_editable %}
+    <span class="info-placeholder">{% translate "No files" %}</span>
+  {% endif %}
+{% endif %}
+

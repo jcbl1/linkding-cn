@@ -38,7 +38,7 @@ class MergeBookmarkGroupTest(TestCase, BookmarkFactoryMixin):
             date_accessed=self.now,
         )
         defaults.update(kwargs)
-        return Bookmark.objects.create(
+        bm = Bookmark.objects.create(
             url=url,
             title=title,
             description=description,
@@ -46,6 +46,10 @@ class MergeBookmarkGroupTest(TestCase, BookmarkFactoryMixin):
             owner=self.user,
             **defaults,
         )
+        # 模拟历史模型：migration 0066 合并时 favicon_file 字段仍存在
+        if not hasattr(bm, 'favicon_file'):
+            bm.favicon_file = ''
+        return bm
 
     def _make_asset(self, bookmark, asset_type="snapshot", file="test.html"):
         return BookmarkAsset.objects.create(

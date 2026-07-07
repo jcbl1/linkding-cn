@@ -1,6 +1,10 @@
+import json
+from functools import lru_cache
+
 from django.db.models import prefetch_related_objects
 from django.templatetags.static import static
 from django.utils.translation import gettext_lazy as _
+from pypinyin import Style, pinyin
 from rest_framework import serializers
 from rest_framework.serializers import ListSerializer
 
@@ -9,6 +13,7 @@ from bookmarks.models import (
     Bookmark,
     BookmarkAsset,
     BookmarkBundle,
+    ReadingProgress,
     Tag,
     UserProfile,
     build_tag_string,
@@ -116,10 +121,26 @@ class BookmarkSerializer(serializers.ModelSerializer):
     date_modified = serializers.DateTimeField(required=False)
 
     def get_favicon_url(self, obj: Bookmark):
-        if not obj.favicon_file:
+        from bookmarks.utils import extract_hostname
+        hostname = extract_hostname(obj.url)
+        if not hostname:
+            return None
+        # 使用预加载的 FaviconLookup 避免 N+1 查询
+        favicon_lookup = self.context.get("_favicon_lookup")
+        if favicon_lookup is None:
+            from bookmarks.views.contexts import FaviconLookup
+            from bookmarks.utils import parse_domain_roots
+            request = self.context.get("request")
+            domain_config = parse_domain_roots(
+                request.user.profile.custom_domain_root if request and request.user.is_authenticated else ""
+            )
+            favicon_lookup = FaviconLookup(domain_config)
+            self.context["_favicon_lookup"] = favicon_lookup
+        favicon_file = favicon_lookup.get(hostname)
+        if not favicon_file:
             return None
         request = self.context.get("request")
-        favicon_file_path = static(obj.favicon_file)
+        favicon_file_path = static(favicon_file)
         favicon_url = request.build_absolute_uri(favicon_file_path)
         return favicon_url
 
@@ -140,6 +161,11 @@ class BookmarkSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         tag_names = validated_data.pop("tag_names", [])
         tag_string = build_tag_string(tag_names)
+        # Apply user's default_mark_unread if unread not explicitly set
+        if "unread" not in self.initial_data:
+            user = self.context["user"]
+            if hasattr(user, "profile"):
+                validated_data.setdefault("unread", user.profile.default_mark_unread)
         bookmark = Bookmark(**validated_data)
 
         disable_scraping = self.context.get("disable_scraping", False)
@@ -223,11 +249,32 @@ class BookmarkAssetSerializer(serializers.ModelSerializer):
         ]
 
 
+@lru_cache(maxsize=None)
+def _pinyin_full(name):
+    """全拼，无声调，小写。如 '最爱' → 'zuiai'"""
+    return "".join(p[0] for p in pinyin(name, style=Style.NORMAL)).lower()
+
+
+@lru_cache(maxsize=None)
+def _pinyin_first(name):
+    """首字母，小写。如 '最爱' → 'za'"""
+    return "".join(p[0] for p in pinyin(name, style=Style.FIRST_LETTER)).lower()
+
+
 class TagSerializer(serializers.ModelSerializer):
+    pinyin_full = serializers.SerializerMethodField()
+    pinyin_first = serializers.SerializerMethodField()
+
     class Meta:
         model = Tag
-        fields = ["id", "name", "date_added"]
+        fields = ["id", "name", "date_added", "pinyin_full", "pinyin_first"]
         read_only_fields = ["date_added"]
+
+    def get_pinyin_full(self, obj):
+        return _pinyin_full(obj.name)
+
+    def get_pinyin_first(self, obj):
+        return _pinyin_first(obj.name)
 
     def create(self, validated_data):
         return get_or_create_tag(validated_data["name"], self.context["user"])
@@ -250,6 +297,9 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "display_url",
             "permanent_notes",
             "search_preferences",
+            "reader_settings",
+            "highlight_copy_format",
+            "highlight_copy_default_action",
             "version",
         ]
 
@@ -312,3 +362,84 @@ class AnnotationSerializer(serializers.ModelSerializer):
             )
 
         return attrs
+
+
+class ReadingProgressSerializer(serializers.ModelSerializer):
+    # 冲突检测：客户端提交上次保存的 date_modified，服务端校验是否过期
+    base_date_modified = serializers.DateTimeField(
+        required=False,
+        allow_null=True,
+        write_only=True,
+    )
+
+    class Meta:
+        model = ReadingProgress
+        fields = [
+            "id",
+            "bookmark",
+            "article_asset",
+            "text_position_start",
+            "text_quote_exact",
+            "text_quote_prefix",
+            "text_quote_suffix",
+            "element_selector",
+            "progress",
+            "scroll_top",
+            "scroll_height",
+            "client_width",
+            "client_height",
+            "date_created",
+            "date_modified",
+            "base_date_modified",
+        ]
+        read_only_fields = ["id", "bookmark", "date_created", "date_modified"]
+
+    def to_internal_value(self, data):
+        # sendBeacon posts form data where empty nullable fields arrive as
+        # empty strings instead of None / omitted.
+        if "text_position_start" in data and data["text_position_start"] == "":
+            data = {**data, "text_position_start": None}
+        if "element_selector" in data:
+            val = data["element_selector"]
+            if val == "":
+                data = {**data, "element_selector": None}
+            elif isinstance(val, str):
+                try:
+                    data = {**data, "element_selector": json.loads(val)}
+                except (ValueError, TypeError):
+                    pass
+        return super().to_internal_value(data)
+
+    def validate(self, attrs):
+        bookmark = self.context.get("bookmark")
+        article_asset = attrs.get("article_asset")
+        if article_asset is None and self.instance is not None:
+            article_asset = self.instance.article_asset
+
+        if bookmark and article_asset and article_asset.bookmark_id != bookmark.id:
+            raise serializers.ValidationError(
+                {
+                    "article_asset": _(
+                        "Article asset must belong to the same bookmark."
+                    )
+                }
+            )
+
+        if article_asset and article_asset.asset_type != BookmarkAsset.TYPE_ARTICLE:
+            raise serializers.ValidationError(
+                {"article_asset": _("Article asset must have type 'article'.")}
+            )
+
+        progress = attrs.get("progress")
+        if progress is not None:
+            attrs["progress"] = min(1, max(0, progress))
+
+        return attrs
+
+    def create(self, validated_data):
+        validated_data.pop("base_date_modified", None)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data.pop("base_date_modified", None)
+        return super().update(instance, validated_data)

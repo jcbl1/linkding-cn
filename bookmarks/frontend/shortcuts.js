@@ -26,11 +26,19 @@ document.addEventListener("keydown", (event) => {
     } else {
       nextItem = items[0];
     }
-    nextItem?.querySelector("a")?.focus();
+    nextItem?.querySelector("a.title-link")?.focus();
   }
 
   if (event.key === "e") {
-    document.querySelector(".bookmark-list")?.classList.toggle("show-notes");
+    const list = document.querySelector(".bookmark-list");
+    if (!list) return;
+    const current = list.dataset.notesGlobal === "true";
+    const next = !current;
+    list.dataset.notesGlobal = String(next);
+    list.querySelectorAll("li[ld-bookmark-item]").forEach((item) => {
+      item.dataset.notesEnabled = String(next);
+      item.classList.toggle("show-notes", next);
+    });
   }
 
   if (event.key === "s") {

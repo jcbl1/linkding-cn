@@ -103,8 +103,16 @@
     order: 40;
   }
 
+  .settings-content > #settings-bookmark-toolbar {
+    order: 45;
+  }
+
   .settings-content > #settings-sharing {
     order: 50;
+  }
+
+  .settings-content > #settings-highlights {
+    order: 55;
   }
 
   .settings-content > #settings-user {
@@ -262,6 +270,14 @@
     gap: var(--unit-4);
     align-items: center;
     padding: 0;
+
+    &.settings-row-card {
+      min-height: 32px;
+      padding: var(--unit-2) var(--unit-3);
+      border: var(--border-width) solid var(--settings-surface-border);
+      border-radius: var(--border-radius);
+      background: var(--body-color-contrast);
+    }
 
     &.settings-row-top {
       align-items: center;
@@ -508,15 +524,8 @@
     justify-content: flex-end;
     align-items: center;
     gap: var(--unit-4);
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     max-width: 100%;
-    overflow-x: auto;
-    padding-bottom: 2px;
-    scrollbar-width: none;
-
-    &::-webkit-scrollbar {
-      display: none;
-    }
   }
 
   .settings-inline-checkbox {
@@ -585,6 +594,7 @@
     }
   }
 
+  /* Legacy settings-help styles - used in settings page */
   .settings-help {
     position: relative;
     display: inline-flex;
@@ -661,6 +671,11 @@
     .form-input-hint + .form-input-hint {
       margin-top: var(--unit-2);
     }
+
+    .form-input-hint.hint-bullet::before {
+      content: "·";
+      margin-right: var(--unit-1);
+    }
   }
 
   .settings-help:hover .settings-help-popover,
@@ -721,6 +736,15 @@
   .settings-module-name {
     min-width: 0;
     font-weight: 400;
+    display: flex;
+    align-items: center;
+    gap: var(--unit-2);
+  }
+
+  .settings-action-preview {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
   }
 
   .settings-inline-action {
@@ -1049,8 +1073,6 @@
       max-width: none;
       flex: 0 0 100%;
       justify-content: flex-start;
-      flex-wrap: wrap;
-      overflow: visible;
       margin-top: var(--unit-2);
     }
   }
@@ -1242,10 +1264,366 @@
 @media (max-width: 720px) {
   .settings-page.settings-integrations-page {
     & .settings-token-table .actions {
-      width: auto; 
+      width: auto;
       & form {
         min-width: 0; /* 取消最小宽度限制 */
       }
     }
   }
+}
+
+/* ===== Quick Tags 设置页样式 ===== */
+
+.settings-page .settings-qt-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  padding: var(--unit-3) var(--unit-3);
+  column-gap: 0;
+}
+
+/* handle 跨 3 行 */
+.settings-page .settings-qt-row .settings-module-handle {
+  grid-row: 1 / 4;
+}
+
+/* 第 1 行 col2：controls */
+.settings-page .settings-qt-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--unit-2);
+  grid-column: 2;
+  grid-row: 1;
+  padding-left: var(--unit-3);
+}
+
+/* 第 2 行 col2：icon + label */
+.settings-page .settings-qt-main {
+  display: flex;
+  align-items: center;
+  gap: var(--unit-2);
+  min-width: 0;
+  position: relative;
+  grid-column: 2;
+  grid-row: 2;
+  padding-left: var(--unit-3);
+}
+
+/* 第 3 行 col2：标签 */
+.settings-page .settings-qt-sub {
+  display: flex;
+  align-items: center;
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+  grid-column: 2;
+  grid-row: 3;
+  padding-left: var(--unit-3);
+}
+
+/* icon 按钮 */
+.settings-page .settings-qt-icon-btn {
+  appearance: none;
+  background: transparent;
+  border: var(--border-width) solid var(--secondary-border-color);
+  border-radius: var(--border-radius);
+  padding: 2px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  color: var(--secondary-text-color);
+}
+
+.settings-page .settings-qt-icon-btn:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.settings-page .settings-qt-icon-placeholder {
+  width: 16px;
+  height: 16px;
+}
+
+/* label */
+.settings-page .settings-qt-label-view {
+  font-weight: 400;
+  cursor: text;
+  border: 1px solid var(--secondary-border-color);
+  border-radius: var(--border-radius);
+  padding: 1px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-page .settings-qt-label-view.is-empty {
+  border-style: dashed;
+  color: var(--secondary-text-color);
+  font-style: italic;
+  opacity: 0.6;
+}
+
+.settings-page .settings-qt-label-input {
+  display: none;
+  flex: 1;
+  min-width: 0;
+  height: var(--settings-button-height);
+  padding: var(--control-padding-y-sm) var(--control-padding-x-sm);
+  font-size: inherit;
+}
+
+.settings-page .settings-qt-row.is-label-editing .settings-qt-label-view {
+  display: none;
+}
+
+.settings-page .settings-qt-row.is-label-editing .settings-qt-label-input {
+  display: block;
+}
+
+.settings-page .settings-qt-label-input::placeholder {
+  font-style: italic;
+  color: var(--secondary-text-color);
+  opacity: 0.6;
+}
+
+/* tags 自动换行 */
+/* tags */
+.settings-page .settings-qt-tags-wrapper {
+  width: 100%;
+}
+
+.settings-page .settings-qt-tags-view {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--unit-1);
+  align-items: center;
+  cursor: text;
+  min-height: 1.4em;
+  border: 1px solid var(--secondary-border-color);
+  border-radius: var(--border-radius);
+  padding: 1px 6px;
+}
+
+.settings-page .settings-qt-tags-view .qt-tag {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.settings-page .settings-qt-tags-view .qt-tag::before {
+  content: "#";
+  opacity: 0.4;
+}
+
+.settings-page .settings-qt-tags-view.is-empty {
+  border-style: dashed;
+  color: var(--secondary-text-color);
+  font-style: italic;
+  opacity: 0.6;
+}
+
+/* 编辑态 */
+.settings-page .settings-qt-tags-wrapper.is-editing .settings-qt-tags-view {
+  display: none;
+}
+
+.settings-page .settings-qt-tags-wrapper.is-editing ld-tag-autocomplete {
+  display: block;
+  width: 100%;
+}
+
+/* 编辑态输入框与显示态一致 */
+.settings-page .settings-qt-tags-wrapper.is-editing .form-autocomplete-input {
+  min-height: 1.4em;
+  height: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--secondary-border-color);
+  border-radius: var(--border-radius);
+  background: transparent;
+  font-size: var(--font-size-sm);
+}
+
+.settings-page .settings-qt-tags-wrapper.is-editing .form-autocomplete-input input {
+  padding: 0;
+  font-size: var(--font-size-sm);
+  line-height: inherit;
+  height: auto;
+  border: none;
+  background: transparent;
+}
+
+.settings-page .settings-qt-tags-wrapper.is-editing .form-autocomplete-input input::placeholder {
+  font-style: italic;
+  opacity: 0.6;
+}
+
+/* 副行内的控件 */
+.settings-page .settings-qt-sub .settings-qt-chip-btn,
+.settings-page .settings-qt-sub .settings-qt-delete-btn {
+  flex: 0 0 auto;
+}
+
+/* chip 按钮 */
+.settings-page .settings-qt-chip-btn {
+  padding: 0 16px 0 6px;
+  border: 1px solid var(--secondary-border-color);
+  border-radius: var(--border-radius);
+  background: var(--body-color);
+  cursor: pointer;
+  white-space: nowrap;
+  color: inherit;
+  appearance: none;
+  line-height: 1.6;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath stroke='none' d='M0 0h24v24H0z' fill='none'/%3E%3Cpath d='M20 10h-16l5.5 -6'/%3E%3Cpath d='M4 14h16l-5.5 6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-size: 10px 10px;
+  background-position: right 4px center;
+}
+
+.settings-page .settings-qt-chip-btn:hover {
+  border-color: var(--primary-color);
+  color: var(--text-color);
+}
+
+/* 删除按钮 */
+.settings-page .settings-qt-delete-btn {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--secondary-text-color);
+}
+
+.settings-page .settings-qt-delete-btn:hover {
+  color: var(--error-color);
+}
+
+/* Icon Picker 弹出面板 */
+.settings-qt-icon-picker-popup {
+  position: absolute;
+  z-index: 350;
+  background: var(--body-color);
+  border: 1px solid var(--secondary-border-color);
+  border-radius: calc(var(--border-radius) * 2);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  padding: var(--unit-3);
+  max-width: calc(100vw - 16px);
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--unit-2);
+}
+
+.settings-qt-icon-picker-popup .qt-icon-picker-search {
+  width: 100%;
+  height: var(--settings-button-height);
+  padding: var(--control-padding-y-sm) var(--control-padding-x-sm);
+}
+
+.settings-qt-icon-picker-popup .qt-icon-picker-search::placeholder {
+  font-style: italic;
+}
+
+.settings-qt-icon-picker-popup .qt-icon-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+  gap: 2px;
+  overflow-y: auto;
+  max-height: 280px;
+  scrollbar-width: thin;
+}
+
+.settings-qt-icon-picker-popup .qt-icon-picker-item {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--border-radius);
+  padding: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-qt-icon-picker-popup .qt-icon-picker-item:hover {
+  background: color-mix(in srgb, var(--body-color-contrast) 80%, transparent);
+  border-color: var(--secondary-border-color);
+}
+
+.settings-qt-icon-picker-popup .qt-icon-picker-item.is-selected {
+  border-color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+}
+
+.settings-qt-icon-picker-popup .qt-icon-picker-hint {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--secondary-text-color);
+  padding: var(--unit-4);
+  font-size: var(--font-size-sm);
+}
+
+/* Highlight copy format preview */
+.settings-hl-copy-preview {
+  margin-top: var(--unit-2);
+}
+
+.settings-hl-copy-preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--unit-2);
+}
+
+@media (max-width: 600px) {
+  .settings-hl-copy-preview-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.settings-hl-copy-preview-item {
+  border: 1px solid var(--secondary-border-color);
+  border-radius: var(--border-radius);
+  overflow: hidden;
+}
+
+.settings-hl-copy-preview-label {
+  display: block;
+  padding: var(--unit-1) var(--unit-2);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--secondary-text-color);
+  background: var(--secondary-bg);
+  border-bottom: 1px solid var(--secondary-border-color);
+}
+
+.settings-hl-copy-preview-content {
+  margin: 0;
+  padding: var(--unit-2);
+  font-size: var(--font-size-sm);
+  font-family: var(--mono-font-family);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--body-font-color);
+  background: transparent;
+}
+
+.hl-copy-warn {
+  color: var(--error-color, #e8595f);
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+}
+
+.settings-control > .settings-select-input {
+  width: auto;
+  min-width: 120px;
 }

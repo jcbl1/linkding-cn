@@ -14,6 +14,12 @@ mkdir -p data/favicons
 mkdir -p data/previews
 # Create assets folder if it does not exist
 mkdir -p data/assets
+# Create custom processor config folders if they do not exist
+mkdir -p data/website_loader data/snapshot_processor data/reader_processor
+# Create empty settings files if they do not exist
+[ -f data/website_loader/settings.json ] || echo '{}' > data/website_loader/settings.json
+[ -f data/snapshot_processor/settings.json ] || echo '{}' > data/snapshot_processor/settings.json
+[ -f data/reader_processor/settings.json ] || echo '{}' > data/reader_processor/settings.json
 
 # Generate secret key file if it does not exist
 python manage.py generate_secret_key

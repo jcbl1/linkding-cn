@@ -346,8 +346,19 @@ class SearchQueryTokenizerTest(TestCase):
         self.assertEqual(len(tokens), 1)
         self.assertEqual(tokens[0].type, TokenType.EOF)
 
-    def test_field_term(self):
-        tokenizer = SearchQueryTokenizer("desc:(foo bar) and #tag")
+    def test_field_keyword(self):
+        tokenizer = SearchQueryTokenizer("desc:foo and #tag")
+        tokens = tokenizer.tokenize()
+        self.assertEqual(len(tokens), 4)
+        self.assertEqual(tokens[0].type, TokenType.FIELD_TERM)
+        self.assertEqual(tokens[0].value, ("desc", "foo"))
+        self.assertEqual(tokens[1].type, TokenType.AND)
+        self.assertEqual(tokens[2].type, TokenType.TAG)
+        self.assertEqual(tokens[2].value, "tag")
+        self.assertEqual(tokens[3].type, TokenType.EOF)
+
+    def test_field_quoted(self):
+        tokenizer = SearchQueryTokenizer('desc:"foo bar" and #tag')
         tokens = tokenizer.tokenize()
         self.assertEqual(len(tokens), 4)
         self.assertEqual(tokens[0].type, TokenType.FIELD_TERM)
@@ -357,13 +368,16 @@ class SearchQueryTokenizerTest(TestCase):
         self.assertEqual(tokens[2].value, "tag")
         self.assertEqual(tokens[3].type, TokenType.EOF)
 
-    def test_field_term_escaped_parentheses_treated_as_plain_term(self):
-        tokenizer = SearchQueryTokenizer(r"title:\(hello\)")
+    def test_field_keyword_with_boolean(self):
+        tokenizer = SearchQueryTokenizer("hl:美丽 or hl:乡村")
         tokens = tokenizer.tokenize()
-        self.assertEqual(len(tokens), 2)
-        self.assertEqual(tokens[0].type, TokenType.TERM)
-        self.assertEqual(tokens[0].value, "title:(hello)")
-        self.assertEqual(tokens[1].type, TokenType.EOF)
+        self.assertEqual(len(tokens), 4)
+        self.assertEqual(tokens[0].type, TokenType.FIELD_TERM)
+        self.assertEqual(tokens[0].value, ("hl", "美丽"))
+        self.assertEqual(tokens[1].type, TokenType.OR)
+        self.assertEqual(tokens[2].type, TokenType.FIELD_TERM)
+        self.assertEqual(tokens[2].value, ("hl", "乡村"))
+        self.assertEqual(tokens[3].type, TokenType.EOF)
 
 
 class SearchQueryParserTest(TestCase):
@@ -398,8 +412,18 @@ class SearchQueryParserTest(TestCase):
         self.assertEqual(result, expected)
 
     def test_field_term_expression(self):
-        result = parse_search_query("desc:(星) and #高人")
+        result = parse_search_query("desc:星 and #高人")
         expected = _and(_field("desc", "星"), _tag("高人"))
+        self.assertEqual(result, expected)
+
+    def test_field_keyword_or_expression(self):
+        result = parse_search_query("hl:美丽 or hl:乡村")
+        expected = _or(_field("hl", "美丽"), _field("hl", "乡村"))
+        self.assertEqual(result, expected)
+
+    def test_field_quoted_expression(self):
+        result = parse_search_query('hl:"美丽 乡村" and ann:感想')
+        expected = _and(_field("hl", "美丽 乡村"), _field("ann", "感想"))
         self.assertEqual(result, expected)
 
     def test_operator_precedence_and_over_or(self):
@@ -889,9 +913,21 @@ class ExpressionToStringTest(TestCase):
         expr = _keyword("unread")
         self.assertEqual(expression_to_string(expr), "!unread")
 
-    def test_field_term(self):
+    def test_field_term_keyword(self):
+        expr = _field("desc", "foo")
+        self.assertEqual(expression_to_string(expr), "desc:foo")
+
+    def test_field_term_quoted(self):
         expr = _field("desc", "foo bar")
-        self.assertEqual(expression_to_string(expr), "desc:(foo bar)")
+        self.assertEqual(expression_to_string(expr), 'desc:"foo bar"')
+
+    def test_field_term_with_hash(self):
+        expr = _field("desc", "foo#bar")
+        self.assertEqual(expression_to_string(expr), 'desc:"foo#bar"')
+
+    def test_field_term_with_bang(self):
+        expr = _field("desc", "foo!bar")
+        self.assertEqual(expression_to_string(expr), 'desc:"foo!bar"')
 
     def test_term_with_spaces(self):
         expr = _term("machine learning")
@@ -1174,8 +1210,8 @@ class StripTagFromQueryLaxSearchTest(TestCase):
         self.assertEqual(result, "books")
 
     def test_field_term_is_preserved(self):
-        result = strip_tag_from_query("desc:(星) and #高人", "高人")
-        self.assertEqual(result, "desc:(星)")
+        result = strip_tag_from_query("desc:星 and #高人", "高人")
+        self.assertEqual(result, "desc:星")
 
 
 class ExtractTagNamesFromQueryTest(TestCase):
@@ -1300,7 +1336,7 @@ class ExtractTagNamesFromQueryLaxSearchTest(TestCase):
         self.assertEqual(result, ["django", "python"])
 
     def test_lax_search_does_not_extract_field_term_as_tag(self):
-        result = extract_tag_names_from_query("desc:(星) and #高人", self.lax_profile)
+        result = extract_tag_names_from_query("desc:星 and #高人", self.lax_profile)
         self.assertEqual(result, ["高人"])
 
     def test_strict_search_ignores_terms(self):

@@ -29,82 +29,66 @@ class PaginationTagTest(TestCase, BookmarkFactoryMixin):
         return template_to_render.render(context)
 
     def assertPrevLinkDisabled(self, html: str):
-        self.assertInHTML(
-            """
-            <li class="page-item disabled">
-                <a href="#" tabindex="-1">Previous</a>
-            </li>
-            """,
-            html,
-        )
+        self.assertIn('class="page-nav prev disabled"', html)
 
     def assertPrevLink(
         self, html: str, page_number: int, href: str = None, frame: str = "_top"
     ):
         href = href if href else f"/test?page={page_number}"
-        self.assertInHTML(
-            f"""
-            <li class="page-item">
-                <a href="{href}" tabindex="-1" data-turbo-frame="{frame}">Previous</a>
-            </li>
-            """,
-            html,
-        )
+        self.assertIn(f'href="{href}"'.replace("&", "&amp;"), html)
+        self.assertIn('class="page-nav prev"', html)
+        self.assertNotIn('class="page-nav prev disabled"', html)
 
     def assertNextLinkDisabled(self, html: str):
-        self.assertInHTML(
-            """
-            <li class="page-item disabled">
-                <a href="#" tabindex="-1">Next</a>
-            </li>
-            """,
-            html,
-        )
+        self.assertIn('class="page-nav next disabled"', html)
 
     def assertNextLink(
         self, html: str, page_number: int, href: str = None, frame: str = "_top"
     ):
         href = href if href else f"/test?page={page_number}"
-        self.assertInHTML(
-            f"""
-            <li class="page-item">
-                <a href="{href}" tabindex="-1" data-turbo-frame="{frame}">Next</a>
-            </li>
-            """,
-            html,
-        )
+        self.assertIn(f'href="{href}"'.replace("&", "&amp;"), html)
+        self.assertIn('class="page-nav next"', html)
+        self.assertNotIn('class="page-nav next disabled"', html)
 
     def assertPageLink(
         self,
         html: str,
         page_number: int,
         active: bool,
-        count: int = 1,
         href: str = None,
         frame: str = "_top",
     ):
-        active_class = "active" if active else ""
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html, "html.parser")
         href = href if href else f"/test?page={page_number}"
-        self.assertInHTML(
-            f"""
-            <li class="page-item {active_class}">
-                <a href="{href}" data-turbo-frame="{frame}">{page_number}</a>
-            </li>
-            """,
-            html,
-            count=count,
-        )
+        # Find the page item with the matching number
+        page_item = soup.select_one(f'li.page-item[data-number="{page_number}"]')
+        self.assertIsNotNone(page_item, f"Page {page_number} not found")
+
+        if active:
+            self.assertIn("active", page_item.get("class", []))
+        else:
+            self.assertNotIn("active", page_item.get("class", []))
+
+        # Check the link href
+        link = page_item.select_one("a")
+        self.assertIsNotNone(link)
+        self.assertEqual(link.get("href"), href)
+
+    def assertPageLinkNotRendered(self, html: str, page_number: int):
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html, "html.parser")
+        page_item = soup.select_one(f'li.page-item[data-number="{page_number}"]')
+        self.assertIsNone(page_item, f"Page {page_number} should not be rendered")
 
     def assertTruncationIndicators(self, html: str, count: int):
-        self.assertInHTML(
-            """
-            <li class="page-item">
-                <span>...</span>
-            </li>
-            """,
-            html,
-            count=count,
-        )
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html, "html.parser")
+        gaps = soup.select("li.page-item.gap")
+        self.assertEqual(len(gaps), count)
 
     def test_previous_disabled_on_page_1(self):
         rendered_template = self.render_template(100, 10, 1)
@@ -126,45 +110,39 @@ class PaginationTagTest(TestCase, BookmarkFactoryMixin):
 
     def test_truncate_pages_start(self):
         current_page = 1
-        expected_visible_pages = [1, 2, 3, 10]
         rendered_template = self.render_template(100, 10, current_page)
-        for page_number in range(1, 10):
-            expected_occurrences = 1 if page_number in expected_visible_pages else 0
+        # All pages should be rendered (new pagination component renders all)
+        for page_number in range(1, 11):
             self.assertPageLink(
                 rendered_template,
                 page_number,
                 page_number == current_page,
-                expected_occurrences,
             )
-        self.assertTruncationIndicators(rendered_template, 1)
+        self.assertTruncationIndicators(rendered_template, 0)
 
     def test_truncate_pages_middle(self):
         current_page = 5
-        expected_visible_pages = [1, 3, 4, 5, 6, 7, 10]
         rendered_template = self.render_template(100, 10, current_page)
-        for page_number in range(1, 10):
-            expected_occurrences = 1 if page_number in expected_visible_pages else 0
+        # All pages should be rendered
+        for page_number in range(1, 11):
             self.assertPageLink(
                 rendered_template,
                 page_number,
                 page_number == current_page,
-                expected_occurrences,
             )
-        self.assertTruncationIndicators(rendered_template, 2)
+        self.assertTruncationIndicators(rendered_template, 0)
 
     def test_truncate_pages_near_end(self):
         current_page = 9
-        expected_visible_pages = [1, 7, 8, 9, 10]
         rendered_template = self.render_template(100, 10, current_page)
-        for page_number in range(1, 10):
-            expected_occurrences = 1 if page_number in expected_visible_pages else 0
+        # All pages should be rendered
+        for page_number in range(1, 11):
             self.assertPageLink(
                 rendered_template,
                 page_number,
                 page_number == current_page,
-                expected_occurrences,
             )
-        self.assertTruncationIndicators(rendered_template, 1)
+        self.assertTruncationIndicators(rendered_template, 0)
 
     def test_respects_search_parameters(self):
         rendered_template = self.render_template(

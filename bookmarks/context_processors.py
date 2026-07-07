@@ -1,5 +1,5 @@
 from bookmarks import utils
-from bookmarks.models import Toast
+from bookmarks.models import Bookmark, Toast
 
 
 def toasts(request):
@@ -19,3 +19,13 @@ def toasts(request):
 
 def app_version(request):
     return {"app_version": utils.app_version}
+
+
+def user_has_shared_bookmarks(request):
+    if not request.user.is_authenticated:
+        return {"user_has_shared_bookmarks": False}
+    return {
+        "user_has_shared_bookmarks": Bookmark.objects.filter(
+            owner=request.user, shared=True
+        ).exists()
+    }

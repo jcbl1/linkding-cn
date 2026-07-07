@@ -28,9 +28,21 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
         self.mock_assets_upload_snapshot = (
             self.mock_assets_upload_snapshot_patcher.start()
         )
+        self.mock_load_favicon_patcher = patch(
+            "bookmarks.services.bookmarks.tasks.load_favicon"
+        )
+        self.mock_load_favicon = self.mock_load_favicon_patcher.start()
+        self.mock_create_html_snapshot_patcher = patch(
+            "bookmarks.services.bookmarks.tasks.create_html_snapshot"
+        )
+        self.mock_create_html_snapshot = (
+            self.mock_create_html_snapshot_patcher.start()
+        )
 
     def tearDown(self):
         self.mock_assets_upload_snapshot_patcher.stop()
+        self.mock_load_favicon_patcher.stop()
+        self.mock_create_html_snapshot_patcher.stop()
 
     def authenticate(self):
         self.api_token = self.setup_api_token()
@@ -69,7 +81,6 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
             5,
             with_tags=True,
             with_web_archive_snapshot_url=True,
-            with_favicon_file=True,
             with_preview_image_file=True,
         )
 
@@ -225,7 +236,6 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
             archived=True,
             with_tags=True,
             with_web_archive_snapshot_url=True,
-            with_favicon_file=True,
             with_preview_image_file=True,
         )
 
@@ -309,7 +319,6 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
             user=other_user,
             with_tags=True,
             with_web_archive_snapshot_url=True,
-            with_favicon_file=True,
             with_preview_image_file=True,
         )
 
@@ -601,6 +610,9 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
 
     def test_create_bookmark_minimal_payload(self):
         self.authenticate()
+        profile = self.get_or_create_test_user().profile
+        profile.default_mark_unread = False
+        profile.save()
 
         data = {"url": "https://example.com/"}
         self.post(
@@ -657,6 +669,9 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
 
     def test_create_bookmark_is_not_unread_by_default(self):
         self.authenticate()
+        profile = self.get_or_create_test_user().profile
+        profile.default_mark_unread = False
+        profile.save()
 
         data = {"url": "https://example.com/"}
         self.post(reverse("linkding:bookmark-list"), data, status.HTTP_201_CREATED)
@@ -1069,12 +1084,15 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
 
     def test_check_returns_bookmark_if_url_is_bookmarked(self):
         self.authenticate()
+        from bookmarks.models import FaviconCache
+        FaviconCache.objects.create(
+            domain="example.com", favicon_file="example_com.png", status="success"
+        )
 
         bookmark = self.setup_bookmark(
             url="https://example.com",
             title="Example title",
             description="Example description",
-            favicon_file="favicon.png",
             preview_image_file="preview.png",
         )
 
@@ -1091,7 +1109,7 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
         self.assertEqual(bookmark.title, bookmark_data["title"])
         self.assertEqual(bookmark.description, bookmark_data["description"])
         self.assertEqual(
-            "http://testserver/static/favicon.png", bookmark_data["favicon_url"]
+            "http://testserver/static/example_com.png", bookmark_data["favicon_url"]
         )
         self.assertEqual(
             "http://testserver/static/preview.png", bookmark_data["preview_image_url"]

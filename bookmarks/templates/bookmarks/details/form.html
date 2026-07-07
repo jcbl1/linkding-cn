@@ -9,15 +9,20 @@
   <div class="weblinks">
     <a class="weblink" href="{{ details.bookmark.url }}" rel="noopener"
        target="{{ details.profile.bookmark_link_target }}">
-      {% if details.bookmark.favicon_file %}
-        <img class="favicon" src="{% static details.bookmark.favicon_file %}" alt="">
-      {% else %}
+      {% if details.favicon_file %}
+        <img class="favicon" src="{% static details.favicon_file %}"
+             onerror="handleFaviconError(this,'{{ details.bookmark.url|escapejs }}')"
+             alt="">
+      {% elif details.favicon_unavailable %}
         <img class="favicon" src="{% static 'favicon.svg' %}" alt="">
+      {% else %}
+        <img class="favicon" src="{% static 'favicon.svg' %}"
+             data-favicon-url="{{ details.bookmark.url|escape }}" alt="">
       {% endif %}
       <span>{% translate "Original URL" %}</span>
     </a>
     <a class="weblink" href="{% url 'linkding:bookmarks.read' details.bookmark.id %}"
-       target="{{ details.profile.bookmark_link_target }}">
+       target="{{ details.profile.bookmark_link_target }}" data-turbo="false">
       <svg class="favicon" xmlns="http://www.w3.org/2000/svg">
         <use xlink:href="#ld-icon-unread"></use>
       </svg>
@@ -99,7 +104,17 @@
     {% if details.bookmark.resolved_description %}
       <section class="description col-2">
         <h3>{% translate "Description" %}</h3>
-        <div>{{ details.bookmark.resolved_description }}</div>
+        <div class="description-content">
+          {% if details.bookmark.resolved_description.splitlines %}
+            {% for line in details.bookmark.resolved_description.splitlines %}
+              {% if line.strip %}
+                <div class="description-line">{{ line.strip }}</div>
+              {% endif %}
+            {% endfor %}
+          {% else %}
+            <div class="description-line">{{ details.bookmark.resolved_description }}</div>
+          {% endif %}
+        </div>
       </section>
     {% endif %}
     {% if details.bookmark.notes %}
@@ -114,7 +129,7 @@
         {% if details.bookmark.preview_image_file %}
           <img src="{% static details.bookmark.preview_image_file %}" alt=""/>
         {% elif details.bookmark.preview_image_remote_url %}
-          <img src="{{ details.bookmark.preview_image_remote_url }}" referrerpolicy="unsafe-url" alt=""/>
+          <img src="{{ details.bookmark.preview_image_remote_url }}" referrerpolicy="unsafe-url" alt="" onerror="this.style.display='none'"/>
         {% endif %}
       </section>
     {% endif %}

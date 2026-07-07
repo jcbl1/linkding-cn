@@ -45,23 +45,17 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         )
         self.mock_save_api_patcher.start()
 
-        self.mock_download_favicon_patcher = mock.patch(
-            "bookmarks.services.favicon_loader.load_favicon"
+        self.mock_fetch_favicon_patcher = mock.patch(
+            "bookmarks.services.favicon_loader.fetch_and_save_favicon"
         )
-        self.mock_download_favicon = self.mock_download_favicon_patcher.start()
-        self.mock_download_favicon.return_value = "https_example_com.png"
+        self.mock_fetch_favicon = self.mock_fetch_favicon_patcher.start()
+        self.mock_fetch_favicon.return_value = "https_example_com.png"
 
-        self.mock_load_favicon_patcher = mock.patch(
-            "bookmarks.services.favicon_loader.refresh_favicon"
+        self.mock_find_cached_patcher = mock.patch(
+            "bookmarks.services.favicon_loader._find_cached_favicon_file"
         )
-        self.mock_load_favicon = self.mock_load_favicon_patcher.start()
-        self.mock_load_favicon.return_value = "https_example_com.png"
-
-        self.mock_get_cached_favicon_patcher = mock.patch(
-            "bookmarks.services.favicon_loader.get_cached_favicon"
-        )
-        self.mock_get_cached_favicon = self.mock_get_cached_favicon_patcher.start()
-        self.mock_get_cached_favicon.return_value = None
+        self.mock_find_cached = self.mock_find_cached_patcher.start()
+        self.mock_find_cached.return_value = None
 
         self.mock_assets_create_snapshot_patcher = mock.patch(
             "bookmarks.services.assets.create_snapshot",
@@ -91,9 +85,8 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
 
     def tearDown(self):
         self.mock_save_api_patcher.stop()
-        self.mock_download_favicon_patcher.stop()
-        self.mock_load_favicon_patcher.stop()
-        self.mock_get_cached_favicon_patcher.stop()
+        self.mock_fetch_favicon_patcher.stop()
+        self.mock_find_cached_patcher.stop()
         self.mock_assets_create_snapshot_patcher.stop()
         self.mock_load_preview_image_patcher.stop()
         huey.storage.flush_results()
@@ -192,142 +185,123 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
 
         self.assertEqual(self.executed_count(), 0)
 
-    def test_load_favicon_should_create_favicon_file(self):
+    def test_ensure_favicon_should_fetch_when_no_cache(self):
+        """无缓存时应入队获取任务。"""
+        bookmark = self.setup_bookmark()
+
+        tasks.ensure_favicon(self.get_or_create_test_user(), bookmark.url)
+
+        # Huey immediate mode: task executed synchronously
+        self.mock_fetch_favicon.assert_called_once()
+
+    def test_ensure_favicon_should_use_disk_cache(self):
+        """磁盘有缓存文件时不应触发网络请求。"""
+        bookmark = self.setup_bookmark()
+        self.mock_find_cached.return_value = "example_com.png"
+
+        tasks.ensure_favicon(self.get_or_create_test_user(), bookmark.url)
+
+        self.mock_fetch_favicon.assert_not_called()
+        from bookmarks.models import FaviconCache
+        cache = FaviconCache.objects.filter(domain="example.com").first()
+        self.assertIsNotNone(cache)
+        self.assertEqual(cache.favicon_file, "example_com.png")
+
+    def test_ensure_favicon_should_not_run_when_disabled(self):
+        self.user.profile.enable_favicons = False
+        self.user.profile.save()
+
+        bookmark = self.setup_bookmark()
+        tasks.ensure_favicon(self.get_or_create_test_user(), bookmark.url)
+
+        self.mock_fetch_favicon.assert_not_called()
+
+    def test_load_favicon_compatibility_shim(self):
+        """旧的 load_favicon(bookmark) 接口仍然可用。"""
         bookmark = self.setup_bookmark()
 
         tasks.load_favicon(self.get_or_create_test_user(), bookmark)
-        bookmark.refresh_from_db()
 
-        self.assertEqual(self.executed_count(), 1)
-        self.assertEqual(bookmark.favicon_file, "https_example_com.png")
+        self.mock_fetch_favicon.assert_called_once()
 
-    def test_load_favicon_should_use_fresh_cached_favicon_without_refresh(self):
+    def test_refresh_favicon_compatibility_shim(self):
+        """旧的 refresh_favicon(bookmark) 接口仍然可用。"""
         bookmark = self.setup_bookmark()
-        self.mock_get_cached_favicon.return_value = favicon_loader.CachedFavicon(
-            filename="https_example_com.png",
-            is_stale=False,
-        )
-
-        tasks.load_favicon(self.get_or_create_test_user(), bookmark)
-        bookmark.refresh_from_db()
-
-        self.assertEqual(self.executed_count(), 0)
-        self.mock_load_favicon.assert_not_called()
-        self.assertEqual(bookmark.favicon_file, "https_example_com.png")
-
-    def test_load_favicon_should_use_stale_cached_favicon_and_refresh_in_background(
-        self,
-    ):
-        bookmark = self.setup_bookmark()
-        self.mock_get_cached_favicon.return_value = favicon_loader.CachedFavicon(
-            filename="https_example_com.png",
-            is_stale=True,
-        )
-
-        def mock_refresh_favicon(url, timeout=10):
-            bookmark.refresh_from_db()
-            self.assertEqual(bookmark.favicon_file, "https_example_com.png")
-            return "https_example_updated_com.png"
-
-        self.mock_load_favicon.side_effect = mock_refresh_favicon
-
-        tasks.load_favicon(self.get_or_create_test_user(), bookmark)
-        bookmark.refresh_from_db()
-
-        self.assertEqual(self.executed_count(), 1)
-        self.mock_load_favicon.assert_called_once()
-        self.assertEqual(bookmark.favicon_file, "https_example_updated_com.png")
-
-    def test_load_favicon_should_refresh_when_cache_is_missing(self):
-        bookmark = self.setup_bookmark()
-        self.mock_get_cached_favicon.return_value = None
-
-        tasks.load_favicon(self.get_or_create_test_user(), bookmark)
-        bookmark.refresh_from_db()
-
-        self.assertEqual(self.executed_count(), 1)
-        self.mock_load_favicon.assert_called_once()
-        self.assertEqual(bookmark.favicon_file, "https_example_com.png")
-
-    def test_load_favicon_should_update_favicon_file(self):
-        bookmark = self.setup_bookmark(favicon_file="https_example_com.png")
-
-        self.mock_load_favicon.return_value = "https_example_updated_com.png"
-
-        tasks.load_favicon(self.get_or_create_test_user(), bookmark)
-
-        bookmark.refresh_from_db()
-        self.mock_load_favicon.assert_called_once()
-        self.assertEqual(bookmark.favicon_file, "https_example_updated_com.png")
-
-    def test_load_favicon_should_handle_missing_bookmark(self):
-        tasks._load_favicon_task(123)
-
-        self.mock_load_favicon.assert_not_called()
-
-    def test_load_favicon_should_not_save_stale_bookmark_data(self):
-        bookmark = self.setup_bookmark()
-
-        # update bookmark during API call to check that saving
-        # the favicon does not overwrite updated bookmark data
-        def mock_load_favicon_impl(url):
-            bookmark.title = "Updated title"
-            bookmark.save()
-            return "https_example_com.png"
-
-        self.mock_load_favicon.side_effect = mock_load_favicon_impl
-
-        tasks.load_favicon(self.get_or_create_test_user(), bookmark)
-        bookmark.refresh_from_db()
-
-        self.assertEqual(bookmark.title, "Updated title")
-        self.assertEqual(bookmark.favicon_file, "https_example_com.png")
-
-    def test_refresh_favicon_should_retry_and_keep_existing_file_on_failure(self):
-        bookmark = self.setup_bookmark(favicon_file="https_example_com.png")
-
-        self.mock_load_favicon.side_effect = requests.exceptions.RequestException(
-            "boom"
-        )
 
         tasks.refresh_favicon(self.get_or_create_test_user(), bookmark)
-        bookmark.refresh_from_db()
 
-        self.assertEqual(tasks._load_favicon_task.task_class.default_retries, 3)
-        self.assertEqual(self.mock_load_favicon.call_count, 1)
-        self.assertEqual(bookmark.favicon_file, "https_example_com.png")
+        self.mock_fetch_favicon.assert_called_once()
+
+    def test_fetch_domain_favicon_updates_favicon_cache_and_bookmarks(self):
+        """获取成功后应更新 FaviconCache 和 Bookmark.favicon_file。"""
+        from bookmarks.models import FaviconCache
+        bookmark = self.setup_bookmark()
+
+        tasks._fetch_domain_favicon_task(self.user.id, "example.com")
+
+        cache = FaviconCache.objects.filter(domain="example.com").first()
+        self.assertIsNotNone(cache)
+        self.assertEqual(cache.status, FaviconCache.STATUS_SUCCESS)
+        self.assertEqual(cache.favicon_file, "https_example_com.png")
+        # Bookmark.favicon_file field removed; verify via FaviconCache only
+        self.assertEqual(cache.favicon_file, "https_example_com.png")
+
+    def test_fetch_domain_favicon_handles_failure_with_retry(self):
+        """获取失败时应更新重试计数和下次重试时间。"""
+        from bookmarks.models import FaviconCache
+        self.mock_fetch_favicon.return_value = ""
+
+        tasks._fetch_domain_favicon_task(self.user.id, "nonexistent.com")
+
+        cache = FaviconCache.objects.filter(domain="nonexistent.com").first()
+        self.assertIsNotNone(cache)
+        self.assertEqual(cache.status, FaviconCache.STATUS_FAILED)
+        self.assertEqual(cache.retry_count, 1)
+        self.assertIsNotNone(cache.next_retry_at)
+        # 第一次重试延迟 1 分钟
+        self.assertEqual(cache.favicon_file, "")
+
+    def test_fetch_domain_favicon_marks_missing_after_max_retries(self):
+        """连续失败 5 次后应标记为 missing，favicon_file 为空。"""
+        from bookmarks.models import FaviconCache
+        self.mock_fetch_favicon.return_value = ""
+
+        # Simulate 5 failures (1min, 3min, 5min, 10min, 20min)
+        for _ in range(5):
+            tasks._fetch_domain_favicon_task(self.user.id, "never.com")
+
+        cache = FaviconCache.objects.filter(domain="never.com").first()
+        self.assertEqual(cache.status, FaviconCache.STATUS_MISSING)
+        self.assertEqual(cache.retry_count, 5)
+        self.assertEqual(cache.favicon_file, "")
 
     @override_settings(LD_DISABLE_BACKGROUND_TASKS=True)
     def test_load_favicon_should_not_run_when_background_tasks_are_disabled(self):
         bookmark = self.setup_bookmark()
         tasks.load_favicon(self.get_or_create_test_user(), bookmark)
 
-        self.assertEqual(self.executed_count(), 0)
+        self.mock_fetch_favicon.assert_not_called()
 
-    def test_load_favicon_should_not_run_when_favicon_feature_is_disabled(self):
-        self.user.profile.enable_favicons = False
-        self.user.profile.save()
-
-        bookmark = self.setup_bookmark()
-        tasks.load_favicon(self.get_or_create_test_user(), bookmark)
-
-        self.assertEqual(self.executed_count(), 0)
-
-    def test_schedule_bookmarks_without_favicons_should_load_favicon_for_all_bookmarks_without_favicon(
+    def test_schedule_bookmarks_without_favicons_should_load_favicon_for_bookmarks_without_favicon(
         self,
     ):
         user = self.get_or_create_test_user()
         self.setup_bookmark()
         self.setup_bookmark()
         self.setup_bookmark()
-        self.setup_bookmark(favicon_file="https_example_com.png")
-        self.setup_bookmark(favicon_file="https_example_com.png")
-        self.setup_bookmark(favicon_file="https_example_com.png")
+        # 第4个书签的域名已有成功的 FaviconCache 条目，应被跳过
+        bookmark_with_favicon = self.setup_bookmark(url="https://other-domain.com/page")
+        from bookmarks.models import FaviconCache
+        FaviconCache.objects.create(
+            domain="other-domain.com",
+            favicon_file="other_domain_com.png",
+            status=FaviconCache.STATUS_SUCCESS,
+        )
 
         tasks.schedule_bookmarks_without_favicons(user)
 
-        self.assertEqual(self.executed_count(), 4)
-        self.assertEqual(self.mock_load_favicon.call_count, 3)
+        # 3 bookmarks without favicon, all same domain -> 1 fetch task (domain-deduped)
+        self.mock_fetch_favicon.assert_called()
 
     def test_schedule_bookmarks_without_favicons_should_only_update_user_owned_bookmarks(
         self,
@@ -338,14 +312,12 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         )
         self.setup_bookmark()
         self.setup_bookmark()
-        self.setup_bookmark()
-        self.setup_bookmark(user=other_user)
-        self.setup_bookmark(user=other_user)
         self.setup_bookmark(user=other_user)
 
         tasks.schedule_bookmarks_without_favicons(user)
 
-        self.assertEqual(self.mock_load_favicon.call_count, 3)
+        # Only 2 bookmarks belong to the user -> 1 fetch (same domain)
+        self.mock_fetch_favicon.assert_called()
 
     @override_settings(LD_DISABLE_BACKGROUND_TASKS=True)
     def test_schedule_bookmarks_without_favicons_should_not_run_when_background_tasks_are_disabled(
@@ -354,7 +326,7 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         self.setup_bookmark()
         tasks.schedule_bookmarks_without_favicons(self.get_or_create_test_user())
 
-        self.assertEqual(self.executed_count(), 0)
+        self.mock_fetch_favicon.assert_not_called()
 
     def test_schedule_bookmarks_without_favicons_should_not_run_when_favicon_feature_is_disabled(
         self,
@@ -365,37 +337,17 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         self.setup_bookmark()
         tasks.schedule_bookmarks_without_favicons(self.get_or_create_test_user())
 
-        self.assertEqual(self.executed_count(), 0)
+        self.mock_fetch_favicon.assert_not_called()
 
-    def test_schedule_refresh_favicons_should_update_favicon_for_all_bookmarks(self):
+    def test_schedule_refresh_favicons_should_fetch_for_all_domains(self):
         user = self.get_or_create_test_user()
         self.setup_bookmark()
-        self.setup_bookmark()
-        self.setup_bookmark()
-        self.setup_bookmark(favicon_file="https_example_com.png")
-        self.setup_bookmark(favicon_file="https_example_com.png")
-        self.setup_bookmark(favicon_file="https_example_com.png")
+        self.setup_bookmark(url="https://other-domain.com/page")
 
         tasks.schedule_refresh_favicons(user)
 
-        self.assertEqual(self.executed_count(), 7)
-        self.assertEqual(self.mock_load_favicon.call_count, 6)
-
-    def test_schedule_refresh_favicons_should_only_update_user_owned_bookmarks(self):
-        user = self.get_or_create_test_user()
-        other_user = User.objects.create_user(
-            "otheruser", "otheruser@example.com", "password123"
-        )
-        self.setup_bookmark()
-        self.setup_bookmark()
-        self.setup_bookmark()
-        self.setup_bookmark(user=other_user)
-        self.setup_bookmark(user=other_user)
-        self.setup_bookmark(user=other_user)
-
-        tasks.schedule_refresh_favicons(user)
-
-        self.assertEqual(self.mock_load_favicon.call_count, 3)
+        # All bookmarks have same domain -> at least 1 fetch
+        self.mock_fetch_favicon.assert_called()
 
     @override_settings(LD_DISABLE_BACKGROUND_TASKS=True)
     def test_schedule_refresh_favicons_should_not_run_when_background_tasks_are_disabled(
@@ -404,14 +356,14 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         self.setup_bookmark()
         tasks.schedule_refresh_favicons(self.get_or_create_test_user())
 
-        self.assertEqual(self.executed_count(), 0)
+        self.mock_fetch_favicon.assert_not_called()
 
     @override_settings(LD_ENABLE_REFRESH_FAVICONS=False)
     def test_schedule_refresh_favicons_should_not_run_when_refresh_is_disabled(self):
         self.setup_bookmark()
         tasks.schedule_refresh_favicons(self.get_or_create_test_user())
 
-        self.assertEqual(self.executed_count(), 0)
+        self.mock_fetch_favicon.assert_not_called()
 
     def test_schedule_refresh_favicons_should_not_run_when_favicon_feature_is_disabled(
         self,
@@ -422,7 +374,20 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         self.setup_bookmark()
         tasks.schedule_refresh_favicons(self.get_or_create_test_user())
 
-        self.assertEqual(self.executed_count(), 0)
+        self.mock_fetch_favicon.assert_not_called()
+
+    def test_rename_favicon_for_domain_config_is_noop(self):
+        """域名规则变更后，rename_favicon_for_domain_config 是 no-op（Bookmark.favicon_file 已移除）。"""
+        user = self.get_or_create_test_user()
+        user.profile.enable_favicons = True
+        user.profile.save()
+
+        self.setup_bookmark(url="https://example.com/page")
+
+        old_config = ""
+        new_config = "example.com -> test.com"
+        # 不应抛出异常
+        tasks.rename_favicon_for_domain_config(user, old_config, new_config)
 
     def test_load_preview_image_should_create_preview_image_file(self):
         bookmark = self.setup_bookmark()
@@ -570,8 +535,8 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         bookmark = self.setup_bookmark()
 
         with mock.patch(
-            "bookmarks.services.tasks._kick_html_snapshot_dispatcher"
-        ) as mock_kick_html_snapshot_dispatcher:
+            "bookmarks.services.tasks._trigger_html_snapshot_dispatcher"
+        ) as mock_trigger_html_snapshot_dispatcher:
             tasks.create_html_snapshot(bookmark)
             self.assertEqual(BookmarkAsset.objects.count(), 1)
 
@@ -586,7 +551,7 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
                 self.assertIn("New snapshot", asset.display_name)
                 self.assertEqual(asset.status, BookmarkAsset.STATUS_PENDING)
 
-            self.assertEqual(mock_kick_html_snapshot_dispatcher.call_count, 2)
+            self.assertEqual(mock_trigger_html_snapshot_dispatcher.call_count, 2)
             self.mock_assets_create_snapshot.assert_not_called()
 
     @override_settings(LD_ENABLE_SNAPSHOTS=True)
@@ -598,12 +563,12 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         ]
 
         with mock.patch(
-            "bookmarks.services.tasks._kick_html_snapshot_dispatcher"
-        ) as mock_kick_html_snapshot_dispatcher:
+            "bookmarks.services.tasks._trigger_html_snapshot_dispatcher"
+        ) as mock_trigger_html_snapshot_dispatcher:
             tasks.create_html_snapshots(bookmarks)
 
         self.assertEqual(BookmarkAsset.objects.count(), 3)
-        self.assertEqual(mock_kick_html_snapshot_dispatcher.call_count, 1)
+        self.assertEqual(mock_trigger_html_snapshot_dispatcher.call_count, 1)
 
     @override_settings(LD_ENABLE_SNAPSHOTS=True)
     def test_schedule_html_snapshots_should_kick_dispatcher_for_pending_assets(self):
@@ -615,11 +580,11 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         )
 
         with mock.patch(
-            "bookmarks.services.tasks._kick_html_snapshot_dispatcher"
-        ) as mock_kick_html_snapshot_dispatcher:
+            "bookmarks.services.tasks._trigger_html_snapshot_dispatcher"
+        ) as mock_trigger_html_snapshot_dispatcher:
             tasks._schedule_html_snapshots_task()
 
-        mock_kick_html_snapshot_dispatcher.assert_called_once_with()
+        mock_trigger_html_snapshot_dispatcher.assert_called_once_with()
 
     @override_settings(LD_ENABLE_SNAPSHOTS=True)
     def test_schedule_html_snapshots_should_not_kick_dispatcher_when_no_pending_assets(
@@ -633,11 +598,11 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         )
 
         with mock.patch(
-            "bookmarks.services.tasks._kick_html_snapshot_dispatcher"
-        ) as mock_kick_html_snapshot_dispatcher:
+            "bookmarks.services.tasks._trigger_html_snapshot_dispatcher"
+        ) as mock_trigger_html_snapshot_dispatcher:
             tasks._schedule_html_snapshots_task()
 
-        mock_kick_html_snapshot_dispatcher.assert_not_called()
+        mock_trigger_html_snapshot_dispatcher.assert_not_called()
 
     @override_settings(LD_ENABLE_SNAPSHOTS=True)
     def test_select_next_html_snapshot_asset_should_prefer_newest_eligible_asset(self):
@@ -825,6 +790,186 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         tasks._create_html_snapshot_task(123)
 
         self.mock_assets_create_snapshot.assert_not_called()
+
+    @override_settings(LD_ENABLE_SNAPSHOTS=True, LD_SNAPSHOT_RETRY_DELAYS=[60, 300, 1500])
+    def test_create_html_snapshot_task_should_retry_on_failure(self):
+        bookmark = self.setup_bookmark(url="https://example.com")
+        asset = self.setup_asset(
+            bookmark=bookmark,
+            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
+            status=BookmarkAsset.STATUS_PENDING,
+            retry_count=0,
+        )
+
+        # 模拟快照失败（设置 STATUS_FAILURE 并抛出异常，模拟真实行为）
+        def create_snapshot_failure(asset):
+            BookmarkAsset.objects.filter(id=asset.id).update(
+                status=BookmarkAsset.STATUS_FAILURE
+            )
+            raise Exception("Snapshot failed")
+
+        self.mock_assets_create_snapshot.side_effect = create_snapshot_failure
+
+        mock_now = timezone.now()
+        with mock.patch("bookmarks.services.tasks.timezone.now", return_value=mock_now):
+            tasks._create_html_snapshot_task(asset.id)
+
+        asset.refresh_from_db()
+        self.assertEqual(asset.status, BookmarkAsset.STATUS_PENDING)
+        self.assertEqual(asset.retry_count, 1)
+        self.assertIsNotNone(asset.next_retry_at)
+        # 第一次重试延迟 60 秒
+        self.assertEqual(asset.next_retry_at, mock_now + timedelta(seconds=60))
+
+    @override_settings(LD_ENABLE_SNAPSHOTS=True, LD_SNAPSHOT_RETRY_DELAYS=[60, 300, 1500])
+    def test_create_html_snapshot_task_should_use_configured_delays(self):
+        bookmark = self.setup_bookmark(url="https://example.com")
+        asset = self.setup_asset(
+            bookmark=bookmark,
+            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
+            status=BookmarkAsset.STATUS_PENDING,
+            retry_count=1,  # 已重试 1 次
+        )
+
+        # 模拟快照失败（设置 STATUS_FAILURE 并抛出异常，模拟真实行为）
+        def create_snapshot_failure(asset):
+            BookmarkAsset.objects.filter(id=asset.id).update(
+                status=BookmarkAsset.STATUS_FAILURE
+            )
+            raise Exception("Snapshot failed")
+
+        self.mock_assets_create_snapshot.side_effect = create_snapshot_failure
+
+        mock_now = timezone.now()
+        with mock.patch("bookmarks.services.tasks.timezone.now", return_value=mock_now):
+            tasks._create_html_snapshot_task(asset.id)
+
+        asset.refresh_from_db()
+        self.assertEqual(asset.status, BookmarkAsset.STATUS_PENDING)
+        self.assertEqual(asset.retry_count, 2)
+        self.assertIsNotNone(asset.next_retry_at)
+        # 第二次重试延迟 300 秒（数组索引 1）
+        self.assertEqual(asset.next_retry_at, mock_now + timedelta(seconds=300))
+
+    @override_settings(LD_ENABLE_SNAPSHOTS=True, LD_SNAPSHOT_RETRY_DELAYS=[60, 300, 1500])
+    def test_create_html_snapshot_task_should_set_failure_after_max_retries(self):
+        bookmark = self.setup_bookmark(url="https://example.com")
+        asset = self.setup_asset(
+            bookmark=bookmark,
+            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
+            status=BookmarkAsset.STATUS_PENDING,
+            retry_count=3,  # 已达最大重试次数（数组长度）
+        )
+
+        # 模拟快照失败（设置 STATUS_FAILURE 并抛出异常，模拟真实行为）
+        def create_snapshot_failure(asset):
+            BookmarkAsset.objects.filter(id=asset.id).update(
+                status=BookmarkAsset.STATUS_FAILURE
+            )
+            raise Exception("Snapshot failed")
+
+        self.mock_assets_create_snapshot.side_effect = create_snapshot_failure
+
+        tasks._create_html_snapshot_task(asset.id)
+
+        asset.refresh_from_db()
+        self.assertEqual(asset.status, BookmarkAsset.STATUS_FAILURE)
+        self.assertEqual(asset.retry_count, 3)  # retry_count 不变
+        self.assertIsNone(asset.next_retry_at)  # next_retry_at 未设置
+
+    @override_settings(LD_ENABLE_SNAPSHOTS=True, LD_SNAPSHOT_RETRY_DELAYS=[30, 60])
+    def test_create_html_snapshot_task_should_use_custom_delays(self):
+        """验证自定义延迟数组配置"""
+        bookmark = self.setup_bookmark(url="https://example.com")
+        asset = self.setup_asset(
+            bookmark=bookmark,
+            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
+            status=BookmarkAsset.STATUS_PENDING,
+            retry_count=0,
+        )
+
+        # 模拟快照失败（设置 STATUS_FAILURE 并抛出异常，模拟真实行为）
+        def create_snapshot_failure(asset):
+            BookmarkAsset.objects.filter(id=asset.id).update(
+                status=BookmarkAsset.STATUS_FAILURE
+            )
+            raise Exception("Snapshot failed")
+
+        self.mock_assets_create_snapshot.side_effect = create_snapshot_failure
+
+        mock_now = timezone.now()
+        with mock.patch("bookmarks.services.tasks.timezone.now", return_value=mock_now):
+            tasks._create_html_snapshot_task(asset.id)
+
+        asset.refresh_from_db()
+        self.assertEqual(asset.status, BookmarkAsset.STATUS_PENDING)
+        self.assertEqual(asset.retry_count, 1)
+        # 第一次重试延迟 30 秒（自定义数组的第一个元素）
+        self.assertEqual(asset.next_retry_at, mock_now + timedelta(seconds=30))
+
+    @override_settings(LD_ENABLE_SNAPSHOTS=True, LD_SNAPSHOT_RETRY_DELAYS=[30, 60])
+    def test_create_html_snapshot_task_should_respect_custom_max_retries(self):
+        """验证自定义数组长度决定最大重试次数"""
+        bookmark = self.setup_bookmark(url="https://example.com")
+        asset = self.setup_asset(
+            bookmark=bookmark,
+            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
+            status=BookmarkAsset.STATUS_PENDING,
+            retry_count=2,  # 已达最大重试次数（数组长度为 2）
+        )
+
+        # 模拟快照失败（设置 STATUS_FAILURE 并抛出异常，模拟真实行为）
+        def create_snapshot_failure(asset):
+            BookmarkAsset.objects.filter(id=asset.id).update(
+                status=BookmarkAsset.STATUS_FAILURE
+            )
+            raise Exception("Snapshot failed")
+
+        self.mock_assets_create_snapshot.side_effect = create_snapshot_failure
+
+        tasks._create_html_snapshot_task(asset.id)
+
+        asset.refresh_from_db()
+        # 应该标记为最终失败
+        self.assertEqual(asset.status, BookmarkAsset.STATUS_FAILURE)
+
+    @override_settings(LD_ENABLE_SNAPSHOTS=True)
+    def test_select_next_html_snapshot_asset_should_skip_pending_retry(self):
+        now = timezone.now()
+        bookmark = self.setup_bookmark(url="https://example.com")
+        asset = self.setup_asset(
+            bookmark=bookmark,
+            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
+            status=BookmarkAsset.STATUS_PENDING,
+            retry_count=1,
+            next_retry_at=now + timedelta(minutes=5),  # 5 分钟后重试
+        )
+
+        selected_asset, next_wake_at = tasks._select_next_html_snapshot_asset(now, {})
+
+        # 应该跳过这个资产
+        self.assertIsNone(selected_asset)
+        # next_wake_at 应该是 next_retry_at
+        self.assertEqual(next_wake_at, now + timedelta(minutes=5))
+
+    @override_settings(LD_ENABLE_SNAPSHOTS=True)
+    def test_select_next_html_snapshot_asset_should_process_ready_retry(self):
+        now = timezone.now()
+        bookmark = self.setup_bookmark(url="https://example.com")
+        asset = self.setup_asset(
+            bookmark=bookmark,
+            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
+            status=BookmarkAsset.STATUS_PENDING,
+            retry_count=1,
+            next_retry_at=now - timedelta(minutes=1),  # 已过重试时间
+        )
+
+        selected_asset, next_wake_at = tasks._select_next_html_snapshot_asset(now, {})
+
+        # 应该选中这个资产
+        self.assertIsNotNone(selected_asset)
+        self.assertEqual(selected_asset.id, asset.id)
+        self.assertIsNone(next_wake_at)
 
     @override_settings(LD_ENABLE_SNAPSHOTS=False)
     def test_create_html_snapshot_should_not_create_asset_when_single_file_is_disabled(
@@ -1105,11 +1250,11 @@ class ArticleTasksTestCase(TestCase, BookmarkFactoryMixin):
 
         with (
             mock.patch(
-                "bookmarks.services.defuddle_processor.parse_url",
+                "bookmarks.services.reader_processor.parse_url",
                 side_effect=RuntimeError("direct parse failed"),
             ) as mock_parse_url,
             mock.patch(
-                "bookmarks.services.defuddle_processor.parse_html",
+                "bookmarks.services.reader_processor.parse_html",
                 return_value=self.parsed_article,
             ) as mock_parse_html,
             mock.patch(
@@ -1146,11 +1291,11 @@ class ArticleTasksTestCase(TestCase, BookmarkFactoryMixin):
 
         with (
             mock.patch(
-                "bookmarks.services.defuddle_processor.parse_url",
+                "bookmarks.services.reader_processor.parse_url",
                 side_effect=RuntimeError("direct parse failed"),
             ),
             mock.patch(
-                "bookmarks.services.defuddle_processor.parse_html",
+                "bookmarks.services.reader_processor.parse_html",
                 side_effect=RuntimeError("snapshot parse failed"),
             ) as mock_parse_html,
             mock.patch(

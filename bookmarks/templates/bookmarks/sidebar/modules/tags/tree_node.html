@@ -1,0 +1,25 @@
+{% load i18n %}
+<li class="tag-tree-node"
+    data-has-children="{{ node.has_children|yesno:'true,false' }}"
+    data-tag-name="{{ node.name }}"
+    data-loaded="false">
+  <div class="tag-tree-row">
+    <div class="tag-tree-content">
+      <a href="{{ node.path_query_string }}" class="tag-tree-link" data-is-tag-item>
+        <span class="tag-tree-name">{{ node.name }}</span>
+        {% if node.co_count > 0 %}
+          <span class="tag-tree-co-count">({{ node.co_count }})</span>
+        {% else %}
+          <span class="tag-tree-count">({{ node.count }})</span>
+        {% endif %}
+      </a>
+    </div>
+    {% if node.has_children %}
+      <button class="tag-tree-toggle" aria-expanded="false" type="button" title="{% translate 'Expand or collapse' %}">
+        <svg class="icon" width="14" height="14" viewBox="0 0 20 20" fill="none">
+          <polyline points="6 8 10 12 14 8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    {% endif %}
+  </div>
+</li>

@@ -32,84 +32,589 @@
     text-overflow: ellipsis;
   }
 
-  & .preview-image {
-    margin: var(--unit-4) 0;
-
-    img {
-      max-width: 100%;
-      max-height: 200px;
-    }
-  }
-
-  & .sections section {
-    margin-top: var(--unit-4);
-  }
-
-  & .sections h3 {
-    margin-bottom: var(--unit-2);
-    font-size: var(--font-size);
-    font-weight: bold;
-  }
-
-  & .assets {
-    margin-top: var(--unit-2);
-
-    & .filesize {
-      color: var(--tertiary-text-color);
-    }
-  }
-
-  & .assets-actions {
-    display: flex;
-    gap: var(--unit-4);
-    align-items: center;
-    margin-top: var(--unit-2);
-
-    & .btn.btn-link {
-      height: unset;
-      padding: 0;
-      border: none;
-    }
-  }
-
   & .tags a {
     color: var(--alternative-color);
   }
-
-  & .status form {
-    display: flex;
-    gap: var(--unit-2);
-  }
-
-  & .status .form-group,
-  .status .form-switch {
-    margin: 0;
-  }
-
-  & .actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
 }
 
-/* Bookmark details view specific */
+/* Bookmark details page */
 .bookmark-details.page {
   display: flex;
   flex-direction: column;
   gap: var(--unit-6);
 }
 
-.bookmark-title {
-  word-break: break-word;
-  max-height: calc(1.5em * 5); /* 5行的高度 */
-  overflow-y: auto;
+/* ---- Scrollbar (matches sidebar .scrollbar) ---- */
+.bookmark-details .modal-body.scrollbar {
+  max-height: none;
   overflow-x: hidden;
-  /* 隐藏滚动条 */
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-color: transparent transparent;
+  &::-webkit-scrollbar { width: 8px; }
+  &::-webkit-scrollbar-thumb { background: transparent; }
+  &:hover {
+    scrollbar-color: var(--secondary-border-color) transparent;
+    &::-webkit-scrollbar-thumb {
+      background: var(--secondary-border-color);
+      border-radius: 4px;
+    }
+  }
 }
 
-.bookmark-title::-webkit-scrollbar {
-  display: none; /* Chrome, Safari and Opera */
+/* ---- Title textarea (looks like heading, auto-resize, max 5 lines) ---- */
+.bookmark-title-input {
+  flex: 1 1 0;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-color);
+  background: transparent;
+  border: none;
+  outline: none;
+  word-break: break-word;
+  line-height: 1.4;
+  resize: none;
+  overflow-y: auto;
+  max-height: calc(1.4em * 5);
+  field-sizing: content;
+  font-family: var(--base-font-family);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar { display: none; }
 }
+
+.bookmark-title-input:disabled {
+  color: var(--text-color);
+  cursor: default;
+}
+
+/* ---- Detail fields ---- */
+.detail-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--unit-3);
+}
+
+.detail-annotation-summary {
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+  display: flex;
+  align-items: center;
+  gap: var(--unit-1);
+}
+
+.detail-annotation-summary .annotation-link {
+  color: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--unit-1);
+  line-height: 1;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.detail-annotation-summary .annotation-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.detail-label {
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+  margin-bottom: var(--unit-1);
+  font-weight: 500;
+}
+
+.detail-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--unit-1);
+}
+
+.detail-label-row .detail-label {
+  margin-bottom: 0;
+}
+
+.detail-clear-btn {
+  padding: 0;
+  border: none;
+  height: auto;
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+  visibility: hidden;
+}
+
+/* 聚焦时显示清空按钮，纯 CSS 无布局抖动 */
+.detail-section:focus-within .detail-clear-btn {
+  visibility: visible;
+}
+
+/* ---- Textarea (looks like plain text until focused, max 10 lines) ---- */
+.detail-textarea {
+  width: 100%;
+  padding: var(--unit-1) 0;
+  font-size: 14px;
+  color: var(--input-text-color, var(--text-color));
+  background: transparent;
+  border: none;
+  outline: none;
+  box-sizing: border-box;
+  font-family: var(--base-font-family);
+  line-height: 1.5;
+  max-height: calc(1.5em * 10);
+  overflow-y: hidden;
+  resize: none;
+  /* 滚动条默认隐藏 */
+  scrollbar-color: transparent transparent;
+}
+
+.detail-textarea::placeholder {
+  color: var(--tertiary-text-color);
+  font-style: italic;
+}
+
+/* 聚焦/悬浮/活动时显示滚动条 */
+.detail-textarea:focus,
+.detail-textarea:hover,
+.detail-textarea:active {
+  scrollbar-color: var(--secondary-border-color) transparent;
+}
+
+.detail-textarea::-webkit-scrollbar {
+  width: 4px;
+}
+.detail-textarea::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 2px;
+}
+.detail-textarea:focus::-webkit-scrollbar-thumb,
+.detail-textarea:hover::-webkit-scrollbar-thumb,
+.detail-textarea:active::-webkit-scrollbar-thumb {
+  background: var(--secondary-border-color);
+}
+
+.detail-textarea.overflows {
+  overflow-y: auto;
+}
+
+/* 笔记不限制最大高度 */
+.detail-textarea-notes {
+  max-height: none;
+}
+
+.info-value-readonly {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-color);
+  font-size: 14px;
+}
+
+/* ---- Tags ---- */
+/* 标签 */
+.detail-tags-wrapper {
+  position: relative;
+  min-height: 1.5em;
+}
+
+.detail-tags-view {
+  cursor: pointer;
+  padding: var(--unit-1) 0;
+  border-radius: var(--border-radius);
+  visibility: visible;
+}
+
+.detail-tags-view:hover {
+  background: var(--body-color-contrast);
+}
+
+/* 动态创建的 ld-tag-autocomplete 绝对定位，不撑开容器 */
+.detail-tags-wrapper.ld-editing .detail-tags-view {
+  visibility: hidden;
+}
+
+.detail-tags-wrapper.ld-editing ld-tag-autocomplete {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+/* 动态创建的 ld-tag-autocomplete 样式适配 */
+.detail-tags-wrapper ld-tag-autocomplete {
+  display: block;
+}
+
+/* wrapper div（.form-autocomplete-input.form-input）和内部 input 都去边框 */
+.detail-tags-wrapper .form-autocomplete .form-autocomplete-input,
+.detail-tags-wrapper .form-autocomplete .form-autocomplete-input.form-input,
+.detail-tags-wrapper .form-autocomplete .form-autocomplete-input input,
+.detail-tags-wrapper .form-autocomplete .form-autocomplete-input input.form-input {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  font-size: 14px;
+  color: var(--text-color);
+  outline: none !important;
+}
+
+.detail-tags-wrapper .form-autocomplete .form-autocomplete-input.is-focused {
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
+.detail-tags-wrapper .form-autocomplete .form-autocomplete-input.is-focused input {
+  box-shadow: none !important;
+  border: none !important;
+}
+
+.info-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unit-1);
+}
+
+.info-tag {
+  font-size: 14px;
+  color: var(--alternative-color);
+}
+
+.info-placeholder {
+  color: var(--tertiary-text-color);
+  font-style: italic;
+}
+
+/* ---- URL display & inline editing ---- */
+.detail-url-wrapper {
+  position: relative;
+}
+
+.detail-url-view {
+  display: flex;
+  align-items: center;
+  gap: var(--unit-1);
+  min-width: 0;
+}
+
+.detail-url-view .favicon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+}
+
+.detail-url-link {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-url-link:hover {
+  color: var(--link-color);
+}
+
+/* URL 编辑态：隐藏链接，显示 input */
+.detail-url-wrapper.editing .detail-url-view {
+  display: none;
+}
+
+.detail-url-edit {
+  display: none;
+  align-items: center;
+  gap: var(--unit-2);
+}
+
+.detail-url-wrapper.editing .detail-url-edit {
+  display: flex;
+}
+
+.detail-url-input {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  padding: var(--unit-1);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  outline: none;
+  background: transparent;
+  color: var(--text-color);
+  font-family: var(--base-font-family);
+}
+
+.detail-url-input:focus {
+  border-color: var(--primary-color);
+}
+
+/* ---- Status chips ---- */
+.detail-status-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unit-2);
+}
+
+.detail-status-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--secondary-text-color);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  line-height: 1.6;
+}
+
+.detail-status-chip:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.detail-status-chip.active {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: #fff;
+}
+
+.detail-status-chip.active:hover {
+  opacity: 0.85;
+  color: #fff;
+}
+
+.detail-status-chip svg {
+  flex-shrink: 0;
+}
+
+/* ---- Dates ---- */
+.detail-dates {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--unit-2);
+}
+
+.info-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+}
+
+.info-date-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ---- Preview image ---- */
+.info-preview-image {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: var(--border-radius);
+  border: 1px solid var(--border-color);
+}
+
+/* ---- File list (reader sidebar style) ---- */
+.info-files {
+  display: flex;
+  flex-direction: column;
+}
+
+.info-file-item {
+  display: flex;
+  align-items: center;
+  gap: var(--unit-1);
+  padding: var(--unit-1) 0;
+  border-top: 1px solid var(--secondary-border-color);
+}
+
+.info-file-item:last-child {
+  border-bottom: 1px solid var(--secondary-border-color);
+}
+
+.info-file-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  color: var(--icon-color);
+}
+
+.info-file-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
+}
+
+.info-file-link {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--link-color);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.info-file-link:hover {
+  text-decoration: underline;
+}
+
+.info-file-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.info-file-size {
+  color: var(--tertiary-text-color);
+  font-size: var(--font-size-sm);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.info-file-status {
+  color: var(--tertiary-text-color);
+  font-size: var(--font-size-sm);
+}
+
+.info-file-failed {
+  color: var(--error-color);
+}
+
+.info-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.info-file-action-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--border-radius);
+  color: var(--icon-color);
+  cursor: pointer;
+  width: 1.3rem;
+  height: 1.3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.info-file-action-btn:hover {
+  background: var(--body-color-contrast);
+  color: var(--text-color);
+}
+
+.info-file-action-delete:hover {
+  color: var(--error-color);
+}
+
+.info-file-rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--unit-1);
+  font-size: var(--font-size-sm);
+  box-sizing: border-box;
+  border: 1px solid var(--primary-color-shade);
+  border-radius: var(--border-radius);
+  background: transparent;
+  color: var(--text-color);
+  outline: none;
+  font-family: var(--base-font-family);
+}
+
+.detail-files-actions {
+  display: flex;
+  gap: var(--unit-2);
+  align-items: center;
+}
+
+.detail-files-actions .btn {
+  padding: 0;
+  border: none;
+  height: auto;
+  font-size: var(--font-size-sm);
+}
+
+/* ---- Batch edit bar ---- */
+.detail-batch-edit-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--unit-2);
+}
+
+/* ---- Footer actions ---- */
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--unit-2);
+  overflow: visible;
+}
+
+.detail-action-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--border-radius);
+  color: var(--icon-color);
+  cursor: pointer;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+  text-decoration: none;
+}
+
+.detail-action-btn:hover {
+  background: var(--body-color-contrast);
+  color: var(--text-color);
+}
+
+.detail-action-btn.active {
+  color: var(--primary-color);
+}
+
+.detail-action-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.detail-action-delete:hover {
+  color: var(--error-color);
+}
+
+.detail-action-spacer {
+  flex: 1;
+}
+

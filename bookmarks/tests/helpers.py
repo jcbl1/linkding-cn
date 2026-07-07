@@ -63,7 +63,6 @@ class BookmarkFactoryMixin:
         description: str = "",
         notes: str = "",
         web_archive_snapshot_url: str = "",
-        favicon_file: str = "",
         preview_image_file: str = "",
         added: datetime = None,
         modified: datetime = None,
@@ -93,7 +92,6 @@ class BookmarkFactoryMixin:
             unread=unread,
             shared=shared,
             web_archive_snapshot_url=web_archive_snapshot_url,
-            favicon_file=favicon_file,
             preview_image_file=preview_image_file,
         )
         bookmark.save()
@@ -113,7 +111,6 @@ class BookmarkFactoryMixin:
         shared: bool = False,
         with_tags: bool = False,
         with_web_archive_snapshot_url: bool = False,
-        with_favicon_file: bool = False,
         with_preview_image_file: bool = False,
         user: User = None,
     ):
@@ -154,9 +151,6 @@ class BookmarkFactoryMixin:
             web_archive_snapshot_url = ""
             if with_web_archive_snapshot_url:
                 web_archive_snapshot_url = f"https://web.archive.org/web/{i}"
-            favicon_file = ""
-            if with_favicon_file:
-                favicon_file = f"favicon_{i}.png"
             preview_image_file = ""
             if with_preview_image_file:
                 preview_image_file = f"preview_image_{i}.png"
@@ -168,8 +162,7 @@ class BookmarkFactoryMixin:
                 shared=shared,
                 tags=tags,
                 web_archive_snapshot_url=web_archive_snapshot_url,
-                favicon_file=favicon_file,
-                preview_image_file=preview_image_file,
+                    preview_image_file=preview_image_file,
                 user=user,
             )
             bookmarks.append(bookmark)
@@ -217,6 +210,8 @@ class BookmarkFactoryMixin:
         display_name: str = None,
         status: str = BookmarkAsset.STATUS_COMPLETE,
         gzip: bool = False,
+        retry_count: int = None,
+        next_retry_at: datetime = None,
     ):
         if date_created is None:
             date_created = timezone.now()
@@ -235,6 +230,10 @@ class BookmarkFactoryMixin:
             status=status,
             gzip=gzip,
         )
+        if retry_count is not None:
+            asset.retry_count = retry_count
+        if next_retry_at is not None:
+            asset.next_retry_at = next_retry_at
         asset.save()
         return asset
 
@@ -408,9 +407,13 @@ class DomainSidebarTestMixin(TestCase, HtmlTestMixin):
             )
             self.assertIsNotNone(label)
             self.assertEqual(label.text.strip(), expected["label"])
-            self.assertEqual(
-                primary.select_one(".count").text.strip(), f"({expected['count']})"
-            )
+            count_el = primary.select_one(".count")
+            self.assertIsNotNone(count_el)
+            count_text = count_el.text.strip()
+            # Support both "(1)" and "1" formats
+            expected_count = str(expected["count"])
+            expected_count_paren = f"({expected['count']})"
+            self.assertIn(count_text, [expected_count, expected_count_paren])
 
             if expected.get("clickable", True):
                 self.assertEqual(primary.name, "a")

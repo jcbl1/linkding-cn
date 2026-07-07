@@ -7,11 +7,12 @@
 
 {% block content %}
   <div ld-bulk-edit
-       class="bookmarks-page grid columns-md-1 {% if bookmark_list.collapse_side_panel %}collapse-sidebar{% endif %}">
+       class="bookmarks-page grid columns-md-1 sidebar-closed"
+       data-sidebar-default="{{ show_sidebar|yesno:'1,0' }}">
 
     {# Bookmark list #}
     <main class="main col-2" aria-labelledby="main-heading">
-      <div class="section-header mb-0" data-sticky-on="{{ request.user_profile.sticky_header_controls|yesno:'true,false' }}">
+      <div class="section-header mb-0" data-sticky-on="{{ sticky_header_controls|yesno:'true,false' }}">
         <h1 id="main-heading">{% translate "Bookmarks" %}<span id="bookmark-list-total">({{ bookmark_list.bookmarks_total }})</span></h1>
         <div class="header-controls">
           <div id="bookmark-search-container">
@@ -19,7 +20,7 @@
           </div>
           {% include 'bookmarks/bulk_edit/toggle.html' %}
           {% random_sort bookmark_list.search %}
-          {% sidebar_toggle %}
+          {% include 'bookmarks/sidebar/components/toggle_button.html' %}
         </div>
       </div>
 
@@ -36,7 +37,8 @@
     </main>
 
     {# Filters #}
-    <div class="scrollbar sidebar col-1 hide-md{% if request.user_profile.sticky_pagination %} paginate-sticky{% endif %}" data-sticky-on="{{ request.user_profile.sticky_side_panel|yesno:'true,false' }}">
+    <div class="scrollbar sidebar col-1{% if sticky_pagination %} paginate-sticky{% endif %}" data-sticky-on="{{ sticky_side_panel|yesno:'true,false' }}">
+      {% include 'bookmarks/sidebar/components/close_button.html' %}
       {% include 'bookmarks/sidebar/index.html' %}
     </div>
   </div>

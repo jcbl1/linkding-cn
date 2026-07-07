@@ -18,10 +18,6 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
     quick_boolean_fields = (
         "display_url",
         "permanent_notes",
-        "display_view_bookmark_action",
-        "display_edit_bookmark_action",
-        "display_archive_bookmark_action",
-        "display_remove_bookmark_action",
         "default_mark_unread",
         "default_mark_shared",
         "enable_favicons",
@@ -49,6 +45,7 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
                 {"key": "bundles", "enabled": True},
                 {"key": "domains", "enabled": True},
                 {"key": "tags", "enabled": True},
+                {"key": "colors", "enabled": True},
             ]
         return json.dumps(modules)
 
@@ -70,10 +67,14 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
             "sidebar_modules": self.create_sidebar_modules(),
             "display_url": False,
             "permanent_notes": False,
-            "display_view_bookmark_action": True,
-            "display_edit_bookmark_action": True,
-            "display_archive_bookmark_action": True,
-            "display_remove_bookmark_action": True,
+            "bookmark_actions": json.dumps([
+                {"key": "read", "enabled": True},
+                {"key": "view", "enabled": True},
+                {"key": "edit", "enabled": True},
+                {"key": "archive", "enabled": True},
+                {"key": "remove", "enabled": True},
+            ]),
+            "bookmark_action_display_mode": "text",
             "default_mark_unread": False,
             "default_mark_shared": False,
             "enable_favicons": False,
@@ -141,7 +142,9 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
             "settings-sidebar",
             "settings-search",
             "settings-bookmarks",
+            "settings-bookmark-toolbar",
             "settings-sharing",
+            "settings-highlights",
             "settings-user",
             "settings-import-export",
             "settings-about",
@@ -162,7 +165,9 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
                 "settings-sidebar",
                 "settings-search",
                 "settings-bookmarks",
+                "settings-bookmark-toolbar",
                 "settings-sharing",
+                "settings-highlights",
                 "settings-user",
                 "settings-import-export",
                 "settings-about",
@@ -203,10 +208,10 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
         date_format_labels = [
             option.get_text(strip=True)
             for option in soup.select(
-                '[aria-labelledby="settings-bookmark-date-label"] .settings-segmented-option span'
+                '[data-toolbar-config-panel="date"] .settings-segmented-option span'
             )
         ]
-        self.assertEqual(date_format_labels, ["Hidden", "Relative", "Absolute"])
+        self.assertEqual(date_format_labels, ["Relative", "Absolute"])
 
         landing_page_labels = [
             option.get_text(strip=True)
@@ -307,7 +312,7 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.user.profile.language, "fr")
         self.user.profile.clean_fields(
-            exclude=["search_preferences", "trash_search_preferences"]
+            exclude=["search_preferences", "trash_search_preferences", "highlights_search_preferences", "reader_settings"]
         )
 
     def test_should_hide_default_sharing_when_sharing_is_disabled(self):
@@ -383,10 +388,13 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
                     "items_per_page": "40",
                     "display_url": True,
                     "permanent_notes": True,
-                    "display_view_bookmark_action": False,
-                    "display_edit_bookmark_action": True,
-                    "display_archive_bookmark_action": False,
-                    "display_remove_bookmark_action": True,
+                    "bookmark_actions": json.dumps([
+                        {"key": "read", "enabled": True},
+                        {"key": "view", "enabled": False},
+                        {"key": "edit", "enabled": True},
+                        {"key": "archive", "enabled": False},
+                        {"key": "remove", "enabled": True},
+                    ]),
                     "default_mark_unread": True,
                     "enable_favicons": True,
                     "enable_preview_images": True,
@@ -441,14 +449,16 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
         self.assertTrue(self.user.profile.display_url)
         self.assertTrue(self.user.profile.permanent_notes)
         self.assertFalse(self.user.profile.display_view_bookmark_action)
+        self.assertTrue(self.user.profile.display_edit_bookmark_action)
         self.assertFalse(self.user.profile.display_archive_bookmark_action)
+        self.assertTrue(self.user.profile.display_remove_bookmark_action)
         self.assertTrue(self.user.profile.default_mark_unread)
         self.assertTrue(self.user.profile.enable_favicons)
         self.assertTrue(self.user.profile.enable_preview_images)
         self.assertFalse(self.user.profile.enable_automatic_html_snapshots)
         self.assertTrue(self.user.profile.sticky_header_controls)
         self.assertTrue(self.user.profile.sticky_pagination)
-        self.assertTrue(self.user.profile.collapse_side_panel)
+        self.assertFalse(self.user.profile.show_sidebar)
         self.assertTrue(self.user.profile.enable_sharing)
         self.assertTrue(self.user.profile.enable_public_sharing)
         self.assertTrue(self.user.profile.default_mark_shared)
@@ -459,6 +469,7 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
                 {"key": "summary", "enabled": True},
                 {"key": "bundles", "enabled": False},
                 {"key": "tags", "enabled": True},
+                {"key": "colors", "enabled": True},
             ],
         )
 
@@ -481,7 +492,7 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
         self.assertEqual(response.status_code, 200)
 
         profile.refresh_from_db()
-        self.assertTrue(profile.collapse_side_panel)
+        self.assertFalse(profile.show_sidebar)
         self.assertTrue(profile.sticky_side_panel)
 
     def test_html_profile_quick_save_redirects_on_success(self):

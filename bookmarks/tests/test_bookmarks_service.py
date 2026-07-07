@@ -50,16 +50,28 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
         self.mock_schedule_metadata_enrichment = (
             self.mock_schedule_metadata_enrichment_patcher.start()
         )
+        self.mock_load_favicon_patcher = patch(
+            "bookmarks.services.bookmarks.tasks.load_favicon"
+        )
+        self.mock_load_favicon = self.mock_load_favicon_patcher.start()
         self.mock_refresh_favicon_patcher = patch(
             "bookmarks.services.bookmarks.tasks.refresh_favicon", create=True
         )
         self.mock_refresh_favicon = self.mock_refresh_favicon_patcher.start()
+        self.mock_create_html_snapshot_patcher = patch(
+            "bookmarks.services.bookmarks.tasks.create_html_snapshot"
+        )
+        self.mock_create_html_snapshot = (
+            self.mock_create_html_snapshot_patcher.start()
+        )
 
     def tearDown(self):
         self.mock_schedule_refresh_metadata_patcher.stop()
         self.mock_load_preview_image_patcher.stop()
         self.mock_schedule_metadata_enrichment_patcher.stop()
+        self.mock_load_favicon_patcher.stop()
         self.mock_refresh_favicon_patcher.stop()
+        self.mock_create_html_snapshot_patcher.stop()
 
     def test_create_should_not_update_website_metadata(self):
         with patch.object(
@@ -238,7 +250,6 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
         with patch.object(tasks, "load_favicon") as mock_load_favicon:
             bookmark_data = Bookmark(
                 url="https://example.com",
-                favicon_file="https_example_com.png",
             )
             bookmark = create_bookmark(bookmark_data, "tag1,tag2", self.user)
 

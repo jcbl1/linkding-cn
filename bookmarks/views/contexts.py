@@ -1,4 +1,5 @@
 import calendar
+import json
 import re
 import urllib.parse
 from datetime import date, datetime, timedelta
@@ -6,6 +7,7 @@ from datetime import date, datetime, timedelta
 from django.conf import settings
 from django.core.paginator import Paginator
 from django.db import models
+from django.db.models import Count
 from django.db.models.functions import TruncDate
 from django.http import Http404, QueryDict
 from django.urls import reverse
@@ -16,11 +18,14 @@ from django.utils.translation import ngettext
 from pypinyin import Style, pinyin
 
 from bookmarks import queries, utils
+from bookmarks.services.icon_loader import load_quick_tags_icon
 from bookmarks.models import (
+    Annotation,
     Bookmark,
     BookmarkAsset,
     BookmarkBundle,
     BookmarkSearch,
+    FaviconCache,
     Tag,
     User,
     UserProfile,
@@ -39,6 +44,61 @@ from bookmarks.views import access
 CJK_RE = re.compile(r"[\u4e00-\u9fff]+")
 
 
+def _tag_sort_key(name: str):
+    """Sort key that orders English tags alphabetically before CJK tags,
+    with CJK tags sorted by their pinyin representation."""
+    if name and CJK_RE.match(name[0]):
+        py = pinyin(name, style=Style.FIRST_LETTER)
+        pinyin_key = "".join(
+            item[0].lower() if item and item[0] else char
+            for item, char in zip(py, name, strict=False)
+        )
+        return (1, pinyin_key)
+    return (0, name.lower())
+
+
+class FaviconLookup:
+    """一次查询加载全部 FaviconCache，提供 O(1) 域名→favicon 查表。
+
+    加载所有状态的记录，区分"有图标"和"已知不可用"：
+    - get(domain) 返回 favicon 文件名，无则返回 ""
+    - is_unavailable(domain) 返回 True 表示该域名已尝试过且失败/缺失，
+      前端不需要再触发懒加载请求。
+    """
+
+    def __init__(self, domain_config=None):
+        self._map: dict[str, str] = {}
+        self._unavailable: set[str] = set()
+        now = timezone.now()
+        for domain, favicon_file, status, next_retry_at in FaviconCache.objects.values_list(
+            "domain", "favicon_file", "status", "next_retry_at"
+        ):
+            if status == FaviconCache.STATUS_SUCCESS and favicon_file:
+                self._map[domain] = favicon_file
+            elif status == FaviconCache.STATUS_MISSING:
+                self._unavailable.add(domain)
+            elif status == FaviconCache.STATUS_FAILED:
+                if next_retry_at and next_retry_at > now:
+                    self._unavailable.add(domain)
+
+        # 别名展开
+        if domain_config:
+            from bookmarks.utils import get_alias_domains_for_root
+            for domain in list(self._map.keys()) + list(self._unavailable):
+                aliases = get_alias_domains_for_root(domain, domain_config)
+                for alias in aliases:
+                    if domain in self._map and alias not in self._map:
+                        self._map[alias] = self._map[domain]
+                    if domain in self._unavailable:
+                        self._unavailable.add(alias)
+
+    def get(self, domain: str) -> str:
+        return self._map.get(domain, "")
+
+    def is_unavailable(self, domain: str) -> bool:
+        return domain in self._unavailable
+
+
 class RequestContext:
     index_view = "linkding:bookmarks.index"
     action_view = "linkding:bookmarks.index.action"
@@ -49,6 +109,8 @@ class RequestContext:
         self.action_url = reverse(self.action_view)
         self.query_params = request.GET.copy()
         self.query_params.pop("details", None)
+        domain_config = utils.parse_domain_roots(request.user_profile.custom_domain_root)
+        self._favicon_lookup = FaviconLookup(domain_config)
 
         self.query_is_valid = True
         self.query_error_message = None
@@ -67,7 +129,7 @@ class RequestContext:
         if remove:
             for key in remove:
                 query_params.pop(key, None)
-        encoded_params = query_params.urlencode()
+        encoded_params = utils.clean_query_params(query_params)
         return view_url + "?" + encoded_params if encoded_params else view_url
 
     def index(self, add: dict = None, remove: dict = None) -> str:
@@ -154,8 +216,17 @@ class BookmarkItem:
         self.description = bookmark.resolved_description
         self.notes = bookmark.notes
         self.tag_names = bookmark.tag_names
+        self.tag_names_set = set(bookmark.tag_names)
         self.tags = [AddTagItem(context, tag) for tag in bookmark.tags.all()]
         self.tags.sort(key=lambda item: item.name)
+        self.has_snapshot = bool(bookmark.latest_snapshot_id)
+        self.has_article = bool(bookmark.latest_article_id)
+        self.web_archive_url = bookmark.web_archive_snapshot_url or ""
+        self.web_archive_fallback_url = (
+            bookmark.web_archive_snapshot_url
+            or generate_fallback_webarchive_url(bookmark.url, bookmark.date_added)
+        )
+        self.reader_url = reverse("linkding:bookmarks.read", args=[bookmark.id])
         if bookmark.latest_snapshot_id:
             self.snapshot_url = reverse(
                 "linkding:assets.view", args=[bookmark.latest_snapshot_id]
@@ -170,13 +241,17 @@ class BookmarkItem:
                 self.snapshot_url = generate_fallback_webarchive_url(
                     bookmark.url, bookmark.date_added
                 )
-        self.favicon_file = bookmark.favicon_file
+        hostname = utils.extract_hostname(bookmark.url)
+        self.favicon_file = context._favicon_lookup.get(hostname)
+        self.favicon_unavailable = not self.favicon_file and context._favicon_lookup.is_unavailable(hostname)
         self.preview_image_remote_url = bookmark.preview_image_remote_url
         self.preview_image_file = bookmark.preview_image_file
         self.is_archived = bookmark.is_archived
         self.unread = bookmark.unread
+        self.shared = bookmark.shared
         self.owner = bookmark.owner
         self.details_url = context.details(bookmark.id)
+        self.has_highlights = getattr(bookmark, 'annotation_count', 0) > 0
 
         css_classes = []
         if bookmark.unread:
@@ -214,13 +289,6 @@ class BookmarkItem:
                     bookmark.date_deleted
                 )
 
-        self.show_notes_button = bookmark.notes and not profile.permanent_notes
-        self.show_mark_as_read = is_editable and bookmark.unread
-        self.show_unshare = is_editable and bookmark.shared and profile.enable_sharing
-
-        self.has_extra_actions = (
-            self.show_notes_button or self.show_mark_as_read or self.show_unshare
-        )
 
 
 class SidebarSummaryStat:
@@ -374,6 +442,16 @@ class SidebarUserSummaryContext:
 
         bookmarks_total = active_bookmarks.count()
         tags_total = Tag.objects.filter(owner=request.user).count()
+        unread_total = active_bookmarks.filter(unread=True).count()
+
+        stats_agg = Annotation.objects.filter(
+            bookmark__owner=request.user,
+            bookmark__is_archived=False,
+            bookmark__is_deleted=False,
+        ).aggregate(
+            highlights=models.Count("id"),
+            notes=models.Count("id", filter=models.Q(note_content__gt="")),
+        )
 
         self.primary_stats = [
             SidebarSummaryStat(
@@ -382,8 +460,31 @@ class SidebarUserSummaryContext:
                 bookmarks_total,
                 self._build_url(reset_search=True),
             ),
-            SidebarSummaryStat("tags", _("Tags"), tags_total),
+            SidebarSummaryStat(
+                "tags",
+                _("Tags"),
+                tags_total,
+                reverse("linkding:tags.index"),
+            ),
             SidebarSummaryStat("collection-days", _("Days"), self.collection_days),
+            SidebarSummaryStat(
+                "unread",
+                _("Unread"),
+                unread_total,
+                self._build_url(reset_search=True, unread="yes"),
+            ),
+            SidebarSummaryStat(
+                "highlights",
+                _("Highlights"),
+                stats_agg["highlights"],
+                self._build_url(reset_search=True, highlight="yes"),
+            ),
+            SidebarSummaryStat(
+                "annotations",
+                _("Annotations"),
+                stats_agg["notes"],
+                self._build_url(reset_search=True, annotation="yes"),
+            ),
         ]
         self.settings_options = self._build_settings_options()
 
@@ -1035,7 +1136,17 @@ class SidebarUserSummaryContext:
         }
 
     @staticmethod
-    def _build_activity_count_html(fragment: dict[str, str | int]):
+    def _build_activity_count_html(
+        fragment: dict[str, str | int], url: str | None = None
+    ):
+        if url and fragment["count"] > 0:
+            return format_html(
+                '{}<a class="summary-activity-summary-value" href="{}">{}</a>{}',
+                fragment["prefix"],
+                url,
+                fragment["count"],
+                fragment["suffix"],
+            )
         return format_html(
             '{}<strong class="summary-activity-summary-value">{}</strong>{}',
             fragment["prefix"],
@@ -1077,10 +1188,62 @@ class SidebarUserSummaryContext:
             ),
             longest_streak,
         )
-        copy_text = _("{bookmarks}, {days}, {streak}.").format(
+        # 高亮和批注统计（按高亮/批注自身的创建日期筛选）
+        annotations_agg = Annotation.objects.filter(
+            bookmark__owner=self.request.user,
+            bookmark__is_archived=False,
+            bookmark__is_deleted=False,
+            date_created__date__gte=period_start,
+            date_created__date__lte=period_end,
+        ).aggregate(
+            highlights=models.Count("id"),
+            notes=models.Count("id", filter=models.Q(note_content__gt="")),
+        )
+        highlights_total = annotations_agg["highlights"]
+        notes_total = annotations_agg["notes"]
+        highlights_fragment = self._build_activity_count_fragment(
+            ngettext(
+                "Added %(count)s highlight",
+                "Added %(count)s highlights",
+                highlights_total,
+            ),
+            highlights_total,
+        )
+        notes_fragment = self._build_activity_count_fragment(
+            ngettext(
+                "%(count)s annotation",
+                "%(count)s annotations",
+                notes_total,
+            ),
+            notes_total,
+        )
+        # 高亮/批注可点击跳转的 URL（带日期范围 + 过滤条件）
+        date_range = dict(
+            date_filter_type=BookmarkSearch.FILTER_DATE_TYPE_ABSOLUTE,
+            date_filter_relative_string=None,
+            date_filter_start=period_start.isoformat(),
+            date_filter_end=period_end.isoformat(),
+        )
+        highlights_url = self._build_url(
+            reset_search=True,
+            date_filter_by=BookmarkSearch.FILTER_DATE_BY_HIGHLIGHT,
+            highlight="yes",
+            **date_range,
+        )
+        notes_url = self._build_url(
+            reset_search=True,
+            date_filter_by=BookmarkSearch.FILTER_DATE_BY_ANNOTATION,
+            annotation="yes",
+            **date_range,
+        )
+        copy_text = _(
+            "{bookmarks}, {days}, {streak}. {highlights}, {notes}."
+        ).format(
             bookmarks=bookmark_fragment["text"],
             days=active_days_fragment["text"],
             streak=longest_streak_fragment["text"],
+            highlights=highlights_fragment["text"],
+            notes=notes_fragment["text"],
         )
         text = _("{lead} {copy}").format(
             lead=lead,
@@ -1091,11 +1254,19 @@ class SidebarUserSummaryContext:
             "bookmark_total": bookmark_total,
             "active_days": active_days,
             "longest_streak": longest_streak,
+            "highlights_total": highlights_total,
+            "notes_total": notes_total,
             "copy_html": format_html(
-                _("{bookmarks}, {days}, {streak}."),
+                _("{bookmarks}, {days}, {streak}. {highlights}, {notes}."),
                 bookmarks=self._build_activity_count_html(bookmark_fragment),
                 days=self._build_activity_count_html(active_days_fragment),
                 streak=self._build_activity_count_html(longest_streak_fragment),
+                highlights=self._build_activity_count_html(
+                    highlights_fragment, url=highlights_url
+                ),
+                notes=self._build_activity_count_html(
+                    notes_fragment, url=notes_url
+                ),
             ),
             "text": text,
         }
@@ -1123,7 +1294,7 @@ class SidebarUserSummaryContext:
             else:
                 query_params[key] = value
 
-        encoded_params = query_params.urlencode()
+        encoded_params = utils.clean_query_params(query_params)
         base_url = reverse("linkding:bookmarks.index")
         return base_url + "?" + encoded_params if encoded_params else base_url
 
@@ -1148,6 +1319,18 @@ class BookmarkListContext:
         # Prefetch related objects, this avoids n+1 queries when accessing fields in templates
         models.prefetch_related_objects(bookmarks_page.object_list, "owner", "tags")
 
+        # 仅当日期路由为高亮时，才计算当前页面书签的高亮计数
+        if user_profile.bookmark_date_route == UserProfile.BOOKMARK_DATE_ROUTE_HIGHLIGHTS and bookmarks_page.object_list:
+            from django.db.models import Count
+            bookmark_ids = [b.id for b in bookmarks_page.object_list]
+            annotation_counts = dict(
+                Bookmark.objects.filter(id__in=bookmark_ids)
+                .annotate(cnt=Count('annotations', distinct=True))
+                .values_list('id', 'cnt')
+            )
+            for bookmark in bookmarks_page.object_list:
+                bookmark.annotation_count = annotation_counts.get(bookmark.id, 0)
+
         self.items = [
             BookmarkItem(request_context, bookmark, user, user_profile)
             for bookmark in bookmarks_page
@@ -1161,17 +1344,104 @@ class BookmarkListContext:
 
         self.link_target = user_profile.bookmark_link_target
         self.date_display = user_profile.bookmark_date_display
+        self.date_route = user_profile.bookmark_date_route
         self.description_display = user_profile.bookmark_description_display
         self.description_max_lines = user_profile.bookmark_description_max_lines
         self.show_url = user_profile.display_url
-        self.show_view_action = user_profile.display_view_bookmark_action
-        self.show_edit_action = user_profile.display_edit_bookmark_action
-        self.show_archive_action = user_profile.display_archive_bookmark_action
-        self.show_remove_action = user_profile.display_remove_bookmark_action
+        self.action_list = [
+            {
+                "key": item["key"],
+                "enabled": item["enabled"],
+                "label": user_profile.ACTION_LABELS[item["key"]],
+            }
+            for item in user_profile.get_bookmark_actions()
+        ]
+        self.action_display_mode = user_profile.bookmark_action_display_mode
+        self.status_display_mode = user_profile.bookmark_status_display_mode
+        self.quick_edit_display_mode = user_profile.bookmark_quick_edit_display_mode
+        self.has_visible_actions = any(item["enabled"] for item in self.action_list)
+        self.status_list = [
+            {
+                "key": item["key"],
+                "enabled": item["enabled"],
+                "label": user_profile.STATUS_LABELS[item["key"]],
+            }
+            for item in user_profile.get_bookmark_statuses()
+        ]
+        self.has_visible_statuses = any(item["enabled"] for item in self.status_list)
+        self.quick_edit_list = [
+            {
+                "key": item["key"],
+                "enabled": item["enabled"],
+                "label": user_profile.QUICK_EDIT_LABELS[item["key"]],
+            }
+            for item in user_profile.get_bookmark_quick_edits()
+        ]
+        self.has_visible_quick_edits = any(item["enabled"] for item in self.quick_edit_list)
+        quick_tags = user_profile.get_bookmark_quick_tags()
+        self.quick_tags_direct = [
+            {**qt, "index": i}
+            for i, qt in enumerate(quick_tags)
+            if qt["enabled"] and qt["tag_names"] and qt["display_position"] == "direct"
+        ]
+        self.quick_tags_submenu = [
+            {**qt, "index": i}
+            for i, qt in enumerate(quick_tags)
+            if qt["enabled"] and qt["tag_names"] and qt["display_position"] == "submenu"
+        ]
+        self.has_quick_tags = bool(self.quick_tags_direct or self.quick_tags_submenu)
+        # 为所有快捷标签加载图标 SVG 数据（内存缓存 → 本地文件 → API）
+        icon_data_map = {}
+        for qt in self.quick_tags_direct:
+            icon_name = qt.get("icon_name")
+            if icon_name:
+                qt["icon_data"] = load_quick_tags_icon(icon_name)
+                if qt["icon_data"]:
+                    icon_data_map[icon_name] = qt["icon_data"]
+            else:
+                qt["icon_data"] = None
+        # JSON 数据供前端 JS 使用（submenu）
+        if self.quick_tags_submenu:
+            submenu_data = []
+            for qt in self.quick_tags_submenu:
+                icon_name = qt["icon_name"] or "tabler:hash"
+                icon_data = load_quick_tags_icon(icon_name)
+                submenu_data.append({
+                    "tagName": " ".join(qt["tag_names"]),
+                    "tagNames": qt["tag_names"],
+                    "label": qt["label"] or "Unnamed",
+                    "shortLabel": qt["short_label"],
+                    "iconName": icon_name,
+                    "iconData": icon_data,
+                    "displayMode": qt["display_mode"],
+                })
+                if icon_data:
+                    icon_data_map[icon_name] = icon_data
+            self.quick_tags_submenu_json = json.dumps(submenu_data, ensure_ascii=False)
+        else:
+            self.quick_tags_submenu_json = None
+        # 工具栏模块顺序（用户可拖拽自定义），含各模块是否有可见内容的标记
+        self.has_date_display = user_profile.bookmark_date_display != UserProfile.BOOKMARK_DATE_DISPLAY_HIDDEN
+        self.toolbar_items = [
+            {
+                "key": module["key"],
+                "has_content": {
+                    UserProfile.TOOLBAR_MODULE_DATE: self.has_date_display,
+                    UserProfile.TOOLBAR_MODULE_ACTIONS: self.has_visible_actions,
+                    UserProfile.TOOLBAR_MODULE_QUICK_EDITS: self.has_visible_quick_edits,
+                    UserProfile.TOOLBAR_MODULE_QUICK_TAGS: self.has_quick_tags,
+                    UserProfile.TOOLBAR_MODULE_STATUSES: self.has_visible_statuses,
+                }.get(module["key"], False),
+            }
+            for module in user_profile.get_bookmark_toolbar_modules()
+            if module["enabled"]
+        ]
+        self.sharing_enabled = user_profile.enable_sharing or user_profile.enable_public_sharing
         self.show_favicons = user_profile.enable_favicons
         self.show_preview_images = user_profile.enable_preview_images
+        self.show_preview_image_placeholders = user_profile.enable_preview_image_placeholders
         self.show_notes = user_profile.permanent_notes
-        self.collapse_side_panel = user_profile.collapse_side_panel
+        self.show_sidebar = user_profile.show_sidebar
         self.is_preview = False
         self.snapshot_feature_enabled = settings.LD_ENABLE_SNAPSHOTS
 
@@ -1180,7 +1450,7 @@ class BookmarkListContext:
         query_params = search.query_params
         if page is not None:
             query_params["page"] = page
-        query_string = urllib.parse.urlencode(query_params)
+        query_string = utils.clean_query_params(query_params)
 
         return base_url if query_string == "" else base_url + "?" + query_string
 
@@ -1190,13 +1460,14 @@ class BookmarkListContext:
     ):
         query_params = search.query_params
         query_params["return_url"] = return_url
-        query_string = urllib.parse.urlencode(query_params)
+        query_string = utils.clean_query_params(query_params)
 
         return (
             base_action_url
             if query_string == ""
             else base_action_url + "?" + query_string
         )
+
 
 
 class ActiveBookmarkListContext(BookmarkListContext):
@@ -1241,7 +1512,8 @@ class AddTagItem:
         params.pop("details", None)
         params.pop("page", None)
 
-        return params.urlencode()
+        encoded = utils.clean_query_params(params)
+        return f"?{encoded}" if encoded else context.index_url
 
     @staticmethod
     def _generate_query_string_legacy(context: RequestContext, tag: Tag) -> str:
@@ -1260,7 +1532,8 @@ class AddTagItem:
         params.pop("details", None)
         params.pop("page", None)
 
-        return params.urlencode()
+        encoded = utils.clean_query_params(params)
+        return f"?{encoded}" if encoded else context.index_url
 
 
 class RemoveTagItem:
@@ -1284,7 +1557,8 @@ class RemoveTagItem:
         params.pop("details", None)
         params.pop("page", None)
 
-        return params.urlencode()
+        encoded = utils.clean_query_params(params)
+        return f"?{encoded}" if encoded else context.index_url
 
     @staticmethod
     def _generate_query_string_legacy(context: RequestContext, tag: Tag) -> str:
@@ -1316,7 +1590,8 @@ class RemoveTagItem:
         params.pop("details", None)
         params.pop("page", None)
 
-        return params.urlencode()
+        encoded = utils.clean_query_params(params)
+        return f"?{encoded}" if encoded else context.index_url
 
 
 class TagGroup:
@@ -1338,6 +1613,9 @@ class TagGroup:
             return TagGroup._create_tag_groups_alphabetical(context, tags)
         elif mode == UserProfile.TAG_GROUPING_DISABLED:
             return TagGroup._create_tag_groups_disabled(context, tags)
+        elif mode == UserProfile.TAG_GROUPING_SMART_TREE:
+            # Smart tree mode uses TagTreeNode instead; return empty groups
+            return []
         else:
             raise ValueError(f"{mode} is not a valid tag grouping mode")
 
@@ -1409,23 +1687,239 @@ class TagGroup:
         if len(tags) == 0:
             return []
 
-        def _sort_key(tag):
-            name = tag.name
-            if CJK_RE.match(name[0]):
-                py = pinyin(name, style=Style.FIRST_LETTER)
-                pinyin_key = "".join(
-                    item[0].lower() if item and item[0] else char
-                    for item, char in zip(py, name, strict=False)
-                )
-                return (1, pinyin_key)
-            return (0, name.lower())
-
-        sorted_tags = sorted(tags, key=_sort_key)
+        sorted_tags = sorted(tags, key=lambda t: _tag_sort_key(t.name))
         group = TagGroup(context, "Ungrouped")
         for tag in sorted_tags:
             group.add_tag(tag)
 
         return [group]
+
+
+# ---- co-occurrence cache ----
+# The raw (bookmark_id, tag_id) pairs for every user are cached so that
+# the expensive SQL query only runs once.  The cache is invalidated by
+# Django signals whenever the user's bookmarks or tags change (see
+# ``signals.py``).  When building the tree for a specific search the
+# cached pairs are filtered in Python, which is fast.
+_CACHE_KEY_PREFIX = "tag_cooccurrence"
+_CACHE_TIMEOUT = 3600  # seconds
+
+
+def _get_cached_pairs(user):
+    """Return all (bookmark_id, tag_id) pairs for *user*, from cache if possible."""
+    from django.core.cache import cache
+
+    key = f"{_CACHE_KEY_PREFIX}:{user.id}"
+    pairs = cache.get(key)
+    if pairs is None:
+        through = Bookmark.tags.through
+        all_bids = Bookmark.objects.filter(owner=user).values_list("id", flat=True)
+        pairs = list(
+            through.objects.filter(bookmark_id__in=all_bids).values_list(
+                "bookmark_id", "tag_id"
+            )
+        )
+        cache.set(key, pairs, _CACHE_TIMEOUT)
+    return pairs
+
+
+def invalidate_tag_cooccurrence_cache(user_id):
+    """Evict the cached co-occurrence pairs for *user_id*."""
+    from django.core.cache import cache
+
+    cache.delete(f"{_CACHE_KEY_PREFIX}:{user_id}")
+
+
+def _build_path_query_string(context, tag_names):
+    """Build a query string that selects all *tag_names* (the full tree path)."""
+    from bookmarks.services.search_query_parser import extract_tag_names_from_query
+
+    params = context.query_params.copy()
+    existing_query = params.get("q", "")
+    profile = context.request.user_profile
+
+    already_selected = {
+        name.lower()
+        for name in extract_tag_names_from_query(existing_query, profile)
+    }
+
+    parts = existing_query.strip() if existing_query else ""
+    for name in tag_names:
+        if name.lower() not in already_selected:
+            if isinstance(context.search_expression, OrExpression):
+                parts = f"({parts})" if parts else ""
+            parts = f"{parts} #{name}".strip()
+
+    params["q"] = parts
+    params.pop("details", None)
+    params.pop("page", None)
+
+    encoded = utils.clean_query_params(params)
+    return f"?{encoded}" if encoded else context.index_url
+
+
+class TagTreeNode:
+    """A node in the recursive tag co-occurrence tree.
+
+    Unified structure for both roots and children:
+    - root nodes: co_count = 0
+    - child nodes: co_count = co-occurrence count with parent
+    """
+
+    def __init__(self, tag_item, count, co_count=0, children=None, path_query_string=""):
+        self.tag = tag_item  # AddTagItem
+        self.name = tag_item.name
+        self.count = count  # Total bookmark count for this tag
+        self.co_count = co_count  # Co-occurrence with parent (0 for roots)
+        self.children = children or []  # List of TagTreeNode
+        self.has_children = len(self.children) > 0
+        # URL that selects every tag on the path from the root to this node
+        self.path_query_string = path_query_string
+
+
+def _build_tag_tree(context, bookmark_queryset, tags):
+    """Build root nodes for the tag co-occurrence tree.
+
+    Only the root level is computed here — children are loaded on demand
+    via the ``/tag-tree/children`` AJAX endpoint.  This keeps the initial
+    page render fast regardless of how many tags or bookmarks the user has.
+
+    Each root node's ``has_children`` flag is determined by a cheap check:
+    does at least one bookmark with this tag also carry a *different* tag?
+    """
+    from collections import defaultdict
+
+    all_pairs = _get_cached_pairs(context.request.user)
+    bookmark_ids = set(bookmark_queryset.values_list("id", flat=True))
+    pairs = [(bid, tid) for bid, tid in all_pairs if bid in bookmark_ids]
+
+    # Build reverse mapping: bookmark -> tags
+    bookmark_tags: dict[int, set[int]] = defaultdict(set)
+    tag_bookmark_count: dict[int, int] = defaultdict(int)
+    for bid, tid in pairs:
+        bookmark_tags[bid].add(tid)
+        tag_bookmark_count[tid] += 1
+
+    # Precompute: which tags appear on a bookmark that has >1 tag?
+    tags_with_children: set[int] = set()
+    for tids in bookmark_tags.values():
+        if len(tids) > 1:
+            tags_with_children.update(tids)
+
+    roots = []
+    for tag in sorted(
+        tags,
+        key=lambda t: (-tag_bookmark_count.get(t.id, 0), _tag_sort_key(t.name)),
+    ):
+        count = tag_bookmark_count.get(tag.id, 0)
+        if count == 0:
+            continue
+
+        root_names = [tag.name]
+        node = TagTreeNode(
+            AddTagItem(context, tag),
+            count,
+            children=[],
+            path_query_string=_build_path_query_string(context, root_names),
+        )
+        node.has_children = tag.id in tags_with_children
+        roots.append(node)
+
+    return roots
+
+
+def get_tag_tree_children(request_context, user, search, path_names):
+    """Compute children for a specific tree path (AJAX endpoint).
+
+    *path_names* is the ordered list of tag names from root to the
+    node whose children are requested.  Returns a list of
+    ``TagTreeNode`` objects (the children), or an empty list if the
+    path is invalid.
+    """
+    from collections import defaultdict
+
+    # Resolve tag names → Tag objects (case-insensitive)
+    all_tags = list(Tag.objects.filter(owner=user))
+    tag_by_name = {t.name.lower(): t for t in all_tags}
+    path_tags = []
+    for name in path_names:
+        tag = tag_by_name.get(name.lower())
+        if tag is None:
+            return []
+        path_tags.append(tag)
+
+    # Load cached pairs & filter by current search
+    all_pairs = _get_cached_pairs(user)
+    search_bids = set(
+        request_context.get_bookmark_query_set(search).values_list("id", flat=True)
+    )
+    pairs = [(bid, tid) for bid, tid in all_pairs if bid in search_bids]
+
+    bookmark_tags: dict[int, set[int]] = defaultdict(set)
+    for bid, tid in pairs:
+        bookmark_tags[bid].add(tid)
+
+    tag_bookmarks: dict[int, set[int]] = defaultdict(set)
+    for bid, tid in pairs:
+        tag_bookmarks[tid].add(bid)
+
+    # Compute ancestor bookmark set: bookmarks with ALL path tags
+    ancestor_bids = search_bids.copy()
+    for tag in path_tags:
+        ancestor_bids &= tag_bookmarks.get(tag.id, set())
+
+    if not ancestor_bids:
+        return []
+
+    visited = {t.id for t in path_tags}
+    tag_map = {t.id: t for t in all_tags}
+
+    # Count co-occurrences
+    co_tag_counts: dict[int, int] = defaultdict(int)
+    for bid in ancestor_bids:
+        for tid in bookmark_tags.get(bid, set()):
+            if tid not in visited and tid in tag_map:
+                co_tag_counts[tid] += 1
+
+    sorted_candidates = sorted(
+        co_tag_counts.items(),
+        key=lambda x: (-x[1], _tag_sort_key(tag_map[x[0]].name)),
+    )
+
+    children = []
+    for co_tag_id, co_count in sorted_candidates:
+        co_tag = tag_map[co_tag_id]
+        child_names = path_names + [co_tag.name]
+        child_bids = ancestor_bids & tag_bookmarks[co_tag_id]
+
+        # Check if this child would have grandchildren (without building them)
+        has_children = False
+        if child_bids:
+            child_visited = visited | {co_tag_id}
+            for bid in child_bids:
+                for tid in bookmark_tags.get(bid, set()):
+                    if tid not in child_visited and tid in tag_map:
+                        has_children = True
+                        break
+                if has_children:
+                    break
+
+        children.append(
+            TagTreeNode(
+                AddTagItem(request_context, co_tag),
+                len(tag_bookmarks.get(co_tag_id, set())),
+                co_count=co_count,
+                children=[],  # loaded on next AJAX call
+                path_query_string=_build_path_query_string(
+                    request_context, child_names
+                ),
+            )
+        )
+        # has_children is computed dynamically based on whether there
+        # are any tags that co-occur with the full child path.
+        children[-1].has_children = has_children
+
+    return children
 
 
 class TagCloudContext:
@@ -1447,26 +1941,40 @@ class TagCloudContext:
         )
         has_selected_tags = len(unique_selected_tags) > 0
         unselected_tags = set(unique_tags).symmetric_difference(unique_selected_tags)
-        groups = TagGroup.create_tag_groups(
-            request_context, user_profile.tag_grouping, unselected_tags
-        )
+
+        self.tag_grouping = user_profile.tag_grouping
+
+        if self.tag_grouping == UserProfile.TAG_GROUPING_SMART_TREE:
+            # Build co-occurrence tree from all visible tags (including selected)
+            bookmark_qs = request_context.get_bookmark_query_set(self.search)
+            self.tag_tree = _build_tag_tree(request_context, bookmark_qs, unique_tags)
+            self.groups = []
+        else:
+            self.tag_tree = []
+            self.groups = TagGroup.create_tag_groups(
+                request_context, self.tag_grouping, unselected_tags
+            )
 
         selected_tag_items = []
         for tag in unique_selected_tags:
             selected_tag_items.append(RemoveTagItem(request_context, tag))
 
         self.tags = unique_tags
-        self.groups = groups
         self.selected_tags = selected_tag_items
         self.has_selected_tags = has_selected_tags
-        self.tag_grouping = user_profile.tag_grouping
 
-        if user_profile.tag_grouping == UserProfile.TAG_GROUPING_ALPHABETICAL:
-            self.toggle_tag_grouping_value = UserProfile.TAG_GROUPING_DISABLED
-            self.toggle_tag_grouping_label = _("Disable grouping")
-        else:
-            self.toggle_tag_grouping_value = UserProfile.TAG_GROUPING_ALPHABETICAL
-            self.toggle_tag_grouping_label = _("Group alphabetically")
+        # --- menu options ---
+        is_tree = self.tag_grouping == UserProfile.TAG_GROUPING_SMART_TREE
+        self.mode_options = [
+            (UserProfile.TAG_GROUPING_ALPHABETICAL, _("Flat mode"), not is_tree),
+            (UserProfile.TAG_GROUPING_SMART_TREE, _("Tree mode"), is_tree),
+        ]
+        self.grouping_options = [
+            (UserProfile.TAG_GROUPING_ALPHABETICAL, _("Alphabetical grouping"),
+             self.tag_grouping == UserProfile.TAG_GROUPING_ALPHABETICAL),
+            (UserProfile.TAG_GROUPING_DISABLED, _("Disable grouping"),
+             self.tag_grouping == UserProfile.TAG_GROUPING_DISABLED),
+        ] if not is_tree else []
 
     def get_selected_tags(self):
         raise NotImplementedError("Must be implemented by subclass")
@@ -1613,7 +2121,7 @@ class DomainItem:
             query_params = request_context.query_params.copy()
             query_params.setlist("q", [query_string])
             query_params.pop("page", None)
-            encoded_query = query_params.urlencode()
+            encoded_query = utils.clean_query_params(query_params)
             self.url = (
                 "?" + encoded_query if encoded_query else request_context.index_url
             )
@@ -1623,22 +2131,27 @@ class DomainsContext:
     request_context = RequestContext
     TOP_ROOT_LIMIT = 10
 
-    def __init__(self, request: HttpRequest, search: BookmarkSearch) -> None:
-        request_context = self.request_context(request)
-        config = utils.parse_domain_roots(request.user_profile.custom_domain_root)
+    def _init_toggle_state(self, request, view_mode_action="toggle_domain_view_mode",
+                           compact_mode_action="toggle_domain_compact_mode"):
+        """Initialize view mode / compact mode state and toggle labels."""
         self.view_mode = self._parse_view_mode(request)
         self.is_icon_mode = self.view_mode == "icon"
         self.is_compact_mode = self._parse_compact_mode(request)
         self.toggle_view_mode_label = (
             _("Full mode") if self.is_icon_mode else _("Icon mode")
         )
-        self.toggle_view_mode_action = "toggle_domain_view_mode"
+        self.toggle_view_mode_action = view_mode_action
         self.toggle_view_mode_value = "full" if self.is_icon_mode else "icon"
         self.toggle_compact_mode_label = (
             _("All domains") if self.is_compact_mode else _("Only important domains")
         )
-        self.toggle_compact_mode_action = "toggle_domain_compact_mode"
+        self.toggle_compact_mode_action = compact_mode_action
         self.toggle_compact_mode_value = "0" if self.is_compact_mode else "1"
+
+    def __init__(self, request: HttpRequest, search: BookmarkSearch) -> None:
+        request_context = self.request_context(request)
+        config = utils.parse_domain_roots(request.user_profile.custom_domain_root)
+        self._init_toggle_state(request)
 
         parsed_query = queries.parse_query_string(search.q)
         selected_domain_terms = [
@@ -1648,11 +2161,11 @@ class DomainsContext:
         ]
 
         bookmarks = list(
-            request_context.get_bookmark_query_set(search).values("url", "favicon_file")
+            request_context.get_bookmark_query_set(search).values("url")
         )
         bookmarks.sort(key=lambda bookmark: bookmark["url"])
 
-        root_nodes = self._build_domain_tree(bookmarks, config)
+        root_nodes = self._build_domain_tree(bookmarks, config, request_context._favicon_lookup)
         if self.is_compact_mode:
             root_nodes = self._compact_root_nodes(root_nodes)
         self.roots = self._build_items(
@@ -1668,6 +2181,7 @@ class DomainsContext:
     def _build_domain_tree(
         bookmarks: list[dict],
         config: utils.DomainConfig,
+        favicon_lookup: FaviconLookup | None = None,
     ) -> list[DomainTreeNode]:
         root_nodes: dict[str, DomainTreeNode] = {}
 
@@ -1707,7 +2221,7 @@ class DomainsContext:
                     )
                     current_nodes[node_host] = node
 
-                node.add_bookmark(hostname, bookmark["favicon_file"])
+                node.add_bookmark(hostname, favicon_lookup.get(hostname) if favicon_lookup else "")
                 current_nodes = node.children
 
         return DomainsContext._sorted_nodes(root_nodes.values())
@@ -1865,7 +2379,10 @@ class BookmarkDetailsContext:
         self.is_editable = bookmark.owner == user
         self.sharing_enabled = user_profile.enable_sharing
         self.preview_image_enabled = user_profile.enable_preview_images
-        self.show_link_icons = user_profile.enable_favicons and bookmark.favicon_file
+        hostname = utils.extract_hostname(bookmark.url)
+        self.favicon_file = request_context._favicon_lookup.get(hostname)
+        self.favicon_unavailable = not self.favicon_file and request_context._favicon_lookup.is_unavailable(hostname)
+        self.show_link_icons = user_profile.enable_favicons and bool(self.favicon_file)
         self.snapshots_enabled = settings.LD_ENABLE_SNAPSHOTS
         self.uploads_enabled = not settings.LD_DISABLE_ASSET_UPLOAD
 
@@ -1890,6 +2407,18 @@ class BookmarkDetailsContext:
             ),
             None,
         )
+
+        self.preview_image_file = bookmark.preview_image_file
+
+        # 高亮和批注数量（单次查询）
+        from django.db.models import Count, Q
+        from bookmarks.models import Annotation
+        agg = Annotation.objects.filter(bookmark=bookmark).aggregate(
+            total=Count("id"),
+            with_note=Count("id", filter=Q(note_content__gt="")),
+        )
+        self.annotation_count = agg["total"]
+        self.note_count = agg["with_note"]
 
 
 class ActiveBookmarkDetailsContext(BookmarkDetailsContext):
@@ -2017,3 +2546,180 @@ class BundlesContext:
             (bundle for bundle in self.bundles if bundle.id == selected_bundle_id),
             None,
         )
+
+
+# ── Highlight-specific sidebar contexts ──────────────────────────────
+
+
+class HighlightRequestContext(RequestContext):
+    """RequestContext for the highlights page — uses highlights URL."""
+
+    index_view = "linkding:bookmarks.highlights"
+    action_view = "linkding:bookmarks.highlights"
+
+    def __init__(self, request: HttpRequest):
+        super().__init__(request)
+        # Remove non-highlight params that might linger from bookmarks page
+        for key in ("details", "bundle", "shared", "unread", "tagged"):
+            self.query_params.pop(key, None)
+
+
+def _get_filtered_annotation_qs(request, search, with_related=False):
+    """Build a filtered annotation queryset from HighlightSearch."""
+    return queries.query_annotations(
+        user=request.user,
+        search_q=search.q,
+        colors=search.colors_list or None,
+        note_filter=search.note_filter,
+        sort="-date_created",
+        group_by="none",
+        date_filter_by=search.date_filter_by,
+        date_filter_start=search.date_filter_start,
+        date_filter_end=search.date_filter_end,
+        bookmark_id=search.bookmark_id_int,
+        with_related=with_related,
+    )
+
+
+def _replace_node_counts_with_highlights(nodes, hostname_hl_counts):
+    """Recursively replace DomainTreeNode.total with highlight counts."""
+    for node in nodes:
+        node.total = hostname_hl_counts.get(node.hostname, 0)
+        _replace_node_counts_with_highlights(
+            node.children.values(), hostname_hl_counts
+        )
+
+
+class HighlightDomainsContext(DomainsContext):
+    """DomainsContext for highlights: filtered by current search, shows highlight counts."""
+
+    @staticmethod
+    def _parse_view_mode(request: HttpRequest) -> str:
+        return request.user_profile.highlights_domain_view_mode
+
+    @staticmethod
+    def _parse_compact_mode(request: HttpRequest) -> bool:
+        return request.user_profile.highlights_domain_compact_mode
+
+    def __init__(self, request: HttpRequest, search) -> None:
+        config = utils.parse_domain_roots(request.user_profile.custom_domain_root)
+        self._init_toggle_state(
+            request,
+            view_mode_action="hl_toggle_domain_view_mode",
+            compact_mode_action="hl_toggle_domain_compact_mode",
+        )
+
+        # Query filtered annotations to get bookmarks and highlight counts
+        qs = _get_filtered_annotation_qs(request, search, with_related=False)
+        bm_hl_counts = (
+            qs.values("bookmark__url")
+            .annotate(hl_count=Count("id"))
+        )
+
+        # Build hostname → highlight count mapping
+        hostname_hl_counts = {}
+        for row in bm_hl_counts:
+            hostname = utils.extract_hostname(row["bookmark__url"])
+            if hostname:
+                hostname_hl_counts[hostname] = hostname_hl_counts.get(hostname, 0) + row["hl_count"]
+
+        # Build domain tree from filtered bookmarks
+        bookmarks = [
+            {"url": row["bookmark__url"]}
+            for row in bm_hl_counts
+        ]
+        bookmarks.sort(key=lambda b: b["url"])
+
+        request_context = HighlightRequestContext(request)
+        root_nodes = self._build_domain_tree(bookmarks, config, request_context._favicon_lookup)
+
+        # Replace bookmark counts with highlight counts
+        _replace_node_counts_with_highlights(root_nodes, hostname_hl_counts)
+
+        if self.is_compact_mode:
+            root_nodes = self._compact_root_nodes(root_nodes)
+
+        # Parse selected domains from search query for DomainItem.is_selected
+        parsed_query = queries.parse_query_string(search.q or "")
+        selected_domain_terms = [
+            utils.canonicalize_domain_filter_value(value)
+            for value in parsed_query["field_terms"]["domain"]
+            if value
+        ]
+
+        self.roots = self._build_items(root_nodes, request_context, search.q or "", selected_domain_terms)
+        self.items = self._flatten_items(self.roots)
+        self.is_empty = len(self.items) == 0
+
+
+class HighlightTagCloudContext:
+    """TagCloudContext for highlights: filtered by current search, shows highlight counts."""
+
+    def __init__(self, request: HttpRequest, search) -> None:
+        user_profile = request.user_profile
+        self.request = request
+        self.search = search
+        self.tag_grouping = user_profile.highlights_tag_grouping
+
+        # Query filtered annotations grouped by tag
+        qs = _get_filtered_annotation_qs(request, search)
+        tag_hl_counts = (
+            qs.filter(bookmark__tags__isnull=False)
+            .values("bookmark__tags__name")
+            .annotate(hl_count=Count("id"))
+            .order_by()
+        )
+        tag_count_map = {row["bookmark__tags__name"].lower(): row["hl_count"] for row in tag_hl_counts}
+
+        # Build tag objects from the tag names
+        tag_names = list(tag_count_map.keys())
+        tags = list(Tag.objects.filter(name__in=tag_names, bookmark__owner=request.user).distinct())
+        unique_tags = utils.unique(tags, key=lambda x: str.lower(x.name))
+
+        request_context = HighlightRequestContext(request)
+
+        # Determine selected tags (from search query) — show at top, exclude from cloud
+        selected_tag_names = extract_tag_names_from_query(search.q or "", user_profile)
+        selected_tag_names_lower = [name.lower() for name in selected_tag_names]
+        all_tags_for_selected = list(
+            Tag.objects.filter(name__in=selected_tag_names_lower, bookmark__owner=request.user).distinct()
+        )
+        unique_selected_tags = utils.unique(all_tags_for_selected, key=lambda x: str.lower(x.name))
+        self.selected_tags = [RemoveTagItem(request_context, tag) for tag in unique_selected_tags]
+        self.has_selected_tags = len(self.selected_tags) > 0
+
+        if self.tag_grouping == UserProfile.TAG_GROUPING_SMART_TREE:
+            # Build co-occurrence tree from annotation bookmark queryset
+            bookmark_qs = Bookmark.objects.filter(
+                id__in=qs.values("bookmark_id")
+            ).distinct()
+            self.tag_tree = _build_tag_tree(request_context, bookmark_qs, unique_tags)
+            self.groups = []
+        else:
+            self.tag_tree = []
+            # Build groups from UNSELECTED tags only
+            unselected_tags = set(unique_tags).symmetric_difference(unique_selected_tags)
+            groups = TagGroup.create_tag_groups(request_context, self.tag_grouping, unselected_tags)
+
+            # Post-process: set highlight counts on tag items
+            for group in groups:
+                for tag_item in group.tags:
+                    tag_item.count = tag_count_map.get(tag_item.name.lower(), 0)
+            self.groups = groups
+
+        self.tags = unique_tags
+
+        is_tree = self.tag_grouping == UserProfile.TAG_GROUPING_SMART_TREE
+        self.mode_options = [
+            (UserProfile.TAG_GROUPING_ALPHABETICAL, _("Flat mode"), not is_tree),
+            (UserProfile.TAG_GROUPING_SMART_TREE, _("Tree mode"), is_tree),
+        ]
+        self.grouping_options = [
+            (UserProfile.TAG_GROUPING_ALPHABETICAL, _("Alphabetical grouping"),
+             self.tag_grouping == UserProfile.TAG_GROUPING_ALPHABETICAL),
+            (UserProfile.TAG_GROUPING_DISABLED, _("Disable grouping"),
+             self.tag_grouping == UserProfile.TAG_GROUPING_DISABLED),
+        ] if not is_tree else []
+
+    def get_selected_tags(self):
+        return []

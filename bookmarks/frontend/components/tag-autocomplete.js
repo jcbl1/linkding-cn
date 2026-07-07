@@ -1,4 +1,5 @@
 import { html, nothing } from "lit";
+import { keyed } from "lit/directives/keyed.js";
 import { cache } from "../utils/tag-cache.js";
 import { TurboLitElement } from "../utils/element.js";
 import { PositionController } from "../utils/position-controller.js";
@@ -68,9 +69,12 @@ export class TagAutocomplete extends TurboLitElement {
     const tags = await cache.getTags();
     const word = getCurrentWord(this.input);
 
+    const search = word.toLowerCase();
     this.suggestions = word
-      ? tags.filter(
-          (tag) => tag.name.toLowerCase().indexOf(word.toLowerCase()) === 0,
+      ? tags.filter((tag) =>
+          tag.name.toLowerCase().indexOf(search) === 0 ||
+          (tag.pinyin_full && tag.pinyin_full.indexOf(search) === 0) ||
+          (tag.pinyin_first && tag.pinyin_first.indexOf(search) === 0),
         )
       : [];
 
@@ -82,20 +86,29 @@ export class TagAutocomplete extends TurboLitElement {
   }
 
   handleKeyDown(event) {
-    if (this.isOpen && (event.keyCode === 13 || event.keyCode === 9)) {
+    // Ignore keys while an IME is composing (e.g. Chinese Pinyin).
+    if (event.isComposing) {
+      return;
+    }
+
+    if (this.isOpen && (event.key === "Enter" || event.key === "Tab")) {
       const suggestion = this.suggestions[this.selectedIndex];
       this.complete(suggestion);
       event.preventDefault();
     }
-    if (event.keyCode === 27) {
+    if (event.key === "Escape") {
       this.close();
       event.preventDefault();
     }
-    if (event.keyCode === 38) {
+    // 回车键：当下拉框关闭时，触发 commit 事件（表示保存并退出）
+    if (event.key === "Enter" && !event.defaultPrevented) {
+      this.dispatchEvent(new CustomEvent("commit", { bubbles: true }));
+    }
+    if (event.key === "ArrowUp") {
       this.updateSelection(-1);
       event.preventDefault();
     }
-    if (event.keyCode === 40) {
+    if (event.key === "ArrowDown") {
       this.updateSelection(1);
       event.preventDefault();
     }
@@ -126,7 +139,7 @@ export class TagAutocomplete extends TurboLitElement {
     this.close();
   }
 
-  updateSelection(dir) {
+  async updateSelection(dir) {
     const length = this.suggestions.length;
     let newIndex = this.selectedIndex + dir;
 
@@ -135,10 +148,9 @@ export class TagAutocomplete extends TurboLitElement {
 
     this.selectedIndex = newIndex;
 
-    setTimeout(() => {
-      const selectedListItem = this.suggestionList?.querySelector("li.selected");
-      selectedListItem?.scrollIntoView({ block: "center" });
-    }, 0);
+    await this.updateComplete;
+    const selectedListItem = this.suggestionList?.querySelector("li.selected");
+    selectedListItem?.scrollIntoView({ block: "nearest" });
   }
 
   render() {
@@ -173,17 +185,19 @@ export class TagAutocomplete extends TurboLitElement {
         >
           ${this.suggestions.map(
             (tag, index) => html`
-              <li class="menu-item ${this.selectedIndex === index ? "selected" : ""}">
-                <a
-                  href="#"
-                  @mousedown=${(event) => {
-                    event.preventDefault();
-                    this.complete(tag);
-                  }}
-                >
-                  ${tag.name}
-                </a>
-              </li>
+              ${keyed(tag.name, html`
+                <li class="menu-item ${this.selectedIndex === index ? "selected" : ""}">
+                  <a
+                    href="#"
+                    @mousedown=${(event) => {
+                      event.preventDefault();
+                      this.complete(tag);
+                    }}
+                  >
+                    ${tag.name}
+                  </a>
+                </li>
+              `)}
             `,
           )}
         </ul>

@@ -37,7 +37,7 @@
       display: contents;
     }
 
-    &:first-of-type {
+    &:nth-child(1 of :not([style*="display:none"])) {
       padding-top: var(--unit-2);
     }
 
@@ -123,5 +123,67 @@
       rotate: 225deg;
       translate: 0 50%;
     }
+  }
+}
+
+/* ── Menu Panel: form-heavy dropdown panels ── */
+.menu.menu-panel {
+  width: 100%;
+  min-width: 0;
+  padding: var(--unit-4);
+  font-size: var(--font-size-sm);
+  transform: none;
+  margin-top: var(--layout-spacing-sm);
+  max-height: none;
+  overflow: visible;
+
+  /* Form layout */
+  .form-group {
+    margin-bottom: var(--unit-3);
+  }
+  .form-group:first-of-type {
+    margin-top: 0;
+  }
+  .form-label {
+    margin-bottom: var(--unit-1);
+  }
+
+  /* Radio/checkbox layout */
+  .radio-group {
+    .form-label {
+      margin-bottom: var(--unit-1);
+    }
+  }
+  .form-radio.form-inline,
+  .form-checkbox.form-inline {
+    margin: 0 var(--unit-2) 0 0;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    column-gap: var(--unit-1);
+  }
+  .form-icon {
+    top: 0;
+    position: relative;
+  }
+
+  /* Actions footer */
+  .actions {
+    margin-top: var(--unit-3);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--unit-2);
+  }
+
+  /* Responsive: narrow screen — fixed to span viewport, scroll handled by JS */
+  @media (max-width: 426px) {
+    position: fixed !important;
+    left: var(--unit-2) !important;
+    right: var(--unit-2) !important;
+    width: auto !important;
+    margin-top: 0;
+    border-radius: var(--border-radius);
+    z-index: 100;
   }
 }

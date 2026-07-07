@@ -1,10 +1,61 @@
-import Defuddle from "defuddle";
 import { Highlighter, HIGHLIGHT_COLORS } from "./anchoring/highlighter";
-import { describeRange, TextQuoteAnchor } from "./anchoring/index";
+import { TextQuoteAnchor } from "./anchoring/index";
 import { READER_ICONS } from "./reader-icons";
-import { gettext, interpolate } from "../utils/i18n.js";
+import { gettext, ngettext, interpolate } from "../utils/i18n.js";
+import "../components/confirm-inline.js";
+import "../components/tag-autocomplete.js";
 import "./reader-toolbar.js";
 import "./reader-sidebar.js";
+import { loadReaderSettings } from "./reader-settings.js";
+import {
+  DEFAULT_ITEM_FORMAT,
+  DEFAULT_SEPARATOR,
+  renderByAction,
+} from "../utils/highlight-copy-format.js";
+import {
+  parseJsonScriptValue,
+  normalizeBaseUrl,
+  joinPath,
+  patchAnnotation,
+  deleteAnnotation,
+  restoreAnnotationToAsset,
+  fetchBookmarkData,
+  fetchAssetList,
+} from "./reader-api.js";
+import {
+  ReadingProgressController,
+  getScrollMetrics,
+} from "./reading-progress.js";
+
+// --- Highlight copy format config cache ---
+let _cachedItemFormat = null;
+let _cachedSeparator = null;
+let _cachedCopyAction = "both";
+let _copyConfigFetched = false;
+
+async function getCopyConfig(apiBase) {
+  if (_copyConfigFetched) return {
+    itemFormat: _cachedItemFormat || DEFAULT_ITEM_FORMAT,
+    separator: _cachedSeparator || DEFAULT_SEPARATOR,
+    action: _cachedCopyAction,
+  };
+  _copyConfigFetched = true;
+  try {
+    const resp = await fetch(`${apiBase}/user/profile/`);
+    if (resp.ok) {
+      const data = await resp.json();
+      const fmt = data.highlight_copy_format || {};
+      if (fmt.item_format) _cachedItemFormat = fmt.item_format;
+      if (fmt.separator) _cachedSeparator = fmt.separator;
+      if (data.highlight_copy_default_action) _cachedCopyAction = data.highlight_copy_default_action;
+    }
+  } catch { /* silent */ }
+  return {
+    itemFormat: _cachedItemFormat || DEFAULT_ITEM_FORMAT,
+    separator: _cachedSeparator || DEFAULT_SEPARATOR,
+    action: _cachedCopyAction,
+  };
+}
 
 const HIGHLIGHT_COLOR_LABELS = {
   yellow: gettext("Yellow"),
@@ -13,97 +64,24 @@ const HIGHLIGHT_COLOR_LABELS = {
   pink: gettext("Pink"),
   primary: gettext("Theme"),
 };
-
-function parseJsonScriptValue(id, fallback) {
-  const el = document.getElementById(id);
-  if (!el) return fallback;
-  try {
-    return JSON.parse(el.textContent);
-  } catch {
-    return fallback;
-  }
-}
-
-function normalizeBaseUrl(baseUrl) {
-  const value = String(baseUrl || "").trim();
-  if (!value) return "";
-  return `${value.replace(/\/+$/, "")}/`;
-}
-
-function joinPath(baseUrl, path) {
-  return `${normalizeBaseUrl(baseUrl)}${String(path || "").replace(/^\/+/, "")}`;
-}
-
-async function patchAnnotation(apiBase, id, updates) {
-  const response = await fetch(joinPath(apiBase, `annotations/${id}/`), {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      "X-CSRFToken": getCSRFToken(),
-    },
-    body: JSON.stringify(updates),
-  });
-  if (!response.ok) throw new Error(`API error: ${response.status}`);
-  return response.json();
-}
-
-async function deleteAnnotation(apiBase, id) {
-  const response = await fetch(joinPath(apiBase, `annotations/${id}/`), {
-    method: "DELETE",
-    headers: { "X-CSRFToken": getCSRFToken() },
-  });
-  if (!response.ok) throw new Error(`API error: ${response.status}`);
-}
-
-function normalizeAnnotationText(text) {
-  return String(text || "").replace(/\s+/g, " ").trim();
-}
-
-function isConfidentAnnotationRange(ann, range) {
-  const rangeText = normalizeAnnotationText(range.toString());
-  const selector = ann.selector || {};
-  const exactText = normalizeAnnotationText(selector.exact);
-  const selectedText = normalizeAnnotationText(ann.selected_text);
-  return rangeText && (rangeText === exactText || rangeText === selectedText);
-}
-
-async function restoreAnnotationToAsset(highlighter, apiBase, assetId, ann) {
-  const range = highlighter.resolveAnnotationRange(ann);
-  if (!isConfidentAnnotationRange(ann, range)) {
-    throw new Error("Resolved range did not match stored annotation text");
-  }
-
-  const { position, quote } = describeRange(highlighter.root, range);
-  return patchAnnotation(apiBase, ann.id, {
-    article_asset: assetId,
-    selector: { ...quote, start: position.start, end: position.end },
-    selected_text: range.toString(),
-  });
-}
-
 /**
- * Reader mode renderer using Defuddle for content extraction,
+ * Reader mode renderer — fetches defuddle-cleaned content from server,
  * with toolbar, sidebar, and annotation support.
  */
 function renderReader(options = {}) {
   const {
-    contentSelector,
-    outputFormat = "html",
-    defuddleOptions = {},
     bookmarkId,
     assetId,
+    from,
   } = options;
 
-  const content = document.getElementById("content");
-  if (!content) return;
-
   const apiBase = normalizeBaseUrl(
-    parseJsonScriptValue("reader-api-base-url", "/api/")
+    parseJsonScriptValue("reader-api-base-url", "/api/"),
   );
   const assetsBase = parseJsonScriptValue("reader-assets-base-url", "/assets");
   const bookmarksIndexUrl = parseJsonScriptValue(
     "reader-bookmarks-index-url",
-    "/bookmarks"
+    "/bookmarks",
   );
 
   // Parse bookmark data injected by Django's json_script
@@ -117,55 +95,102 @@ function renderReader(options = {}) {
     }
   }
 
-  const contentHtml = content.innerHTML;
-  const dom = new DOMParser().parseFromString(contentHtml, "text/html");
-
-  const defuddleOptions_ = {
-    ...defuddleOptions,
-    url: window.location.href,
-  };
-  if (contentSelector) {
-    defuddleOptions_.contentSelector = contentSelector;
-  }
-  if (outputFormat === "markdown") {
-    defuddleOptions_.markdown = true;
-  }
-
-  const result = new Defuddle(dom, defuddleOptions_).parse();
-
   // Title shown in toolbar should always come from bookmark metadata.
-  let resolvedTitle = bookmarkData.title || "";
-  if (!resolvedTitle) {
+  let toolbarTitle = bookmarkData.title || "";
+  if (!toolbarTitle) {
     try {
-      resolvedTitle = new URL(bookmarkData.url || window.location.href).hostname;
+      toolbarTitle = new URL(bookmarkData.url || window.location.href)
+        .hostname;
     } catch {
-      resolvedTitle = gettext("Reader");
+      toolbarTitle = gettext("Reader");
     }
   }
-  document.title = resolvedTitle;
+  document.title = toolbarTitle;
 
-  // Build article container (replaces old .reading-time with scroll progress)
+  // Fetch article content asynchronously, then render.
+  const contentUrl = assetId > 0
+    ? joinPath(assetsBase, `${assetId}`)
+    : null;
+
+  if (contentUrl) {
+    fetch(contentUrl)
+      .then((r) => {
+        if (!r.ok) return Promise.reject(r.status);
+        return r.text();
+      })
+      .then((html) => {
+        // 从完整 HTML 文档中提取 body 内容和 head 元数据
+        const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        const bodyHtml = bodyMatch ? bodyMatch[1] : html;
+        const titleMatch = html.match(/<meta\s+name="title"\s+content="([^"]*)"/i);
+        const wcMatch = html.match(/<meta\s+name="word-count"\s+content="(\d+)"/i);
+        if (titleMatch) document.title = titleMatch[1];
+        renderArticle(bodyHtml, {
+          title: titleMatch ? titleMatch[1] : null,
+          wordCount: wcMatch ? parseInt(wcMatch[1], 10) : 0,
+        }, toolbarTitle, bookmarkData, apiBase, assetsBase, bookmarksIndexUrl, bookmarkId, assetId, from);
+      })
+      .catch((err) => {
+        console.error("Failed to load article content:", err);
+        const el = document.getElementById("loading-container");
+        if (el) el.textContent = gettext("Failed to load article.");
+      });
+  }
+}
+
+function renderArticle(bodyHtml, meta, resolvedTitle, bookmarkData, apiBase, assetsBase, bookmarksIndexUrl, bookmarkId, assetId, fromParam) {
+  // Remove loading spinner
+  const loadingEl = document.getElementById("loading-container");
+  if (loadingEl) loadingEl.remove();
+
   const container = document.createElement("div");
   container.classList.add("container");
 
-  const articleTitle = document.createElement("h1");
-  articleTitle.textContent = result.title || "";
-  container.append(articleTitle);
-
-  const byline = [result.author, result.site].filter(Boolean);
-  if (byline.length > 0) {
-    const articleByline = document.createElement("p");
-    articleByline.textContent = byline.join(" | ");
-    articleByline.classList.add("byline");
-    container.append(articleByline);
+  // 标题
+  if (meta.title) {
+    const articleTitle = document.createElement("h1");
+    articleTitle.className = "article-title";
+    articleTitle.textContent = meta.title;
+    container.append(articleTitle);
   }
 
-  const divider = document.createElement("hr");
-  container.append(divider);
+  // 字数和预计阅读时长
+  if (meta.wordCount > 0) {
+    const stats = document.createElement("p");
+    stats.className = "article-stats";
+    const hr = document.createElement("hr");
+    container.append(stats);
+    container.append(hr);
+
+    function updateReadingStats() {
+      const speed = Number(loadReaderSettings().readingSpeed) || 400;
+      const fast = Math.ceil(meta.wordCount / (speed * 1.1));
+      const slow = Math.ceil(meta.wordCount / (speed * 0.9));
+      let minText;
+      if (fast === slow) {
+        minText = interpolate(
+          ngettext("%(fast)s minute", "%(fast)s minutes", fast),
+          { fast: fast.toLocaleString() },
+        );
+      } else {
+        minText = interpolate(
+          ngettext("%(fast)s~%(slow)s minute", "%(fast)s~%(slow)s minutes", slow),
+          { fast: fast.toLocaleString(), slow: slow.toLocaleString() },
+        );
+      }
+      stats.textContent =
+        interpolate(gettext("%(wordCount)s words · %(min)s"), {
+          wordCount: meta.wordCount.toLocaleString(),
+          min: minText,
+        });
+    }
+    updateReadingStats();
+    document.addEventListener("reader-settings-changed", updateReadingStats);
+  }
 
   const articleContent = document.createElement("div");
   articleContent.id = "article-content";
-  articleContent.innerHTML = result.content;
+  articleContent.innerHTML = bodyHtml;
   postProcess(articleContent);
   container.append(articleContent);
 
@@ -179,7 +204,7 @@ function renderReader(options = {}) {
   contentArea.appendChild(container);
   layout.appendChild(contentArea);
 
-  content.replaceWith(layout);
+  document.body.appendChild(layout);
 
   // --- Snapshot URL (open latest snapshot page directly) ---
   const snapshotUrl = bookmarkData.snapshot_id
@@ -202,7 +227,7 @@ function renderReader(options = {}) {
   layout.appendChild(sidebar);
 
   // Restore sidebar state from localStorage (default: closed)
-  const savedSidebarRaw = localStorage.getItem("reader_sidebar_open");
+  const savedSidebarRaw = localStorage.getItem("ld:reader:sidebar-open");
   const savedSidebarOpen = savedSidebarRaw === "true";
   sidebar.open = savedSidebarOpen;
   toolbar.sidebarOpen = savedSidebarOpen;
@@ -212,7 +237,7 @@ function renderReader(options = {}) {
     const newState = !sidebar.open;
     sidebar.open = newState;
     toolbar.sidebarOpen = newState;
-    localStorage.setItem("reader_sidebar_open", String(newState));
+    localStorage.setItem("ld:reader:sidebar-open", String(newState));
   });
 
   // On mobile, tap outside sidebar closes it.
@@ -223,26 +248,181 @@ function renderReader(options = {}) {
     const path = typeof e.composedPath === "function" ? e.composedPath() : [];
     const insideSidebar = path.includes(sidebar);
     const insideToolbar = path.includes(toolbar);
-    if (!insideSidebar && !insideToolbar) {
+    // 确认弹窗等浮层也不应关闭侧边栏
+    const insidePopup = e.target.closest(".reader-confirm-popup, .ld-confirm-popup");
+    if (!insideSidebar && !insideToolbar && !insidePopup) {
       sidebar.open = false;
       toolbar.sidebarOpen = false;
-      localStorage.setItem("reader_sidebar_open", "false");
+      localStorage.setItem("ld:reader:sidebar-open", "false");
     }
   });
+
+  // --- Editable mode ---
+  const isEditable = bookmarkData.is_editable !== false;
+  sidebar.isEditable = isEditable;
+  toolbar.isEditable = isEditable;
+
+  // --- Toolbar "add-bookmark" action ---
+  toolbar.addEventListener("add-bookmark", () => {
+    sidebar._addToMyBookmarks();
+  });
+
+  // --- Non-owner: toast on text selection ---
+  if (!isEditable) {
+    let selectionToast = null;
+
+    function removeSelectionToast() {
+      if (selectionToast) { selectionToast.remove(); selectionToast = null; }
+    }
+
+    document.addEventListener("selectionchange", () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      if (!articleContent.contains(range.commonAncestorContainer)) return;
+      if (selectionToast) return;
+
+      selectionToast = document.createElement("div");
+      selectionToast.className = "reader-resume-toast reader-resume-toast--resume";
+      selectionToast.setAttribute("role", "status");
+      selectionToast.innerHTML = `
+        <span class="reader-resume-toast-text">${gettext("Add bookmark to highlight")}</span>
+        <span class="reader-resume-toast-buttons">
+          <button type="button" class="btn btn-sm btn-link selection-toast-cancel">${gettext("Cancel")}</button>
+          <button type="button" class="btn btn-sm btn-primary selection-toast-add">${gettext("Add")}</button>
+        </span>
+      `;
+      selectionToast.querySelector(".selection-toast-cancel").addEventListener("click", () => {
+        removeSelectionToast();
+        selection.removeAllRanges();
+      });
+      selectionToast.querySelector(".selection-toast-add").addEventListener("click", () => {
+        removeSelectionToast();
+        sidebar._addToMyBookmarks();
+      });
+      document.body.appendChild(selectionToast);
+
+      // Dismiss on scroll or page click (outside toast)
+      const dismissOnInteraction = (e) => {
+        if (selectionToast && !selectionToast.contains(e.target)) {
+          removeSelectionToast();
+          document.removeEventListener("scroll", dismissOnInteraction, true);
+          document.removeEventListener("pointerdown", dismissOnInteraction, true);
+        }
+      };
+      document.addEventListener("scroll", dismissOnInteraction, true);
+      document.addEventListener("pointerdown", dismissOnInteraction, true);
+    });
+  }
 
   // --- Fetch full bookmark data and assets ---
   if (bookmarkData.id) {
     fetchBookmarkData(bookmarkData.id, sidebar, apiBase);
-    fetchAssetList(bookmarkData.id, sidebar, apiBase);
+    if (isEditable) {
+      fetchAssetList(bookmarkData.id, sidebar, apiBase);
+    }
   }
 
-  // --- Highlighter ---
-  if (bookmarkId && Number(assetId) > 0) {
-    initHighlighter(articleContent, bookmarkId, assetId, sidebar, apiBase);
+  // --- Highlighter (owner only) ---
+  let highlighter = null;
+  if (isEditable && bookmarkId && Number(assetId) > 0) {
+    highlighter = initHighlighter(articleContent, bookmarkId, assetId, sidebar, apiBase);
   }
 
-  // --- Scroll progress ---
+  // --- Scroll progress (owner only) ---
   setupScrollProgress(contentArea, toolbar);
+  if (isEditable) {
+    // Check for pending scroll from "Add to my bookmarks" flow
+    try {
+      const pending = JSON.parse(localStorage.getItem("ld:reader:pending-scroll") || "null");
+      if (pending && pending.bookmarkId === bookmarkId && pending.scrollTop > 0) {
+        localStorage.removeItem("ld:reader:pending-scroll");
+        requestAnimationFrame(() => {
+          contentArea.scrollTop = pending.scrollTop;
+        });
+      }
+    } catch {}
+    if (fromParam === "highlights") {
+      // From highlights page: skip progress saving, scroll to annotation
+      _initHighlightsJumpMode(contentArea, articleContent, bookmarkId, assetId, apiBase, highlighter);
+    } else {
+      new ReadingProgressController(
+        contentArea,
+        articleContent,
+        bookmarkId,
+        assetId,
+        apiBase,
+      );
+    }
+  }
+}
+
+/**
+ * From highlights page: pause progress sync, scroll to annotation, show banner.
+ */
+function _initHighlightsJumpMode(contentArea, articleContent, bookmarkId, assetId, apiBase, highlighter) {
+  // Show pause banner
+  const banner = document.createElement("div");
+  banner.className = "reader-progress-paused-banner";
+  banner.innerHTML = `
+    <span class="reader-progress-paused-text"></span>
+    <button type="button" class="btn btn-sm reader-progress-resume-btn"></button>
+  `;
+  banner.querySelector(".reader-progress-paused-text").textContent =
+    gettext("Reading progress sync is paused");
+  banner.querySelector(".reader-progress-resume-btn").textContent =
+    gettext("Resume sync");
+
+  banner.querySelector(".reader-progress-resume-btn").addEventListener("click", () => {
+    banner.remove();
+    new ReadingProgressController(contentArea, articleContent, bookmarkId, assetId, apiBase);
+  });
+
+  document.body.appendChild(banner);
+
+  // Scroll to annotation hash after annotations load
+  const hash = location.hash;
+  if (!hash || !hash.startsWith("#annotation-")) return;
+  const targetAnnId = hash.replace("#annotation-", "");
+
+  function jumpToAnnotation() {
+    if (!highlighter) return;
+    const ann = highlighter.annotations.get(targetAnnId);
+    if (!ann) return;
+    try {
+      const range = highlighter.resolveAnnotationRange(ann);
+      scrollRangeIntoReaderView(contentArea, range);
+      // Wait for scroll to finish by watching scrollTop, then flash
+      const container = getReaderScrollContainer(contentArea) || contentArea;
+      let last = container.scrollTop;
+      const poll = setInterval(() => {
+        const cur = container.scrollTop;
+        if (Math.abs(cur - last) < 1) {
+            clearInterval(poll);
+            flashAnnotationRange(range);
+        }
+        last = cur;
+      }, 100);
+    } catch {}
+  }
+
+  if (highlighter) {
+    // Poll until the target annotation is loaded, then jump
+    let elapsed = 0;
+    const poll = setInterval(() => {
+      elapsed += 200;
+      if (highlighter.annotations.has(targetAnnId)) {
+        clearInterval(poll);
+        requestAnimationFrame(() => jumpToAnnotation());
+      } else if (elapsed >= 5000) {
+        clearInterval(poll);
+        // Last resort: try resolving anyway
+        jumpToAnnotation();
+      }
+    }, 200);
+  }
 }
 
 function postProcess(articleContent) {
@@ -251,57 +431,10 @@ function postProcess(articleContent) {
   });
 }
 
-function getCSRFToken() {
-  const match = document.cookie.match(/csrftoken=([^;]+)/);
-  if (match) return match[1];
-  const meta = document.querySelector('meta[name="csrfmiddlewaretoken"]');
-  return meta ? meta.content : "";
-}
-
-async function fetchBookmarkData(bookmarkId, sidebar, apiBase) {
-  try {
-    const resp = await fetch(joinPath(apiBase, `bookmarks/${bookmarkId}/`));
-    if (resp.ok) {
-      const data = await resp.json();
-      sidebar.bookmarkData = { ...sidebar.bookmarkData, ...data };
-      if (data?.title) {
-        document.title = data.title;
-        document.dispatchEvent(
-          new CustomEvent("bookmark-updated", {
-            detail: { title: data.title },
-          })
-        );
-      }
-    }
-  } catch (err) {
-    console.warn("Failed to fetch bookmark data:", err);
-  }
-}
-
-async function fetchAssetList(bookmarkId, sidebar, apiBase) {
-  try {
-    const resp = await fetch(
-      joinPath(apiBase, `bookmarks/${bookmarkId}/assets/`)
-    );
-    if (resp.ok) {
-      const data = await resp.json();
-      sidebar.assetList = Array.isArray(data) ? data : data.results || [];
-    }
-  } catch (err) {
-    console.warn("Failed to fetch asset list:", err);
-  }
-}
-
 function setupScrollProgress(contentEl, toolbar) {
   let ticking = false;
   const update = () => {
-    const scrollTop = contentEl.scrollTop;
-    const scrollHeight = contentEl.scrollHeight - contentEl.clientHeight;
-    const percent =
-      scrollHeight > 0
-        ? Math.min(100, Math.round((scrollTop / scrollHeight) * 100))
-        : 0;
-    toolbar.progress = percent;
+    toolbar.progress = Math.round(getScrollMetrics(contentEl).progress * 100);
   };
 
   update();
@@ -316,21 +449,13 @@ function setupScrollProgress(contentEl, toolbar) {
   });
 }
 
-const ANNOTATION_TOOLBAR_MODE_KEY = "reader_annotation_toolbar_mode";
 const ANNOTATION_TOOLBAR_MODE_HYBRID = "hybrid";
 const ANNOTATION_TOOLBAR_MODE_TAKEOVER = "takeover";
 const DEFAULT_HIGHLIGHT_COLOR = "yellow";
 
 function getAnnotationToolbarMode() {
-  try {
-    const raw = localStorage.getItem(ANNOTATION_TOOLBAR_MODE_KEY);
-    if (raw === ANNOTATION_TOOLBAR_MODE_TAKEOVER) {
-      return ANNOTATION_TOOLBAR_MODE_TAKEOVER;
-    }
-  } catch {
-    // Ignore localStorage access errors and use hybrid mode.
-  }
-  return ANNOTATION_TOOLBAR_MODE_HYBRID;
+  const mode = loadReaderSettings().annotationToolbarMode;
+  return mode === ANNOTATION_TOOLBAR_MODE_TAKEOVER ? mode : ANNOTATION_TOOLBAR_MODE_HYBRID;
 }
 
 function setAnnotationToolbarModeDataset(mode) {
@@ -341,6 +466,127 @@ function toSolidColor(bg) {
   if (typeof bg !== "string") return bg;
   if (bg.includes("color-mix(")) return bg;
   return bg.replace("0.35", "0.8").replace("0.3", "0.8");
+}
+
+function getReaderScrollContainer(contentEl) {
+  return (
+    contentEl.closest("#reader-content") ||
+    document.getElementById("reader-content") ||
+    null
+  );
+}
+
+function getRangeStartRect(range) {
+  try {
+    const startRange = range.cloneRange();
+    startRange.collapse(true);
+    const caretRects = startRange.getClientRects();
+    if (caretRects.length > 0) return caretRects[0];
+  } catch {
+    // Ignore and fall back.
+  }
+  try {
+    const rects = range.getClientRects();
+    if (rects.length > 0) return rects[0];
+    const box = range.getBoundingClientRect();
+    if (box && (box.width > 0 || box.height > 0)) return box;
+  } catch {
+    // Ignore and let caller fallback.
+  }
+  return null;
+}
+
+function scrollRangeIntoReaderView(contentEl, range) {
+  const container = getReaderScrollContainer(contentEl);
+  const targetRect = getRangeStartRect(range);
+
+  if (container && targetRect) {
+    const containerRect = container.getBoundingClientRect();
+    const offsetInContainer =
+      container.scrollTop + (targetRect.top - containerRect.top);
+    // Keep target around upper-middle area for better reading continuity.
+    const desiredTop = offsetInContainer - container.clientHeight * 0.32;
+    const maxTop = Math.max(
+      0,
+      container.scrollHeight - container.clientHeight,
+    );
+    const nextTop = Math.max(0, Math.min(maxTop, desiredTop));
+    container.scrollTo({ top: nextTop, behavior: "smooth" });
+    return;
+  }
+
+  // Fallback for unexpected DOM states.
+  const node = range.startContainer;
+  const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+  if (el) {
+    el.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+      inline: "nearest",
+    });
+  }
+}
+
+/**
+ * Wait until scroll position stabilizes, then call callback.
+ */
+function _waitForScrollStable(el, callback) {
+  let last = -1, stable = 0;
+  const check = setInterval(() => {
+    const cur = el.scrollTop;
+    if (Math.abs(cur - last) < 1) {
+      if (++stable >= 3) { clearInterval(check); callback(); }
+    } else {
+      stable = 0;
+    }
+    last = cur;
+  }, 80);
+  // Safety: never wait more than 2s
+  setTimeout(() => { clearInterval(check); callback(); }, 2000);
+}
+
+/**
+ * Flash underline bars under each line of the annotation range.
+ * Uses getClientRects() for per-line rects.
+ */
+function flashAnnotationRange(range) {
+  // Try per-line rects first
+  const rects = Array.from(range.getClientRects()).filter(r => r.width > 0 && r.height > 0);
+  if (rects.length > 0) {
+    const seen = new Set();
+    for (const r of rects) {
+      const key = Math.round(r.bottom);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      _createFlashBar(r.left, r.bottom, r.width);
+    }
+    return;
+  }
+  // Fallback: single bounding box
+  const box = range.getBoundingClientRect();
+  if (box.width > 0 && box.height > 0) {
+    _createFlashBar(box.left, box.bottom, box.width);
+  }
+}
+
+function _createFlashBar(left, bottom, width) {
+  const color = "rgba(255,235,0,0.85)";
+  const bar = document.createElement("div");
+  bar.setAttribute("style", [
+    "position:fixed",
+    "z-index:99999",
+    "pointer-events:none",
+    "border-radius:1px",
+    "left:" + left + "px",
+    "top:" + (bottom + 1) + "px",
+    "width:" + width + "px",
+    "height:2px",
+    "background:" + color,
+    "animation:reader-annotation-flash 0.4s ease 2",
+  ].join(";"));
+  document.body.appendChild(bar);
+  bar.addEventListener("animationend", () => bar.remove());
+  setTimeout(() => { if (bar.parentNode) bar.remove(); }, 1200);
 }
 
 /**
@@ -355,61 +601,11 @@ function initHighlighter(contentEl, bookmarkId, assetId, sidebar, apiBase) {
 
   // Sync annotations to sidebar
   highlighter.onChange((annotations) => {
-    const unresolved = (sidebar.annotations || []).filter((ann) => ann._unresolved);
+    const unresolved = (sidebar.annotations || []).filter(
+      (ann) => ann._unresolved,
+    );
     sidebar.annotations = [...Array.from(annotations.values()), ...unresolved];
   });
-
-  function getReaderScrollContainer() {
-    return (
-      contentEl.closest("#reader-content") ||
-      document.getElementById("reader-content") ||
-      null
-    );
-  }
-
-  function getRangeStartRect(range) {
-    try {
-      const startRange = range.cloneRange();
-      startRange.collapse(true);
-      const caretRects = startRange.getClientRects();
-      if (caretRects.length > 0) return caretRects[0];
-    } catch {
-      // Ignore and fall back.
-    }
-    try {
-      const rects = range.getClientRects();
-      if (rects.length > 0) return rects[0];
-      const box = range.getBoundingClientRect();
-      if (box && (box.width > 0 || box.height > 0)) return box;
-    } catch {
-      // Ignore and let caller fallback.
-    }
-    return null;
-  }
-
-  function scrollRangeIntoReaderView(range) {
-    const container = getReaderScrollContainer();
-    const targetRect = getRangeStartRect(range);
-
-    if (container && targetRect) {
-      const containerRect = container.getBoundingClientRect();
-      const offsetInContainer =
-        container.scrollTop + (targetRect.top - containerRect.top);
-      // Keep target around upper-middle area for better reading continuity.
-      const desiredTop = offsetInContainer - container.clientHeight * 0.32;
-      const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-      const nextTop = Math.max(0, Math.min(maxTop, desiredTop));
-      container.scrollTo({ top: nextTop, behavior: "smooth" });
-      return;
-    }
-
-    // Fallback for unexpected DOM states.
-    const node = range.startContainer;
-    const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-    }
-  }
 
   // Reload asset list when assets change
   sidebar.addEventListener("reload-assets", (e) => {
@@ -427,19 +623,19 @@ function initHighlighter(contentEl, bookmarkId, assetId, sidebar, apiBase) {
       try {
         const range = highlighter.resolveAnnotationRange(ann);
         // Scroll to exact range position instead of parent element center.
-        scrollRangeIntoReaderView(range);
+        scrollRangeIntoReaderView(contentEl, range);
       } catch {
         console.warn(`Could not locate annotation ${id}`);
       }
     } else if (action === "copy") {
       const ann =
         highlighter.annotations.get(String(id)) ||
-        (sidebar.annotations || []).find((item) => String(item.id) === String(id));
+        (sidebar.annotations || []).find(
+          (item) => String(item.id) === String(id),
+        );
       if (ann) {
-        let text = ann.selected_text;
-        if (ann.note_content) {
-          text += "\n\n---\n\n" + ann.note_content;
-        }
+        const config = await getCopyConfig(apiBase);
+        const text = renderByAction(config.itemFormat, ann.selected_text, ann.note_content || "", config.action);
         try {
           await navigator.clipboard.writeText(text);
         } catch {
@@ -455,15 +651,17 @@ function initHighlighter(contentEl, bookmarkId, assetId, sidebar, apiBase) {
       }
     } else if (action === "edit-note") {
       const unresolvedAnn = (sidebar.annotations || []).find(
-        (item) => String(item.id) === String(id) && item._unresolved
+        (item) => String(item.id) === String(id) && item._unresolved,
       );
       if (unresolvedAnn) {
         try {
-          const updated = await patchAnnotation(apiBase, id, { note_content: note });
+          const updated = await patchAnnotation(apiBase, id, {
+            note_content: note,
+          });
           sidebar.annotations = (sidebar.annotations || []).map((item) =>
             String(item.id) === String(id)
               ? { ...updated, _unresolved: true }
-              : item
+              : item,
           );
         } catch (err) {
           console.error("Failed to update annotation:", err);
@@ -473,13 +671,13 @@ function initHighlighter(contentEl, bookmarkId, assetId, sidebar, apiBase) {
       }
     } else if (action === "delete") {
       const unresolvedAnn = (sidebar.annotations || []).find(
-        (item) => String(item.id) === String(id) && item._unresolved
+        (item) => String(item.id) === String(id) && item._unresolved,
       );
       if (unresolvedAnn) {
         try {
           await deleteAnnotation(apiBase, id);
           sidebar.annotations = (sidebar.annotations || []).filter(
-            (item) => String(item.id) !== String(id)
+            (item) => String(item.id) !== String(id),
           );
           highlighter.annotations.delete(String(id));
         } catch (err) {
@@ -490,7 +688,7 @@ function initHighlighter(contentEl, bookmarkId, assetId, sidebar, apiBase) {
       }
     } else if (action === "change-color") {
       const unresolvedAnn = (sidebar.annotations || []).find(
-        (item) => String(item.id) === String(id) && item._unresolved
+        (item) => String(item.id) === String(id) && item._unresolved,
       );
       if (unresolvedAnn) {
         try {
@@ -500,13 +698,15 @@ function initHighlighter(contentEl, bookmarkId, assetId, sidebar, apiBase) {
           sidebar.annotations = (sidebar.annotations || []).map((item) =>
             String(item.id) === String(id)
               ? { ...updated, _unresolved: true }
-              : item
+              : item,
           );
         } catch (err) {
           console.error("Failed to update annotation:", err);
         }
       } else {
-        await highlighter.updateAnnotation(String(id), { color: e.detail.color });
+        await highlighter.updateAnnotation(String(id), {
+          color: e.detail.color,
+        });
       }
     }
   });
@@ -515,11 +715,14 @@ function initHighlighter(contentEl, bookmarkId, assetId, sidebar, apiBase) {
   setAnnotationToolbarModeDataset(toolbarMode);
   document.documentElement.classList.toggle(
     "reader-annotation-takeover",
-    toolbarMode === ANNOTATION_TOOLBAR_MODE_TAKEOVER
+    toolbarMode === ANNOTATION_TOOLBAR_MODE_TAKEOVER,
   );
 
-  const hasCoarsePrimaryPointer = window.matchMedia("(pointer: coarse)").matches;
-  const hasAnyCoarsePointer = window.matchMedia("(any-pointer: coarse)").matches;
+  const hasCoarsePrimaryPointer =
+    window.matchMedia("(pointer: coarse)").matches;
+  const hasAnyCoarsePointer = window.matchMedia(
+    "(any-pointer: coarse)",
+  ).matches;
   const isTouchCapable = (navigator.maxTouchPoints || 0) > 0;
   const preferMobileToolbar =
     hasCoarsePrimaryPointer || hasAnyCoarsePointer || isTouchCapable;
@@ -640,59 +843,59 @@ function initHighlighter(contentEl, bookmarkId, assetId, sidebar, apiBase) {
     return popup._noteInput.value.trim();
   }
 
-async function resizeNoteInput() {
-  const input = popup._noteInput;
-  if (!input) return;
+  async function resizeNoteInput() {
+    const input = popup._noteInput;
+    if (!input) return;
 
-  const styles = window.getComputedStyle(input);
-  const lineHeight = await measureLineHeightPx(input);
-  const paddingTop = parseFloat(styles.paddingTop) || 0;
-  const paddingBottom = parseFloat(styles.paddingBottom) || 0;
-  const borderTop = parseFloat(styles.borderTopWidth) || 0;
-  const borderBottom = parseFloat(styles.borderBottomWidth) || 0;
-  const verticalFrame = paddingTop + paddingBottom + borderTop + borderBottom;
-  const minHeight = lineHeight + verticalFrame;
-  const viewportHeight = Math.max(
-    0,
-    window.visualViewport?.height || window.innerHeight
-  );
-  const popupRect = popup.getBoundingClientRect();
-  const toolbarRow = popup.querySelector(".ld-annotation-toolbar-row");
-  const toolbarRowHeight = toolbarRow
-    ? toolbarRow.getBoundingClientRect().height
-    : 0;
-  const noteAreaStyles = popup._noteArea
-    ? window.getComputedStyle(popup._noteArea)
-    : null;
-  const noteAreaMarginTop = noteAreaStyles
-    ? parseFloat(noteAreaStyles.marginTop) || 0
-    : 0;
-  const safeGap = 12;
-  const availablePopupHeight = Math.max(
-    minHeight,
-    viewportHeight - popupRect.top - safeGap
-  );
-  const availableForNote = Math.max(
-    minHeight,
-    availablePopupHeight - toolbarRowHeight - noteAreaMarginTop
-  );
-  const maxLinesByViewport = Math.max(
-    1,
-    Math.floor((viewportHeight * 0.45 - verticalFrame) / lineHeight)
-  );
-  const maxLinesBySpace = Math.max(
-    1,
-    Math.floor((availableForNote - verticalFrame) / lineHeight)
-  );
-  const maxLines = Math.min(10, maxLinesByViewport, maxLinesBySpace);
-  const maxHeight = lineHeight * maxLines + verticalFrame;
+    const styles = window.getComputedStyle(input);
+    const lineHeight = await measureLineHeightPx(input);
+    const paddingTop = parseFloat(styles.paddingTop) || 0;
+    const paddingBottom = parseFloat(styles.paddingBottom) || 0;
+    const borderTop = parseFloat(styles.borderTopWidth) || 0;
+    const borderBottom = parseFloat(styles.borderBottomWidth) || 0;
+    const verticalFrame = paddingTop + paddingBottom + borderTop + borderBottom;
+    const minHeight = lineHeight + verticalFrame;
+    const viewportHeight = Math.max(
+      0,
+      window.visualViewport?.height || window.innerHeight,
+    );
+    const popupRect = popup.getBoundingClientRect();
+    const toolbarRow = popup.querySelector(".ld-annotation-toolbar-row");
+    const toolbarRowHeight = toolbarRow
+      ? toolbarRow.getBoundingClientRect().height
+      : 0;
+    const noteAreaStyles = popup._noteArea
+      ? window.getComputedStyle(popup._noteArea)
+      : null;
+    const noteAreaMarginTop = noteAreaStyles
+      ? parseFloat(noteAreaStyles.marginTop) || 0
+      : 0;
+    const safeGap = 12;
+    const availablePopupHeight = Math.max(
+      minHeight,
+      viewportHeight - popupRect.top - safeGap,
+    );
+    const availableForNote = Math.max(
+      minHeight,
+      availablePopupHeight - toolbarRowHeight - noteAreaMarginTop,
+    );
+    const maxLinesByViewport = Math.max(
+      1,
+      Math.floor((viewportHeight * 0.45 - verticalFrame) / lineHeight),
+    );
+    const maxLinesBySpace = Math.max(
+      1,
+      Math.floor((availableForNote - verticalFrame) / lineHeight),
+    );
+    const maxLines = Math.min(10, maxLinesByViewport, maxLinesBySpace);
+    const maxHeight = lineHeight * maxLines + verticalFrame;
 
-  input.style.height = "auto";
-  const contentHeight = Math.max(minHeight, input.scrollHeight);
-  const nextHeight = Math.min(maxHeight, contentHeight);
-  input.style.height = `${nextHeight}px`;
-  input.style.overflowY = contentHeight > maxHeight + 0.5 ? "auto" : "hidden";
-}
+    input.style.height = "auto";
+    const contentHeight = Math.max(minHeight, input.scrollHeight);
+    const nextHeight = Math.min(maxHeight, contentHeight);
+    input.style.height = `${nextHeight}px`;
+    input.style.overflowY = contentHeight > maxHeight + 0.5 ? "auto" : "hidden";
+  }
 
   function clearPending({ keepSelection = false } = {}) {
     state.pendingRange = null;
@@ -740,7 +943,8 @@ async function resizeNoteInput() {
 
   function getCurrentSelectionRange() {
     const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+    if (!selection || selection.isCollapsed || !selection.rangeCount)
+      return null;
     const range = selection.getRangeAt(0);
     if (!contentEl.contains(range.commonAncestorContainer)) return null;
     if (!selection.toString().trim().length) return null;
@@ -792,7 +996,9 @@ async function resizeNoteInput() {
 
   function getLastSelectionRect(range) {
     const rects = range.getClientRects();
-    return rects.length > 0 ? rects[rects.length - 1] : range.getBoundingClientRect();
+    return rects.length > 0
+      ? rects[rects.length - 1]
+      : range.getBoundingClientRect();
   }
 
   function getSelectionEndRect(range) {
@@ -818,7 +1024,7 @@ async function resizeNoteInput() {
 
   function updateAnchorRectFromAnnotation(ann) {
     let rect = null;
-    const annEl = document.querySelector(`[data-annotation-id="${ann.id}"]`);
+    const annEl = document.querySelector(`.ld-highlight[data-annotation-id="${ann.id}"]`);
     if (annEl) {
       rect = annEl.getBoundingClientRect();
     } else {
@@ -908,7 +1114,7 @@ async function resizeNoteInput() {
             String(state.pendingAnnotation.id),
             {
               note_content: noteText,
-            }
+            },
           );
           if (updated) {
             setSaveStatus("saved", gettext("Saved"));
@@ -934,7 +1140,7 @@ async function resizeNoteInput() {
         const created = await highlighter.createAnnotation(
           state.pendingRange,
           colorToSave,
-          noteText
+          noteText,
         );
         if (created) {
           state.pendingRange = null;
@@ -985,7 +1191,10 @@ async function resizeNoteInput() {
       state.isPersisting = true;
       setMode("persisting");
       try {
-        await highlighter.updateAnnotation(String(state.pendingAnnotation.id), updates);
+        await highlighter.updateAnnotation(
+          String(state.pendingAnnotation.id),
+          updates,
+        );
       } finally {
         state.isPersisting = false;
       }
@@ -997,7 +1206,7 @@ async function resizeNoteInput() {
         createdAnnotation = await highlighter.createAnnotation(
           state.pendingRange,
           selectedColor,
-          noteText
+          noteText,
         );
       } finally {
         state.isPersisting = false;
@@ -1012,7 +1221,9 @@ async function resizeNoteInput() {
     }
 
     if (state.pendingAnnotation) {
-      const latest = highlighter.annotations.get(String(state.pendingAnnotation.id));
+      const latest = highlighter.annotations.get(
+        String(state.pendingAnnotation.id),
+      );
       if (latest) {
         state.pendingAnnotation = latest;
       }
@@ -1183,7 +1394,7 @@ async function resizeNoteInput() {
     const annId = highlighter.getAnnotationIdFromTarget(
       e.target,
       e.clientX,
-      e.clientY
+      e.clientY,
     );
     if (annId) {
       const ann = highlighter.annotations.get(annId);
@@ -1209,7 +1420,7 @@ async function resizeNoteInput() {
   popup.addEventListener("mousedown", (e) => {
     markToolbarInteraction();
     const interactive = e.target.closest(
-      "textarea, input, button, select, option, [contenteditable='true']"
+      "textarea, input, button, select, option, [contenteditable='true']",
     );
     if (
       popup.classList.contains("ld-annotation-toolbar-desktop") &&
@@ -1223,7 +1434,7 @@ async function resizeNoteInput() {
     e.stopPropagation();
     if (!preferMobileToolbar || !isDockedTopLayout()) return;
     const toolbarControl = e.target.closest(
-      "[data-color], [data-action='delete'], [data-action='delete-confirm'], [data-action='delete-cancel']"
+      "[data-color], [data-action='delete'], [data-action='delete-confirm'], [data-action='delete-cancel']",
     );
     if (!toolbarControl) return;
     state.lastToolbarControlPointerDownTs = performance.now();
@@ -1233,7 +1444,7 @@ async function resizeNoteInput() {
     () => {
       markToolbarInteraction();
     },
-    { passive: true }
+    { passive: true },
   );
 
   // --- Color button click ---
@@ -1243,7 +1454,7 @@ async function resizeNoteInput() {
       state.isOpen &&
       performance.now() - state.openedAt < 140 &&
       e.target.closest(
-        "[data-action='delete'], [data-action='delete-confirm'], [data-action='delete-cancel']"
+        "[data-action='delete'], [data-action='delete-confirm'], [data-action='delete-cancel']",
       )
     ) {
       return;
@@ -1328,7 +1539,9 @@ async function resizeNoteInput() {
     }
     await savePendingAnnotation();
     if (state.pendingAnnotation) {
-      const latest = highlighter.annotations.get(String(state.pendingAnnotation.id));
+      const latest = highlighter.annotations.get(
+        String(state.pendingAnnotation.id),
+      );
       if (latest) {
         state.pendingAnnotation = latest;
       }
@@ -1379,7 +1592,7 @@ async function resizeNoteInput() {
     {
       passive: true,
       capture: true,
-    }
+    },
   );
   document.addEventListener("scroll", reflowPopupPosition, {
     passive: true,
@@ -1394,12 +1607,19 @@ async function resizeNoteInput() {
     });
   }
   updateMobileToolbarOffset();
+  return highlighter;
 }
 
 /**
  * Load annotations from the API.
  */
-async function loadAnnotations(highlighter, apiBase, bookmarkId, assetId, sidebar) {
+async function loadAnnotations(
+  highlighter,
+  apiBase,
+  bookmarkId,
+  assetId,
+  sidebar,
+) {
   if (!bookmarkId || Number(assetId) <= 0) {
     highlighter.load([]);
     if (sidebar) sidebar.annotations = [];
@@ -1408,7 +1628,7 @@ async function loadAnnotations(highlighter, apiBase, bookmarkId, assetId, sideba
 
   try {
     const response = await fetch(
-      joinPath(apiBase, `bookmarks/${bookmarkId}/annotations/`)
+      joinPath(apiBase, `bookmarks/${bookmarkId}/annotations/`),
     );
     if (!response.ok) return;
 
@@ -1423,16 +1643,13 @@ async function loadAnnotations(highlighter, apiBase, bookmarkId, assetId, sideba
         currentAnnotations.push(ann);
         continue;
       }
-      if (ann.article_asset !== null && ann.article_asset !== undefined) {
-        continue;
-      }
 
       try {
         const restored = await restoreAnnotationToAsset(
           highlighter,
           apiBase,
           currentAssetId,
-          ann
+          ann,
         );
         currentAnnotations.push(restored);
       } catch {
@@ -1490,12 +1707,14 @@ function createHighlightPopup({ compact }) {
     btn.className = "ld-annotation-color-btn";
     btn.dataset.color = name;
     const colorLabel = HIGHLIGHT_COLOR_LABELS[name] || String(cfg.label || "");
-    btn.title = interpolate(gettext("Highlight: %(color)s"), { color: colorLabel });
-    btn.setAttribute("aria-label", interpolate(gettext("Highlight with %(color)s"), { color: colorLabel }));
-    btn.style.setProperty(
-      "--ld-annotation-color",
-      toSolidColor(cfg.bg)
+    btn.title = interpolate(gettext("Highlight: %(color)s"), {
+      color: colorLabel,
+    });
+    btn.setAttribute(
+      "aria-label",
+      interpolate(gettext("Highlight with %(color)s"), { color: colorLabel }),
     );
+    btn.style.setProperty("--ld-annotation-color", toSolidColor(cfg.bg));
     colorGroup.appendChild(btn);
   }
   colorCard.appendChild(colorGroup);
@@ -1603,7 +1822,9 @@ function positionPopup(popup, rect, anchorClientX = null) {
   const gap = 6;
   const popupWidth = popup.offsetWidth;
   const popupHeight = popup.offsetHeight;
-  const margin = popup.classList.contains("ld-annotation-toolbar-mobile") ? 8 : 10;
+  const margin = popup.classList.contains("ld-annotation-toolbar-mobile")
+    ? 8
+    : 10;
 
   const preferredX = Number.isFinite(anchorClientX)
     ? anchorClientX
@@ -1611,7 +1832,7 @@ function positionPopup(popup, rect, anchorClientX = null) {
   let left = preferredX - popupWidth * 0.5;
   left = Math.max(
     margin,
-    Math.min(left, window.innerWidth - popupWidth - margin)
+    Math.min(left, window.innerWidth - popupWidth - margin),
   );
 
   let top = rect.bottom + gap;

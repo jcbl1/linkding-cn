@@ -8,6 +8,7 @@ from django.urls import reverse
 from django.utils import timezone, translation
 
 from bookmarks.models import BookmarkSearch, UserProfile
+from bookmarks.views.contexts import SidebarUserSummaryContext
 from bookmarks.tests.helpers import (
     BookmarkFactoryMixin,
     BookmarkListTestMixin,
@@ -26,6 +27,13 @@ class BookmarkIndexViewTestCase(
     def setUp(self) -> None:
         user = self.get_or_create_test_user()
         self.client.force_login(user)
+        # 重置 profile 到已知默认值，避免测试间状态污染
+        profile = user.profile
+        profile.sum_mode = SidebarUserSummaryContext.MODE_CALENDAR
+        profile.sum_show_weekdays = False
+        profile.sum_show_details = False
+        profile.default_mark_unread = False
+        profile.save()
 
     def assertEditLink(self, response, url):
         soup = self.make_soup(response.content.decode())
@@ -689,11 +697,10 @@ class BookmarkIndexViewTestCase(
     @unittest.skip("Pre-existing: domain count format changed (no parentheses in icon mode)")
     def test_list_domains_without_normalization_rules(self):
         self.setup_bookmark(
-            url="https://example.com/alpha", favicon_file="https_example_com.png"
+            url="https://example.com/alpha"
         )
         self.setup_bookmark(
             url="https://sub.example.com/beta",
-            favicon_file="https_sub_example_com.png",
         )
 
         response = self.client.get(reverse("linkding:bookmarks.index"))
@@ -726,14 +733,12 @@ class BookmarkIndexViewTestCase(
 
         self.setup_bookmark(
             url="https://docs.feishu.cn/123",
-            favicon_file="https_docs_feishu_cn.png",
         )
         self.setup_bookmark(
-            url="https://feishu.cn/blog", favicon_file="https_feishu_cn.png"
+            url="https://feishu.cn/blog"
         )
         self.setup_bookmark(
             url="https://131312.feishu.cn",
-            favicon_file="https_131312_feishu_cn.png",
         )
 
         response = self.client.get(reverse("linkding:bookmarks.index"))
@@ -814,7 +819,7 @@ class BookmarkIndexViewTestCase(
         self.setup_bookmark(url="https://feishu.cn/blog", title="hello root")
 
         response = self.client.get(
-            reverse("linkding:bookmarks.index") + "?q=domain:(feishu.cn+|+.feishu.cn)"
+            reverse("linkding:bookmarks.index") + '?q=domain:"feishu.cn+|+.feishu.cn"'
         )
 
         soup = self.make_soup(response.content.decode())
@@ -1088,7 +1093,6 @@ class BookmarkIndexViewTestCase(
             for count in range(17 - index):
                 self.setup_bookmark(
                     url=f"https://domain-{index}.example.com/{count}",
-                    favicon_file=f"https_domain_{index}_example_com.png",
                 )
 
         response = self.client.get(reverse("linkding:bookmarks.index"))
@@ -1186,7 +1190,6 @@ class BookmarkIndexViewTestCase(
             for count in range(17 - index):
                 self.setup_bookmark(
                     url=f"https://domain-{index}.example.com/{count}",
-                    favicon_file=f"https_domain_{index}_example_com.png",
                 )
 
         response = self.client.get(
@@ -1226,8 +1229,14 @@ class BookmarkIndexViewTestCase(
             self.user.date_joined = joined_at
             self.user.save(update_fields=["date_joined"])
 
-            oldest_day = today - timezone.timedelta(days=30)
-            recent_day = today - timezone.timedelta(days=4)
+            # Use dates within the same month to avoid month boundary issues
+            if today.day >= 5:
+                oldest_day = today.replace(day=max(today.day - 20, 1))
+                recent_day = today.replace(day=today.day - 4)
+            else:
+                # today is early in the month, use fixed days
+                oldest_day = today.replace(day=1)
+                recent_day = today.replace(day=2)
             oldest_added = timezone.make_aware(
                 timezone.datetime(
                     oldest_day.year, oldest_day.month, oldest_day.day, 12, 0
@@ -1289,9 +1298,9 @@ class BookmarkIndexViewTestCase(
             primary_stats = summary.select(".summary-primary-stats [data-summary-stat]")
             self.assertEqual(
                 [item.attrs["data-summary-stat"] for item in primary_stats],
-                ["bookmarks", "tags", "collection-days"],
+                ["bookmarks", "tags", "collection-days", "unread", "highlights", "annotations"],
             )
-            self.assertEqual(len(primary_stats), 3)
+            self.assertEqual(len(primary_stats), 6)
             self.assertEqual(
                 summary.select_one("[data-summary-stat='bookmarks']")
                 .select_one(".summary-metric-value")
@@ -1342,7 +1351,7 @@ class BookmarkIndexViewTestCase(
             self.assertIsNone(
                 collection_days_toggle.select_one(".summary-info-popover")
             )
-            self.assertIsNone(summary.select_one("[data-summary-stat='unread']"))
+            self.assertIsNotNone(summary.select_one("[data-summary-stat='unread']"))
             self.assertIsNone(summary.select_one("[data-summary-stat='untagged']"))
 
             self.assertIsNone(
@@ -1892,9 +1901,19 @@ class BookmarkIndexViewTestCase(
         with translation.override("zh-hans"):
             self.set_profile_language("zh-hans")
             today = timezone.localdate()
-            # Use 2 consecutive days in the current month for a streak of 2
-            yesterday = today - timezone.timedelta(days=1)
-            activity_days = [yesterday, today]
+            # Use 2 consecutive days within the SAME month for a streak of 2
+            # Avoid month boundary by using day=2 and day=3 when today is day 1
+            if today.day >= 3:
+                day_a = today.replace(day=today.day - 2)
+                day_b = today.replace(day=today.day - 1)
+            elif today.day == 2:
+                day_a = today.replace(day=1)
+                day_b = today
+            else:
+                # today.day == 1, use day 2 and day 3 of the same month
+                day_a = today.replace(day=2)
+                day_b = today.replace(day=3)
+            activity_days = [day_a, day_b]
             expected_count = len(activity_days)
 
             for index, bookmark_day in enumerate(activity_days):
@@ -1942,7 +1961,7 @@ class BookmarkIndexViewTestCase(
                 activity_summary.select_one(".summary-activity-summary-copy").get_text(
                     " ", strip=True
                 ),
-                f"收藏书签 {expected_count} 个，共活跃 {expected_count} 天，最高连续活跃 {expected_count} 天。",
+                f"收藏书签 {expected_count} 个，共活跃 {expected_count} 天，最高连续活跃 {expected_count} 天。新增高亮 0 个， 0 条批注。",
             )
             self.assertEqual(
                 [
@@ -1951,7 +1970,7 @@ class BookmarkIndexViewTestCase(
                         ".summary-activity-summary-value"
                     )
                 ],
-                [str(expected_count), str(expected_count), str(expected_count)],
+                [str(expected_count), str(expected_count), str(expected_count), "0", "0"],
             )
 
             menu_buttons = [
@@ -2022,7 +2041,7 @@ class BookmarkIndexViewTestCase(
                 heatmap_activity_summary.select_one(
                     ".summary-activity-summary-copy"
                 ).get_text(" ", strip=True),
-                f"收藏书签 {week_count} 个，共活跃 {week_count} 天，最高连续活跃 {expected_longest_streak} 天。",
+                f"收藏书签 {week_count} 个，共活跃 {week_count} 天，最高连续活跃 {expected_longest_streak} 天。新增高亮 0 个， 0 条批注。",
             )
 
     def test_sidebar_summary_follows_selected_date_filter_without_explicit_period(self):
@@ -2100,7 +2119,7 @@ class BookmarkIndexViewTestCase(
             calendar_activity_summary.select_one(
                 ".summary-activity-summary-copy"
             ).get_text(" ", strip=True),
-            "收藏书签 3 个，共活跃 3 天，最高连续活跃 3 天。",
+            "收藏书签 3 个，共活跃 3 天，最高连续活跃 3 天。新增高亮 0 个， 0 条批注。",
         )
 
         # Toggle mode to heatmap
@@ -2148,7 +2167,7 @@ class BookmarkIndexViewTestCase(
             heatmap_activity_summary.select_one(
                 ".summary-activity-summary-copy"
             ).get_text(" ", strip=True),
-            "收藏书签 3 个，共活跃 3 天，最高连续活跃 3 天。",
+            "收藏书签 3 个，共活跃 3 天，最高连续活跃 3 天。新增高亮 0 个， 0 条批注。",
         )
         start_heatmap_day = heatmap_summary.select_one(
             f"[data-summary-heatmap-day='{start_day.isoformat()}']"

@@ -1,0 +1,32 @@
+{% extends "bookmarks/sidebar/components/module_base.html" %}
+{% load i18n %}
+
+{% block section_attrs %}id="domain-section-container" aria-labelledby="domains-heading"{% endblock %}
+{% block toggle_storage_key %}highlightsDomainSectionState{% endblock %}
+{% block heading_id %}domains-heading{% endblock %}
+{% block title %}{% translate "Domains" %}{% endblock %}
+
+{% block dropdown_label %}{% translate "Domains menu" %}{% endblock %}
+{% block dropdown_items %}
+  <li class="menu-item">
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="pref_action" value="{{ domains.toggle_view_mode_action }}">
+      <input type="hidden" name="value" value="{{ domains.toggle_view_mode_value }}">
+      <button type="submit" class="menu-link">{{ domains.toggle_view_mode_label }}</button>
+    </form>
+  </li>
+  <li class="menu-item">
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="pref_action" value="{{ domains.toggle_compact_mode_action }}">
+      <input type="hidden" name="value" value="{{ domains.toggle_compact_mode_value }}">
+      <button type="submit" class="menu-link">{{ domains.toggle_compact_mode_label }}</button>
+    </form>
+  </li>
+{% endblock %}
+
+{% block content_attrs %}id="domain-tree-container"{% endblock %}
+{% block content %}
+  {% include "bookmarks/sidebar/modules/domains/tree.html" %}
+{% endblock %}

@@ -1,21 +1,5 @@
-(function () {
-  const bookmarkUrl = window.location;
-  const title =
-    document.querySelector('title')?.textContent ||
-    document.querySelector('meta[property=&quot;og:title&quot;]')?.getAttribute('content') ||
-    '';
-  const description =
-    document.querySelector('meta[name=&quot;description&quot;]')?.getAttribute('content') ||
-    document
-      .querySelector('meta[property=&quot;og:description&quot;]')
-      ?.getAttribute('content') ||
-    '';
-
-  let applicationUrl = '{{ application_url }}';
-  applicationUrl += '?url=' + encodeURIComponent(bookmarkUrl);
-  applicationUrl += '&title=' + encodeURIComponent(title);
-  applicationUrl += '&description=' + encodeURIComponent(description);
-  applicationUrl += '&auto_close';
-
-  window.open(applicationUrl);
-})();
+/* 客户端 bookmarklet：从浏览器端捕获页面标题和描述。
+   通过 include 内联到 href='javascript:...' 中。
+   约束：必须单行（换行破坏 href）、双引号用 HTML 实体（裸双引号截断 href）。
+   逻辑：读取 title/description -> 计算 URL 剩余空间 -> 等比缩放 -> 打开表单。 */
+void(function(){var u=window.location,t=document.querySelector('title')?.textContent||document.querySelector('meta[property=&quot;og:title&quot;]')?.getAttribute('content')||'',d=document.querySelector('meta[name=&quot;description&quot;]')?.getAttribute('content')||document.querySelector('meta[property=&quot;og:description&quot;]')?.getAttribute('content')||'';var eu=encodeURIComponent(u),et=encodeURIComponent(t),ed=encodeURIComponent(d);var max=8000-('{{ application_url }}?url='+eu+'&title=&description=&auto_close').length;if(max<0)max=0;var used=et.length+ed.length;if(used>max&&used>0){var ratio=max/used;et=et.substring(0,Math.floor(t.length*ratio));ed=ed.substring(0,Math.floor(d.length*ratio))}window.open('{{ application_url }}?url='+eu+'&title='+et+'&description='+ed+'&auto_close')})();

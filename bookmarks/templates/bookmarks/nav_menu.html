@@ -5,17 +5,15 @@
     <a href="{% url 'linkding:bookmarks.new' %}" class="btn btn-primary mr-2">{% translate "Add" %}</a>
     <ld-dropdown class="dropdown">
       <button class="btn btn-link dropdown-toggle" tabindex="0">
-        {% translate "Categories" %}
+        {% translate "Bookmarks" context "nav" %}
       </button>
       <ul class="menu" role="list" tabindex="-1">
         <li class="menu-item">
-          <a href="{% url 'linkding:bookmarks.index' %}" class="menu-link">{% translate "Bookmarks" %}</a>
+          <a href="{% url 'linkding:bookmarks.index' %}" class="menu-link">{% translate "All bookmarks" %}</a>
         </li>
-        {% if request.user_profile.enable_sharing %}
-          <li class="menu-item">
-            <a href="{% url 'linkding:bookmarks.shared' %}" class="menu-link">{% translate "Shared bookmarks" %}</a>
-          </li>
-        {% endif %}
+        <li class="menu-item">
+          <a href="{% if request.user_profile.enable_sharing and user_has_shared_bookmarks %}{% url 'linkding:bookmarks.shared' %}?user={{ request.user.username }}{% else %}{% url 'linkding:bookmarks.shared' %}{% endif %}" class="menu-link">{% translate "Shared bookmarks" %}</a>
+        </li>
         <li class="menu-item">
           <a href="{% url 'linkding:bookmarks.archived' %}" class="menu-link">{% translate "Archived bookmarks" %}</a>
         </li>
@@ -24,11 +22,15 @@
         </li>
       </ul>
     </ld-dropdown>
+    <a href="{% url 'linkding:bookmarks.highlights' %}" class="btn btn-link">{% translate "Highlights" %}</a>
     <ld-dropdown class="dropdown">
-      <button class="btn btn-link dropdown-toggle" tabindex="0">
-        {% translate "Settings" %}
+      <button class="btn btn-link dropdown-toggle ld-update-anchor" tabindex="0" ld-update-checker>
+        {% translate "Settings" %}<span class="ld-update-dot" ld-update-dot style="display:none"></span>
       </button>
       <ul class="menu" role="list" tabindex="-1">
+        <li class="menu-item ld-update-menu-item" ld-update-menu-item style="display:none">
+          <button type="button" class="btn btn-link menu-link ld-update-trigger">{% translate "New version" %}<span class="ld-update-dot"></span></button>
+        </li>
         <li class="menu-item">
           <a href="{% url 'linkding:settings.general' %}" class="menu-link">{% translate "General" %}</a>
         </li>
@@ -53,28 +55,21 @@
   {# Menu drop-down for smaller devices #}
   <div class="show-md">
     <a href="{% url 'linkding:bookmarks.new' %}" aria-label="{% translate 'Add bookmark' %}" class="btn btn-primary">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-           style="width: 24px; height: 24px">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-      </svg>
+      <svg width="24" height="24"><use href="#ld-icon-plus"></use></svg>
     </a>
     <ld-dropdown class="dropdown dropdown-right">
-      <button class="btn btn-link dropdown-toggle" aria-label="{% translate 'Navigation menu' %}" tabindex="0">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-             style="width: 24px; height: 24px">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
-        </svg>
+      <button class="btn btn-link dropdown-toggle ld-update-anchor" aria-label="{% translate 'Navigation menu' %}" tabindex="0">
+        <svg width="24" height="24"><use href="#ld-icon-menu"></use></svg>
+        <span class="ld-update-dot" ld-update-dot style="display:none"></span>
       </button>
       <!-- menu component -->
       <ul class="menu" role="list" tabindex="-1">
         <li class="menu-item">
-          <a href="{% url 'linkding:bookmarks.index' %}" class="menu-link">{% translate "Bookmarks" %}</a>
+          <a href="{% url 'linkding:bookmarks.index' %}" class="menu-link">{% translate "All bookmarks" %}</a>
         </li>
-        {% if request.user_profile.enable_sharing %}
-          <li class="menu-item">
-            <a href="{% url 'linkding:bookmarks.shared' %}" class="menu-link">{% translate "Shared bookmarks" %}</a>
-          </li>
-        {% endif %}
+        <li class="menu-item">
+          <a href="{% if request.user_profile.enable_sharing and user_has_shared_bookmarks %}{% url 'linkding:bookmarks.shared' %}?user={{ request.user.username }}{% else %}{% url 'linkding:bookmarks.shared' %}{% endif %}" class="menu-link">{% translate "Shared bookmarks" %}</a>
+        </li>
         <li class="menu-item">
           <a href="{% url 'linkding:bookmarks.archived' %}" class="menu-link">{% translate "Archived bookmarks" %}</a>
         </li>
@@ -82,6 +77,13 @@
           <a href="{% url 'linkding:bookmarks.trashed' %}" class="menu-link">{% translate "Trash" %}</a>
         </li>
         <div class="divider"></div>
+        <li class="menu-item">
+          <a href="{% url 'linkding:bookmarks.highlights' %}" class="menu-link">{% translate "Highlights" %}</a>
+        </li>
+        <div class="divider"></div>
+        <li class="menu-item ld-update-menu-item" ld-update-menu-item style="display:none">
+          <button type="button" class="btn btn-link menu-link ld-update-trigger">{% translate "New version" %}<span class="ld-update-dot"></span></button>
+        </li>
         <li class="menu-item">
           <a href="{% url 'linkding:settings.general' %}" class="menu-link">{% translate "General" %}</a>
         </li>
