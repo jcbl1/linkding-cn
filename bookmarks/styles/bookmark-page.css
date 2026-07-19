@@ -802,6 +802,7 @@ button.btn-link.quick-tag-btn.active:focus {
 }
 
 .tag-tree {
+  font-size: var(--font-size);
   line-height: 1.1rem;
 
   & .selected-tags {
@@ -825,6 +826,8 @@ button.btn-link.quick-tag-btn.active:focus {
   padding-left: var(--unit-4);
   list-style: none;
   display: none;
+  border-left: 1.5px solid var(--secondary-border-color);
+  margin-left: 11px;
 }
 
 .tag-tree-node[data-has-children="true"][data-expanded="true"] > .tag-tree-children {
@@ -835,7 +838,13 @@ button.btn-link.quick-tag-btn.active:focus {
   display: flex;
   align-items: center;
   gap: var(--unit-1);
-  padding: var(--unit-1) 0;
+  padding: var(--unit-1) var(--unit-2);
+  border-radius: var(--border-radius);
+  transition: background-color 0.15s ease;
+
+  &:hover {
+    background-color: var(--body-color-contrast);
+  }
 }
 
 .tag-tree-content {
@@ -846,12 +855,13 @@ button.btn-link.quick-tag-btn.active:focus {
 .tag-tree-link {
   color: var(--alternative-color);
   text-decoration: none;
-  display: inline-flex;
+  display: flex;
   align-items: baseline;
   gap: var(--unit-1);
 
   &:hover {
     color: var(--alternative-color-dark);
+    text-decoration: none;
   }
 }
 
@@ -862,13 +872,7 @@ button.btn-link.quick-tag-btn.active:focus {
 }
 
 .tag-tree-count {
-  color: var(--alternative-color-dark);
-  font-size: var(--font-size-sm);
-  flex-shrink: 0;
-}
-
-.tag-tree-co-count {
-  color: var(--alternative-color-dark);
+  color: var(--secondary-text-color);
   font-size: var(--font-size-sm);
   flex-shrink: 0;
 }
@@ -879,31 +883,27 @@ button.btn-link.quick-tag-btn.active:focus {
   justify-content: center;
   background: none;
   border: none;
-  color: var(--alternative-color-dark);
+  color: var(--secondary-text-color);
   cursor: pointer;
-  padding: var(--unit-1);
+  padding: 2px;
   border-radius: var(--border-radius);
   flex-shrink: 0;
-  transition: transform 0.15s ease;
+  transition: color 0.15s ease;
+
+  & .icon {
+    transition: transform 0.15s ease;
+  }
 
   &:hover {
-    color: var(--primary-text-color);
-    background: var(--secondary-bg-color);
+    color: var(--text-color);
   }
 }
 
-.tag-tree-node[data-expanded="true"] > .tag-tree-row .tag-tree-toggle {
+.tag-tree-node[data-expanded="true"] > .tag-tree-row .tag-tree-toggle .icon {
   transform: rotate(180deg);
 }
 
-.tag-tree-toggle.loading {
-  opacity: 0.4;
-  animation: tag-tree-spin 0.8s linear infinite;
-}
 
-@keyframes tag-tree-spin {
-  to { transform: rotate(360deg); }
-}
 
 /* Tag module dropdown enhancements */
 .menu-divider {

@@ -1565,14 +1565,13 @@ class TagTreeBehavior extends Behavior {
 
     if (html === null) {
       // 2. Cache miss — fetch from server
-      if (button) button.classList.add("loading");
       try {
         const resp = await fetch(`/tag-tree/children?${sp.toString()}`);
         if (!resp.ok) return;
         html = await resp.text();
         try { sessionStorage.setItem(cacheKey, html); } catch {}
       } finally {
-        if (button) button.classList.remove("loading");
+        // no-op
       }
     }
 
