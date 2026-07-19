@@ -528,6 +528,7 @@ class BookmarkItem extends Behavior {
           }
 
           this._syncInlineDescriptionSeparator();
+          this._reinitDescriptionToggle();
         })
         .catch((error) => {
           console.error("Failed to save description:", error);
@@ -1183,6 +1184,32 @@ class BookmarkItem extends Behavior {
         );
       }
     });
+  }
+
+  /**
+   * 清除旧的描述 toggle 监听，重新检测截断并绑定点击展开。
+   * 供内联编辑保存后调用。
+   */
+  _reinitDescriptionToggle() {
+    // 移除旧 handler
+    if (this.onToggleDescription) {
+      const target = this._descriptionToggleTarget || this.descriptionContainer;
+      target.removeEventListener("click", this.onToggleDescription);
+      this.onToggleDescription = null;
+      this._descriptionToggleTarget = null;
+    }
+    // 重置展开态和 cursor
+    if (this.descriptionContainer) {
+      this.descriptionContainer.classList.remove("expanded");
+      this.descriptionContainer.style.cursor = "";
+    }
+    if (this.descriptionElement) {
+      this.descriptionElement.classList.remove("expanded");
+    }
+    const dt = this.descriptionContainer?.querySelector(".description-text");
+    if (dt) dt.style.cursor = "";
+
+    this.initDescriptionToggle();
   }
 
   // ==========================================
