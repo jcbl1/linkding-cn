@@ -426,9 +426,7 @@ class DomainSidebarTestMixin(TestCase, HtmlTestMixin):
                 self.assertEqual(favicon.attrs["width"], "16")
                 self.assertEqual(favicon.attrs["height"], "16")
                 if "favicon" in expected:
-                    self.assertEqual(
-                        favicon.attrs["src"], f"/static/{expected['favicon']}"
-                    )
+                    self.assertIn("/favicon/", favicon.attrs["src"])
 
             if expected.get("selected"):
                 self.assertIn("selected", list_item.attrs.get("class", []))

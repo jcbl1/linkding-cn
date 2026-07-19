@@ -213,6 +213,9 @@ def ensure_favicon(user: User, url: str):
         return
 
     if cache.status == FaviconCache.STATUS_MISSING:
+        # MISSING 状态下，如果 next_retry_at 已过期，允许重试
+        if cache.next_retry_at and cache.next_retry_at <= timezone.now():
+            _enqueue_favicon_task(user.id, domain)
         return
 
     # STATUS_SUCCESS 但文件丢失（已在步骤 1 处理，此处兜底）
@@ -240,62 +243,75 @@ def refresh_favicon(user: User, bookmark: Bookmark):
 
 
 def _enqueue_favicon_task(user_id: int, domain: str):
-    """带去重的入队：同一域名同时只有一个任务在执行。"""
-    from django.core.cache import cache as django_cache
-    lock_key = f"favicon_task_lock:{domain}"
-    if django_cache.add(lock_key, "1", timeout=60):
-        _fetch_domain_favicon_task(user_id, domain)
+    """入队 favicon 获取任务。去重由任务内部的分布式锁保证。"""
+    _fetch_domain_favicon_task(user_id, domain)
 
 
 @task(retries=3)
 def _fetch_domain_favicon_task(user_id: int, domain: str):
     """per-domain 的 favicon 获取任务。
 
-    成功后更新 FaviconCache。
-    失败时更新重试计数和下次重试时间（指数退避）。
+    分布式锁保证同一域名同时只有一个任务在执行。
+    成功后更新 FaviconCache；失败时更新重试计数和下次重试时间。
     """
     from django.core.cache import cache as django_cache
 
     from bookmarks.models import FaviconCache
 
-    cache, _ = FaviconCache.objects.get_or_create(
-        domain=domain,
-        defaults={"status": FaviconCache.STATUS_PENDING},
-    )
+    # 分布式锁：任务执行时才加锁（180s 超时覆盖所有 provider 尝试）
+    lock_key = f"favicon_task_lock:{domain}"
+    if not django_cache.add(lock_key, "1", timeout=180):
+        logger.debug(f"Skipping favicon fetch for domain={domain}, another task is running")
+        return
 
-    logger.info(f"Fetching favicon for domain={domain}")
-    favicon_file = favicon_loader.fetch_and_save_favicon(domain, scheme="https")
+    try:
+        cache, _ = FaviconCache.objects.get_or_create(
+            domain=domain,
+            defaults={"status": FaviconCache.STATUS_PENDING},
+        )
 
-    if not favicon_file:
-        # 尝试 http fallback
-        favicon_file = favicon_loader.fetch_and_save_favicon(domain, scheme="http")
+        # MISSING 状态的重试间隔序列（天），之后以最后值（7天）为间隔无限重试
+        MISSING_RETRY_DELAYS = [1, 1, 1, 2, 2, 3, 3, 4, 5, 6, 7]
 
-    RETRY_DELAYS = FaviconCache.RETRY_DELAYS
-    MAX_RETRIES = len(RETRY_DELAYS)
+        logger.info(f"Fetching favicon for domain={domain}")
 
-    if favicon_file:
-        cache.favicon_file = favicon_file
-        cache.status = FaviconCache.STATUS_SUCCESS
-        cache.fetched_at = timezone.now()
-        cache.retry_count = 0
-        cache.next_retry_at = None
-        cache.save()
-    else:
-        cache.retry_count += 1
-        if cache.retry_count >= MAX_RETRIES:
-            cache.status = FaviconCache.STATUS_MISSING
-            cache.favicon_file = ""
+        favicon_file = favicon_loader.fetch_and_save_favicon(domain)
+
+        RETRY_DELAYS = FaviconCache.RETRY_DELAYS
+        MAX_RETRIES = len(RETRY_DELAYS)
+
+        if favicon_file:
+            cache.favicon_file = favicon_file
+            cache.status = FaviconCache.STATUS_SUCCESS
+            cache.fetched_at = timezone.now()
+            cache.retry_count = 0
             cache.next_retry_at = None
-            logger.info(f"Favicon not found for domain={domain} after {MAX_RETRIES} retries, marking as missing")
+            cache.save()
         else:
-            cache.status = FaviconCache.STATUS_FAILED
-            delay_seconds = RETRY_DELAYS[cache.retry_count - 1]
-            cache.next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
-            logger.info(f"Favicon fetch failed for domain={domain}, retry #{cache.retry_count} in {delay_seconds}s")
-        cache.save()
-
-    # 释放锁
-    django_cache.delete(f"favicon_task_lock:{domain}")
+            # MISSING 状态下的重试失败
+            if cache.status == FaviconCache.STATUS_MISSING:
+                cache.retry_count += 1
+                idx = min(cache.retry_count, len(MISSING_RETRY_DELAYS) - 1)
+                delay_days = MISSING_RETRY_DELAYS[idx]
+                cache.next_retry_at = timezone.now() + timedelta(days=delay_days)
+                logger.info(f"Favicon still missing for domain={domain}, will retry in {delay_days} day(s) (attempt {cache.retry_count})")
+                cache.save()
+                return
+            cache.retry_count += 1
+            if cache.retry_count >= MAX_RETRIES:
+                cache.status = FaviconCache.STATUS_MISSING
+                # 保留旧的 favicon_file，不清空（过期图标仍可使用）
+                cache.retry_count = 0
+                cache.next_retry_at = timezone.now() + timedelta(days=MISSING_RETRY_DELAYS[0])
+                logger.info(f"Favicon not found for domain={domain} after {MAX_RETRIES} retries, marking as missing (will retry in {MISSING_RETRY_DELAYS[0]} day(s))")
+            else:
+                cache.status = FaviconCache.STATUS_FAILED
+                delay_seconds = RETRY_DELAYS[cache.retry_count - 1]
+                cache.next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
+                logger.info(f"Favicon fetch failed for domain={domain}, retry #{cache.retry_count} in {delay_seconds}s")
+            cache.save()
+    finally:
+        django_cache.delete(lock_key)
 
 
 def schedule_bookmarks_without_favicons(user: User):
@@ -312,21 +328,18 @@ def _batch_load_favicons_task(user_id: int):
     user = User.objects.get(id=user_id)
     domain_config = parse_domain_roots(user.profile.custom_domain_root)
 
-    # 收集所有已成功的域名
-    success_domains = set(
-        FaviconCache.objects.filter(
-            status=FaviconCache.STATUS_SUCCESS
-        ).values_list("domain", flat=True)
-    )
-
-    # 先收集所有唯一域名（避免逐条调用 _resolve_domain + ensure_favicon）
+    # 收集所有唯一域名，逐个检查是否已有成功缓存（exists 查询走索引，不加载全量到内存）
     raw_urls = Bookmark.objects.filter(
         owner=user, is_deleted=False
     ).values_list("url", flat=True).iterator()
     domains_to_fetch = set()
     for url in raw_urls:
         domain = _resolve_domain(url, domain_config)
-        if domain and domain not in success_domains and domain not in domains_to_fetch:
+        if not domain or domain in domains_to_fetch:
+            continue
+        if not FaviconCache.objects.filter(
+            domain=domain, status=FaviconCache.STATUS_SUCCESS
+        ).exists():
             domains_to_fetch.add(domain)
 
     # 为缺少 favicon 的域名入队

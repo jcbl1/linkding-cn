@@ -262,7 +262,7 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         self.assertEqual(cache.favicon_file, "")
 
     def test_fetch_domain_favicon_marks_missing_after_max_retries(self):
-        """连续失败 5 次后应标记为 missing，favicon_file 为空。"""
+        """连续失败 5 次后应标记为 missing，retry_count 重置为 0，favicon_file 为空。"""
         from bookmarks.models import FaviconCache
         self.mock_fetch_favicon.return_value = ""
 
@@ -272,8 +272,51 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
 
         cache = FaviconCache.objects.filter(domain="never.com").first()
         self.assertEqual(cache.status, FaviconCache.STATUS_MISSING)
-        self.assertEqual(cache.retry_count, 5)
+        self.assertEqual(cache.retry_count, 0)
         self.assertEqual(cache.favicon_file, "")
+        self.assertIsNotNone(cache.next_retry_at)
+
+    def test_fetch_domain_favicon_missing_retry_uses_progressive_delays(self):
+        """MISSING 状态重试应使用渐进间隔序列，之后 7 天封顶。
+
+        MISSING_RETRY_DELAYS = [1, 1, 1, 2, 2, 3, 3, 4, 5, 6, 7]
+        transition 时 retry_count=0, next_retry_at=1天 (MISSING_RETRY_DELAYS[0])
+        之后每次重试: retry_count++, delay = MISSING_RETRY_DELAYS[min(count, 10)]
+        有效序列: 1(transition) → 1 → 1 → 2 → 2 → 3 → 3 → 4 → 5 → 6 → 7 → 7 → ...
+        """
+        from bookmarks.models import FaviconCache
+        from datetime import timedelta
+        self.mock_fetch_favicon.return_value = ""
+
+        # 先到达 MISSING 状态（transition 时 retry_count=0, next_retry_at=1天）
+        for _ in range(5):
+            tasks._fetch_domain_favicon_task(self.user.id, "retry.com")
+        cache = FaviconCache.objects.filter(domain="retry.com").first()
+        self.assertEqual(cache.status, FaviconCache.STATUS_MISSING)
+        self.assertEqual(cache.retry_count, 0)
+
+        # 从 transition 后的第一次重试开始验证
+        # retry_count 1→11 对应 MISSING_RETRY_DELAYS[1..10] + 封顶
+        expected_delays = [1, 1, 2, 2, 3, 3, 4, 5, 6, 7]
+
+        for i, expected_days in enumerate(expected_delays):
+            cache.next_retry_at = timezone.now() - timedelta(seconds=1)
+            cache.save()
+            tasks._fetch_domain_favicon_task(self.user.id, "retry.com")
+            cache.refresh_from_db()
+            self.assertEqual(cache.status, FaviconCache.STATUS_MISSING)
+            self.assertEqual(cache.retry_count, i + 1)
+            delta = cache.next_retry_at - timezone.now()
+            self.assertAlmostEqual(delta.total_seconds(), timedelta(days=expected_days).total_seconds(), delta=5)
+
+        # 超出序列长度后应使用封顶值 7 天
+        cache.next_retry_at = timezone.now() - timedelta(seconds=1)
+        cache.save()
+        tasks._fetch_domain_favicon_task(self.user.id, "retry.com")
+        cache.refresh_from_db()
+        self.assertEqual(cache.retry_count, 11)
+        delta = cache.next_retry_at - timezone.now()
+        self.assertAlmostEqual(delta.total_seconds(), timedelta(days=7).total_seconds(), delta=5)
 
     @override_settings(LD_DISABLE_BACKGROUND_TASKS=True)
     def test_load_favicon_should_not_run_when_background_tasks_are_disabled(self):
