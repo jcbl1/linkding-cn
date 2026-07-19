@@ -111,6 +111,8 @@ html.reader-mode {
     overflow-y: auto;
     display: flex;
     justify-content: center;
+    padding: 0;
+    scrollbar-gutter: auto;
   }
 
   #reader-content .container {
@@ -1016,6 +1018,7 @@ html.reader-mode {
     display: block;
     height: 100%;
     align-self: stretch;
+    min-width: 0;
   }
 
   #reader-sidebar {

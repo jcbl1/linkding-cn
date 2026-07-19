@@ -41,6 +41,17 @@
     } catch(e){}
   })();
   </script>
+  <style>
+    reader-sidebar { display: block; height: 100%; align-self: stretch; min-width: 0; }
+    #reader-sidebar {
+      width: var(--reader-sidebar-width); height: 100%;
+      border-left: 1px solid var(--border-color); background: var(--body-color);
+      display: flex; flex-direction: column;
+      transition: width 0.25s ease, border-width 0.25s ease;
+      flex-shrink: 0; overflow: hidden;
+    }
+    #reader-sidebar[data-open="false"] { width: 0; border-left-width: 0; }
+  </style>
 </head>
 <body class="reader-mode">
 {% include 'shared/svg_icons.html' %}

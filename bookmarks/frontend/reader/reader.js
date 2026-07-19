@@ -224,6 +224,8 @@ function renderArticle(bodyHtml, meta, resolvedTitle, bookmarkData, apiBase, ass
   sidebar.apiBase = apiBase;
   sidebar.assetsBase = assetsBase;
   sidebar.bookmarksIndexUrl = bookmarksIndexUrl;
+  // Prevent flex item min-width:auto from keeping the closed sidebar visible
+  sidebar.style.minWidth = "0";
   layout.appendChild(sidebar);
 
   // Restore sidebar state from localStorage (default: closed)
