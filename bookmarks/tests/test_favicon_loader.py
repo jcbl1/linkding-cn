@@ -41,6 +41,10 @@ class FaviconLoaderTestCase(TestCase):
             LD_FAVICON_FOLDER=self.temp_favicon_folder.name
         )
         self.favicon_folder_override.enable()
+        # 重置健康检查器，标记为已初始化（跳过探测，避免干扰 mock）
+        favicon_loader._provider_health.reset()
+        with favicon_loader._provider_health._lock:
+            favicon_loader._provider_health._initialized = True
 
     def tearDown(self) -> None:
         self.temp_favicon_folder.cleanup()

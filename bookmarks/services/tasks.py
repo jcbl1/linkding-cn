@@ -275,10 +275,7 @@ def _fetch_domain_favicon_task(user_id: int, domain: str):
 
         logger.info(f"Fetching favicon for domain={domain}")
 
-        favicon_file = favicon_loader.fetch_and_save_favicon(domain, scheme="https")
-    if not favicon_file:
-        # 尝试 http fallback
-        favicon_file = favicon_loader.fetch_and_save_favicon(domain, scheme="http")
+        favicon_file = favicon_loader.fetch_and_save_favicon(domain)
 
         RETRY_DELAYS = FaviconCache.RETRY_DELAYS
         MAX_RETRIES = len(RETRY_DELAYS)

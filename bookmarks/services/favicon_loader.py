@@ -3,16 +3,135 @@ import mimetypes
 import os
 import os.path
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from time import monotonic
 
 import requests
+from bs4 import BeautifulSoup
 from django.conf import settings
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
 # register mime type for .ico files, which is not included in the default
 # mimetypes of the Docker image
 mimetypes.add_type("image/x-icon", ".ico")
+
+
+
+# ---------------------------------------------------------------------------
+# Provider 健康检查（启动探测 + 定时刷新）
+# ---------------------------------------------------------------------------
+
+_HEALTH_CHECK_TIMEOUT = 3       # 单 provider 探测超时（秒）
+_RECHECK_INTERVAL = 6 * 3600    # 不可用 provider 重新探测间隔（6 小时）
+
+
+class _ProviderHealthChecker:
+    """管理 favicon provider 的健康状态。
+
+    - 启动时（首次调用时）并发探测所有 provider
+    - 不可用的 provider 从尝试列表中排除
+    - 定时重新探测不可用 provider，恢复后自动加入
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._unhealthy_set: set[str] = set()  # 不可达 provider（快速查找）
+        self._last_probe: float = 0            # 上次探测时间
+        self._probing = False                  # 是否正在探测中
+        self._initialized = False              # 是否完成过首次探测
+
+    def reset(self):
+        """重置健康状态（用于测试）。"""
+        with self._lock:
+            self._unhealthy_set = set()
+            self._last_probe = 0
+            self._probing = False
+            self._initialized = False
+
+    def get_active_providers(self) -> list[str]:
+        """返回当前可用的 provider 列表（排除已知不可达的）。
+
+        首次调用时触发后台探测，同时返回全部 provider（避免阻塞）。
+        探测完成后排除不可达 provider。
+        始终以 settings.LD_FAVICON_PROVIDERS 为基准，支持运行时变更。
+        """
+        with self._lock:
+            if not self._initialized:
+                self._initialized = True
+                self._start_probe()
+                return list(settings.LD_FAVICON_PROVIDERS)
+
+            if self._unhealthy_set and monotonic() - self._last_probe >= _RECHECK_INTERVAL:
+                self._start_probe()
+
+        # 基于当前 settings 过滤（不在锁内，settings 读取无竞争）
+        current = list(settings.LD_FAVICON_PROVIDERS)
+        if not self._unhealthy_set:
+            return current
+        return [p for p in current if p not in self._unhealthy_set]
+
+    def _start_probe(self):
+        """在后台线程中并发探测所有 provider。"""
+        if self._probing:
+            return
+        self._probing = True
+        thread = threading.Thread(target=self._probe_all, daemon=True)
+        thread.start()
+
+    def _probe_all(self):
+        """并发探测所有 provider 的可达性。"""
+        providers = list(settings.LD_FAVICON_PROVIDERS)
+        if not providers:
+            with self._lock:
+                self._unhealthy_set = set()
+                self._last_probe = monotonic()
+                self._probing = False
+            return
+
+        results = {}
+        probe_url_params = {"domain": "google.com", "url": "https://google.com"}
+
+        def _probe_one(provider_template):
+            url = provider_template.format(**probe_url_params)
+            try:
+                resp = requests.get(
+                    url, timeout=_HEALTH_CHECK_TIMEOUT,
+                    allow_redirects=True, stream=True,
+                )
+                resp.close()
+                return resp.status_code < 500
+            except Exception:
+                return False
+
+        with ThreadPoolExecutor(max_workers=len(providers)) as executor:
+            futures = {executor.submit(_probe_one, p): p for p in providers}
+            for future in as_completed(futures):
+                provider = futures[future]
+                try:
+                    results[provider] = future.result()
+                except Exception:
+                    results[provider] = False
+
+        unhealthy = {p for p, ok in results.items() if not ok}
+        healthy = [p for p in providers if p not in unhealthy]
+
+        with self._lock:
+            self._unhealthy_set = unhealthy
+            self._last_probe = monotonic()
+            self._probing = False
+
+        for p in healthy:
+            logger.info(f"Favicon provider healthy: {p}")
+        for p in unhealthy:
+            logger.info(f"Favicon provider unhealthy (excluded): {p}")
+
+
+# 全局单例
+_provider_health = _ProviderHealthChecker()
 
 
 def _ensure_favicon_folder():
@@ -144,17 +263,246 @@ def _is_svg_placeholder(data: bytes, content_type: str) -> bool:
     return False
 
 
+
+# ---------------------------------------------------------------------------
+# 自建 favicon 解析器（兜底方案）
+# ---------------------------------------------------------------------------
+
+_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+)
+
+_HONEST_UA = (
+    "Mozilla/5.0 (compatible; LinkdingFaviconBot/1.0; "
+    "+https://github.com/sissbruecker/linkding)"
+)
+
+_MAX_HTML_BYTES = 32 * 1024  # 只读前 32KB
+
+def _resolve_url(href: str, base_url: str) -> str:
+    """将相对 URL 解析为绝对 URL。"""
+    if not href:
+        return ""
+    if href.startswith("data:"):
+        return href
+    if href.startswith(("http://", "https://")):
+        return href
+    if href.startswith("//"):
+        return "https:" + href
+    if href.startswith("/"):
+        parsed = urlparse(base_url)
+        return f"{parsed.scheme}://{parsed.netloc}{href}"
+    if base_url.endswith("/"):
+        return base_url + href
+    return base_url.rsplit("/", 1)[0] + "/" + href
+
+
+def _calculate_favicon_score(size, fmt: str, rel: str) -> int:
+    """为 favicon 候选打分，分数越高越优先。"""
+    score = 50
+    if "svg" in fmt:
+        score += 100
+    if size:
+        if size >= 128:
+            score += 60
+        elif size >= 64:
+            score += 50
+        elif size >= 32:
+            score += 40
+        elif size >= 16:
+            score += 20
+    if "png" in fmt:
+        score += 20
+    elif "webp" in fmt:
+        score += 15
+    elif "ico" in fmt:
+        score += 5
+    if "apple-touch-icon" in rel:
+        score += 10
+    return score
+
+
+def _parse_html_for_favicons(html: str, base_url: str) -> list:
+    """从 HTML 中解析 favicon 链接，返回 [(url, score), ...] 按分数降序排列。"""
+    candidates = []
+    try:
+        soup = BeautifulSoup(html[:_MAX_HTML_BYTES], "html.parser")
+    except Exception:
+        return []
+
+    for link in soup.find_all("link", rel=True, href=True):
+        rel = " ".join(link.get("rel", []))
+        if "icon" not in rel:
+            continue
+        href = link["href"]
+        if href.startswith("data:"):
+            continue
+        sizes = link.get("sizes", "")
+        size = None
+        if sizes:
+            match = re.match(r"(\d+)x\d+", sizes)
+            if match:
+                size = int(match.group(1))
+        fmt = link.get("type", "") or ""
+        if not fmt and "." in href.split("/")[-1]:
+            fmt = href.rsplit(".", 1)[-1].split("?")[0]
+        url = _resolve_url(href, base_url)
+        score = _calculate_favicon_score(size, fmt, rel)
+        candidates.append((url, score))
+
+    # og:image 作为最后的 HTML 候选
+    og = soup.find("meta", property="og:image")
+    if og and og.get("content"):
+        url = _resolve_url(og["content"], base_url)
+        candidates.append((url, 30))
+
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    return candidates
+
+
+def _download_favicon_candidate(url: str, timeout: int, use_browser_ua: bool = False) -> tuple | None:
+    """下载单个 favicon 候选，验证后返回 (content_type, body) 或 None。"""
+    if url.startswith("data:"):
+        return None
+    ua = _BROWSER_UA if use_browser_ua else _HONEST_UA
+    try:
+        resp = requests.get(url, timeout=timeout, headers={"User-Agent": ua}, allow_redirects=True)
+        if not resp.ok:
+            return None
+        body = resp.content
+        if not _is_valid_image(body):
+            if body.lstrip().startswith(b"<"):
+                return "image/svg+xml", body
+            return None
+        ct = resp.headers.get("Content-Type", "")
+        if not ct or "text/html" in ct:
+            ct = _guess_content_type(url, body)
+        return ct, body
+    except Exception:
+        return None
+
+
+def _guess_content_type(url: str, body: bytes) -> str:
+    """从 URL 扩展名和文件头猜测 content_type。"""
+    ext = ""
+    if "." in url.split("/")[-1]:
+        ext = url.rsplit(".", 1)[-1].split("?")[0].lower()
+    if ext in ("png", "jpg", "jpeg", "gif", "webp", "svg", "ico"):
+        ct = mimetypes.guess_type(f"x.{ext}")[0]
+        if ct:
+            return ct
+    if body[:4] == b"\x89PNG":
+        return "image/png"
+    if body[:3] == b"GIF":
+        return "image/gif"
+    if body[:4] == b"RIFF":
+        return "image/webp"
+    if body[:2] == b"\x00\x00":
+        return "image/x-icon"
+    if body[:2] == b"\xff\xd8":
+        return "image/jpeg"
+    return "image/png"
+
+
+def _fetch_favicon_from_site(domain: str, scheme: str = "https", timeout: int = 6) -> tuple | None:
+    """直接从目标网站解析 favicon（自建兜底方案）。
+
+    发现策略：
+    1. 请求目标网页 HTML，解析 <link rel="icon"> 等标签
+    2. 请求 /manifest.json 中的 icons
+    3. fallback: /apple-touch-icon.png
+    4. fallback: /favicon.ico
+
+    使用双 UA 策略：先用诚实 UA，被拦截后切换浏览器 UA。
+    """
+
+    base_url = f"{scheme}://{domain}"
+    html_timeout = min(timeout, 6)
+    resource_timeout = min(timeout, 4)
+
+    # 双 UA 策略获取 HTML
+    html = None
+    for ua in (_HONEST_UA, _BROWSER_UA):
+        try:
+            resp = requests.get(
+                base_url, timeout=html_timeout,
+                headers={"User-Agent": ua, "Accept": "text/html,application/xhtml+xml,*/*"},
+                allow_redirects=True,
+            )
+            if resp.ok and "text/html" in resp.headers.get("Content-Type", ""):
+                final = urlparse(resp.url)
+                base_url = f"{final.scheme}://{final.netloc}"
+                html = resp.text
+                break
+        except Exception:
+            continue
+
+    # 收集所有候选
+    candidates = []
+
+    if html:
+        candidates.extend(_parse_html_for_favicons(html, base_url))
+
+    # manifest.json
+    try:
+        manifest_resp = requests.get(
+            f"{base_url}/manifest.json", timeout=resource_timeout,
+            headers={"User-Agent": _HONEST_UA},
+        )
+        if manifest_resp.ok:
+            manifest = manifest_resp.json()
+            for icon in manifest.get("icons", []):
+                if icon.get("src"):
+                    url = _resolve_url(icon["src"], base_url)
+                    sizes = icon.get("sizes", "")
+                    size = None
+                    if sizes:
+                        match = re.match(r"(\d+)x\d+", sizes)
+                        if match:
+                            size = int(match.group(1))
+                    fmt = icon.get("type", "")
+                    score = _calculate_favicon_score(size, fmt, "icon")
+                    candidates.append((url, score))
+    except Exception:
+        pass
+
+    # 固定路径 fallback
+    candidates.append((f"{base_url}/apple-touch-icon.png", 30))
+    candidates.append((f"{base_url}/favicon.ico", 10))
+
+    # 按分数降序去重
+    seen = set()
+    unique_candidates = []
+    for url, score in candidates:
+        if url not in seen:
+            seen.add(url)
+            unique_candidates.append((url, score))
+    unique_candidates.sort(key=lambda x: x[1], reverse=True)
+
+    # 依次尝试下载
+    for url, _score in unique_candidates:
+        result = _download_favicon_candidate(url, resource_timeout)
+        if result:
+            logger.debug(f"Self-resolved favicon for {domain}: {url}")
+            return result
+
+    return None
+
+
+
 def _try_fetch_from_providers(domain: str, scheme: str = "https", timeout: int = 10) -> tuple[str, bytes] | None:
     """依次尝试所有配置的 provider，返回第一个成功的结果 (content_type, body)。
 
-    全部失败时返回 None。
+    全部失败时返回 None（不抛异常）。
+    provider 使用指定 scheme；自建解析器自动尝试 https 和 http。
     """
     url_parameters = {
         "url": f"{scheme}://{domain}",
         "domain": domain,
     }
 
-    for provider_url in settings.LD_FAVICON_PROVIDERS:
+    for provider_url in _provider_health.get_active_providers():
         favicon_url = provider_url.format(**url_parameters)
         try:
             logger.debug(f"Trying favicon provider: {favicon_url}")
@@ -174,6 +522,16 @@ def _try_fetch_from_providers(domain: str, scheme: str = "https", timeout: int =
             logger.debug(f"Favicon provider returned {status_code}, skipping: {favicon_url}")
         except requests.exceptions.RequestException as e:
             logger.warning(f"Favicon provider failed: {favicon_url}: {e}")
+
+    # 所有第三方 provider 均失败 → 尝试自建解析（兜底，自动尝试 https 和 http）
+    for try_scheme in (scheme, "http" if scheme == "https" else scheme):
+        try:
+            result = _fetch_favicon_from_site(domain, scheme=try_scheme, timeout=timeout)
+            if result:
+                return result
+        except Exception as e:
+            logger.warning(f"Self-built favicon resolver failed for {domain} ({try_scheme}): {e}")
+
     return None
 
 
