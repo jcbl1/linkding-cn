@@ -31,8 +31,7 @@
                   </svg>
                 </span>
               {% else %}
-                <img class="favicon" src="{% static domain.favicon_file %}"
-                     onerror="handleFaviconError(this,'https://{{ domain.host|escapejs }}')"
+                <img class="favicon" src="{% url 'linkding:favicon_image' domain=domain.favicon_domain %}"
                      alt="" width="16" height="16">
               {% endif %}
               <span class="domain-text domain-text-icon">
@@ -52,8 +51,7 @@
                 </svg>
               </span>
             {% else %}
-              <img class="favicon" src="{% static domain.favicon_file %}"
-                   onerror="handleFaviconError(this,'https://{{ domain.host|escapejs }}')"
+              <img class="favicon" src="{% url 'linkding:favicon_image' domain=domain.favicon_domain %}"
                    alt="" width="16" height="16">
             {% endif %}
             <span class="domain-text">

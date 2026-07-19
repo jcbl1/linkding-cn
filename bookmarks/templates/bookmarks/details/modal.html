@@ -34,16 +34,7 @@
         {% if details.is_editable %}
           <div class="detail-url-wrapper">
             <div class="detail-url-view">
-              {% if details.favicon_file %}
-                <img class="favicon" src="{% static details.favicon_file %}"
-                     onerror="handleFaviconError(this,'{{ details.bookmark.url|escapejs }}')"
-                     alt="">
-              {% elif details.favicon_unavailable %}
-                <img class="favicon" src="{% static 'favicon.svg' %}" alt="">
-              {% else %}
-                <img class="favicon" src="{% static 'favicon.svg' %}"
-                     data-favicon-url="{{ details.bookmark.url|escape }}" alt="">
-              {% endif %}
+              <img class="favicon" src="{% url 'linkding:favicon_image' domain=details.favicon_domain %}" alt="">
               <a class="detail-url-link" href="{{ details.bookmark.url }}" rel="noopener"
                  target="{{ details.profile.bookmark_link_target }}">{{ details.bookmark.url }}</a>
               <button type="button" class="info-file-action-btn" id="edit-url-btn" title="{% translate 'Edit URL' %}">
@@ -61,16 +52,7 @@
           </div>
         {% else %}
           <div class="detail-url-view">
-            {% if details.favicon_file %}
-              <img class="favicon" src="{% static details.favicon_file %}"
-                   onerror="handleFaviconError(this,'{{ details.bookmark.url|escapejs }}')"
-                   alt="">
-            {% elif details.favicon_unavailable %}
-              <img class="favicon" src="{% static 'favicon.svg' %}" alt="">
-            {% else %}
-              <img class="favicon" src="{% static 'favicon.svg' %}"
-                   data-favicon-url="{{ details.bookmark.url|escape }}" alt="">
-            {% endif %}
+            <img class="favicon" src="{% url 'linkding:favicon_image' domain=details.favicon_domain %}" alt="">
             <a class="detail-url-link" href="{{ details.bookmark.url }}" rel="noopener"
                target="{{ details.profile.bookmark_link_target }}">{{ details.bookmark.url }}</a>
           </div>

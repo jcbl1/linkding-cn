@@ -21,17 +21,7 @@
               </label>
               {% if bookmark_list.show_favicons %}
               <a href="?q=domain:%22{{ bookmark_item.url|extract_domain:request.user_profile }}%22" class="favicon-link">
-                {% if bookmark_item.favicon_file %}
-                <img class="favicon" src="{% static bookmark_item.favicon_file %}"
-                     onerror="handleFaviconError(this,'{{ bookmark_item.url|escapejs }}')"
-                     alt="">
-                {% elif bookmark_item.favicon_unavailable %}
-                <img class="favicon" src="{% static 'favicon.svg' %}" alt="">
-                {% else %}
-                <img class="favicon" src="{% static 'favicon.svg' %}"
-                     data-favicon-url="{{ bookmark_item.url|escape }}"
-                     alt="">
-                {% endif %}
+                <img class="favicon" src="{% url 'linkding:favicon_image' domain=bookmark_item.favicon_domain %}" alt="">
               </a>
               {% endif %}
               <a href="{{ bookmark_item.url }}" target="{{ bookmark_list.link_target }}" rel="noopener" class="title-link truncate">

@@ -24,6 +24,7 @@
   {% if request.user_profile.custom_css %}
     <link href="{% url 'linkding:custom_css' %}?hash={{ request.user_profile.custom_css_hash }}" rel="stylesheet" type="text/css"/>
   {% endif %}
+
 </head>
 <body>
 <header class="container">
@@ -48,15 +49,7 @@
     </p>
     <div class="weblinks">
       <a class="weblink" href="{{ bookmark.url }}" rel="noopener">
-        {% if favicon_file %}
-          <img class="favicon" src="{% static favicon_file %}" alt=""
-               onerror="handleFaviconError(this,'{{ bookmark.url|escapejs }}')">
-        {% elif favicon_unavailable %}
-          <img class="favicon" src="{% static 'favicon.svg' %}" alt="">
-        {% else %}
-          <img class="favicon" src="{% static 'favicon.svg' %}"
-               data-favicon-url="{{ bookmark.url|escape }}" alt="">
-        {% endif %}
+        <img class="favicon" src="{% url 'linkding:favicon_image' domain=favicon_domain %}" alt="">
         <span>{% translate "Original URL" %}</span>
       </a>
       {% if snapshot_url %}
@@ -107,48 +100,6 @@
 </script>
 <script src="{% static 'reader-unavailable.js' %}?v={{ app_version }}" type="application/javascript"></script>
 {% endif %}
-<script>
-var _faviconPromises = {};
-function _faviconDomainKey(url) {
-  try { return new URL(url).origin; } catch(e) { return url; }
-}
-function _prefetchFavicon(url) {
-  var key = _faviconDomainKey(url);
-  if (!_faviconPromises[key]) {
-    _faviconPromises[key] = fetch('{% url "linkding:bookmarks.prefetch_favicon" %}?url=' + encodeURIComponent(url))
-      .then(function(r) { return r.json(); })
-      .catch(function() { return {favicon_file: ''}; });
-  }
-  return _faviconPromises[key];
-}
-var _faviconFallbackSrc = '{% static "favicon.svg" %}';
-function _applyFavicon(img, faviconFile) {
-  if (faviconFile && faviconFile !== 'favicon.svg') {
-    img.onerror = function() { img.onerror = null; img.src = _faviconFallbackSrc; };
-    img.src = '/static/' + faviconFile;
-  } else {
-    img.src = _faviconFallbackSrc;
-  }
-}
-function handleFaviconError(img, url) {
-  img.onerror = null;
-  _prefetchFavicon(url).then(function(d) { _applyFavicon(img, d.favicon_file); });
-}
-(function() {
-  var observer = new IntersectionObserver(function(entries) {
-    entries.forEach(function(entry) {
-      if (!entry.isIntersecting) return;
-      var img = entry.target;
-      var url = img.getAttribute('data-favicon-url');
-      if (!url) return;
-      observer.unobserve(img);
-      _prefetchFavicon(url).then(function(d) { _applyFavicon(img, d.favicon_file); });
-    });
-  }, { rootMargin: '200px' });
-  document.querySelectorAll('img[data-favicon-url]').forEach(function(el) {
-    observer.observe(el);
-  });
-})();
-</script>
+
 </body>
 </html>

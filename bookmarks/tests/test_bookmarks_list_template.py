@@ -139,7 +139,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
             self.assertIsNone(favicon)
             return
         self.assertIsNotNone(favicon)
-        self.assertTrue(favicon["src"].startswith("/static/"))
+        self.assertTrue(favicon["src"].startswith("/favicon/"))
 
     def assertPreviewImageVisible(self, html: str, bookmark: Bookmark):
         self.assertPreviewImage(html, bookmark, True)
@@ -847,7 +847,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         self.assertFaviconVisible(html, bookmark)
 
     def test_favicon_should_show_placeholder_when_there_is_no_icon(self):
-        """favicon_file 为空时应显示占位符图标 + data-favicon-url 懒加载属性。"""
+        """favicon_file 为空时应显示 /favicon/{domain} URL（返回默认 favicon.svg）。"""
         profile = self.get_or_create_test_user().profile
         profile.enable_favicons = True
         profile.save()
@@ -858,8 +858,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         soup = self.make_soup(html)
         favicon = soup.select_one(".favicon")
         self.assertIsNotNone(favicon)
-        self.assertIn("favicon.svg", favicon["src"])
-        self.assertTrue(favicon.has_attr("data-favicon-url"))
+        self.assertTrue(favicon["src"].startswith("/favicon/"))
 
     def test_favicon_should_be_hidden_when_favicons_disabled(self):
         profile = self.get_or_create_test_user().profile

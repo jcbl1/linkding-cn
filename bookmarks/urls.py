@@ -54,9 +54,9 @@ urlpatterns = [
         name="bookmarks.trashed.action",
     ),
     path(
-        "bookmarks/prefetch-favicon",
-        views.bookmarks.prefetch_favicon,
-        name="bookmarks.prefetch_favicon",
+        "favicon/<str:domain>",
+        views.bookmarks.favicon_image,
+        name="favicon_image",
     ),
     path(
         "bookmarks/load_temporary_preview_image",

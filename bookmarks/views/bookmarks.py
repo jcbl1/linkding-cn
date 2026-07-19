@@ -1,12 +1,16 @@
 import random as rng
 import time
 import urllib.parse
+from pathlib import Path
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db.models import QuerySet
+import mimetypes
 from django.http import (
+    FileResponse,
     HttpResponseBadRequest,
+    HttpResponseNotFound,
     HttpResponseForbidden,
     HttpResponseRedirect,
     JsonResponse,
@@ -650,105 +654,61 @@ def share(request: HttpRequest, bookmark_id: int | str):
     bookmark.save()
 
 
-def prefetch_favicon(request: HttpRequest):
-    """前端 onerror / 懒加载的 favicon 获取端点。
+def favicon_image(request: HttpRequest, domain: str):
+    """Favicon serving 端点。
 
-    使用 FaviconCache 全局缓存 + favicon_loader 获取。
+    查找 FaviconCache → 有文件则返回图片，无则返回默认 favicon.svg。
+    浏览器通过 Cache-Control 缓存，减少重复请求。
     """
-    if not request.user_profile.enable_favicons:
-        return JsonResponse({"status": "disabled"})
-
-    url = request.GET.get("url")
-    if not url:
-        return JsonResponse({"error": _("URL parameter is missing")}, status=400)
-
     from bookmarks.models import FaviconCache
-    from bookmarks.utils import extract_hostname, parse_domain_roots, resolve_favicon_domain
 
-    domain_config = parse_domain_roots(request.user_profile.custom_domain_root)
-    hostname = extract_hostname(url)
-    if not hostname:
-        return JsonResponse({"error": _("Invalid URL")}, status=400)
+    # 基本输入校验
+    if not domain or len(domain) > 253 or "/" in domain or "\\" in domain:
+        return HttpResponseNotFound()
 
-    domain = resolve_favicon_domain(hostname, config=domain_config)
+    # 启用 favicon 功能的用户才触发后台获取
+    enable_favicons = request.user_profile.enable_favicons
 
-    # 1. 检查 FaviconCache 状态
     cache = FaviconCache.objects.filter(domain=domain).first()
 
-    if cache:
-        # SUCCESS: 磁盘文件存在 → 直接返回
-        if cache.status == FaviconCache.STATUS_SUCCESS and cache.favicon_file:
-            if favicon_loader._get_favicon_path(cache.favicon_file).is_file():
-                if cache.fetched_at:
-                    stale_threshold = timezone.now() - timezone.timedelta(days=1)
-                    if cache.fetched_at < stale_threshold:
-                        from bookmarks.services.tasks import _enqueue_favicon_task
-                        _enqueue_favicon_task(request.user.id, domain)
-                return JsonResponse({"status": "success", "favicon_file": cache.favicon_file})
-            # 磁盘文件丢失 → 继续到步骤 2 重新获取
-
-        # PENDING: 其他请求正在获取 → 不重复
-        elif cache.status == FaviconCache.STATUS_PENDING:
-            return JsonResponse({"status": "success", "favicon_file": "", "retry_after": 10})
-
-        # FAILED: 检查退火重试时间
+    # 判断是否需要触发后台获取（在返回旧图标之前，确保 MISSING/FAILED 能触发重试）
+    should_fetch = False
+    if enable_favicons and request.user.is_authenticated:
+        if not cache:
+            should_fetch = True
+        elif cache.status == FaviconCache.STATUS_SUCCESS and cache.favicon_file:
+            # DB 说成功但磁盘文件丢失（不一致），重新获取
+            filepath = favicon_loader._get_favicon_path(cache.favicon_file)
+            if not filepath.is_file():
+                should_fetch = True
         elif cache.status == FaviconCache.STATUS_FAILED:
-            if cache.next_retry_at and cache.next_retry_at > timezone.now():
-                retry_after = int((cache.next_retry_at - timezone.now()).total_seconds())
-                return JsonResponse({"status": "success", "favicon_file": "", "retry_after": retry_after})
-            # 到了重试时间 → 继续到步骤 2
-
-        # MISSING: 永久失败 → 不重试
+            if cache.next_retry_at and cache.next_retry_at <= timezone.now():
+                should_fetch = True
         elif cache.status == FaviconCache.STATUS_MISSING:
-            return JsonResponse({"status": "success", "favicon_file": "", "retry_after": 2592000})
+            if cache.next_retry_at and cache.next_retry_at <= timezone.now():
+                should_fetch = True
+    if should_fetch:
+        from bookmarks.services.tasks import _enqueue_favicon_task
+        _enqueue_favicon_task(request.user.id, domain)
 
-    # 2. 尝试从 provider 获取
-    favicon_file = favicon_loader.fetch_and_save_favicon(domain, scheme="https")
-    if not favicon_file:
-        favicon_file = favicon_loader.fetch_and_save_favicon(domain, scheme="http")
+    # 有缓存文件且磁盘存在 → 返回图片（无论状态，过期图标仍可使用）
+    if cache and cache.favicon_file:
+        filepath = favicon_loader._get_favicon_path(cache.favicon_file)
+        if filepath.is_file():
+            content_type = mimetypes.guess_type(str(filepath))[0] or 'image/png'
+            resp = FileResponse(filepath.open('rb'), content_type=content_type)
+            resp['Cache-Control'] = 'public, max-age=86400'
+            return resp
 
-    if favicon_file:
-        FaviconCache.objects.update_or_create(
-            domain=domain,
-            defaults={
-                "favicon_file": favicon_file,
-                "status": FaviconCache.STATUS_SUCCESS,
-                "fetched_at": timezone.now(),
-                "retry_count": 0,
-                "next_retry_at": None,
-            },
-        )
-        return JsonResponse({"status": "success", "favicon_file": favicon_file})
-
-    # 3. 全部失败 → 退火重试
-    RETRY_DELAYS = FaviconCache.RETRY_DELAYS
-    if cache:
-        new_retry_count = cache.retry_count + 1
+    # 返回默认 favicon.svg
+    from django.contrib.staticfiles.finders import find
+    default_path = find('favicon.svg')
+    if default_path:
+        resp = FileResponse(Path(default_path).open('rb'), content_type='image/svg+xml')
     else:
-        new_retry_count = 1
-
-    if new_retry_count >= len(RETRY_DELAYS):
-        FaviconCache.objects.update_or_create(
-            domain=domain,
-            defaults={
-                "status": FaviconCache.STATUS_MISSING,
-                "favicon_file": "",
-                "retry_count": new_retry_count,
-                "next_retry_at": None,
-            },
-        )
-    else:
-        delay = RETRY_DELAYS[new_retry_count - 1]
-        FaviconCache.objects.update_or_create(
-            domain=domain,
-            defaults={
-                "status": FaviconCache.STATUS_FAILED,
-                "favicon_file": "",
-                "retry_count": new_retry_count,
-                "next_retry_at": timezone.now() + timezone.timedelta(seconds=delay),
-            },
-        )
-    return JsonResponse({"status": "success", "favicon_file": ""})
+        resp = HttpResponseNotFound()
+    resp['Cache-Control'] = 'public, max-age=3600'
+    return resp
 
 
 def load_temporary_preview_image(request: HttpRequest):

@@ -1109,7 +1109,7 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
         self.assertEqual(bookmark.title, bookmark_data["title"])
         self.assertEqual(bookmark.description, bookmark_data["description"])
         self.assertEqual(
-            "http://testserver/static/example_com.png", bookmark_data["favicon_url"]
+            "http://testserver/favicon/example.com", bookmark_data["favicon_url"]
         )
         self.assertEqual(
             "http://testserver/static/preview.png", bookmark_data["preview_image_url"]

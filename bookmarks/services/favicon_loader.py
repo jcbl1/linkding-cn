@@ -169,9 +169,11 @@ def _try_fetch_from_providers(domain: str, scheme: str = "https", timeout: int =
                     logger.debug(f"Provider returned SVG placeholder, trying next: {favicon_url}")
                     continue
                 return content_type, body
+        except requests.exceptions.HTTPError as e:
+            status_code = e.response.status_code if e.response is not None else 0
+            logger.debug(f"Favicon provider returned {status_code}, skipping: {favicon_url}")
         except requests.exceptions.RequestException as e:
             logger.warning(f"Favicon provider failed: {favicon_url}: {e}")
-            continue
     return None
 
 
@@ -180,16 +182,16 @@ def _is_valid_image(data: bytes) -> bool:
     if len(data) < 8:
         return False
     # PNG
-    if data[:4] == bytes([0x89, 0x50, 0x4E, 0x47]):
+    if data[:4] == b"\x89PNG":
         return True
     # JPEG
-    if data[:3] == bytes([0xFF, 0xD8, 0xFF]):
+    if data[:3] == b"\xff\xd8\xff":
         return True
     # GIF
     if data[:4] == b"GIF8":
         return True
     # ICO
-    if data[:4] == bytes([0x00, 0x00, 0x01, 0x00]):
+    if data[:4] == b"\x00\x00\x01\x00":
         return True
     # SVG: must contain <svg tag (not just any < character like HTML)
     if b"<svg" in data[:256] or (data[:5] == b"<?xml" and b"<svg" in data[:512]):
@@ -225,8 +227,11 @@ def fetch_and_save_favicon(domain: str, scheme: str = "https", timeout: int = 10
     favicon_file = f"{name}{file_extension}"
     favicon_path = _get_favicon_path(favicon_file)
 
-    with open(favicon_path, "wb") as f:
+    # 原子写入：先写临时文件再 rename，防止并发写入导致文件损坏
+    tmp_path = favicon_path.with_suffix(".tmp")
+    with open(tmp_path, "wb") as f:
         f.write(body)
+    os.rename(str(tmp_path), str(favicon_path))
 
     _remove_existing_variants(domain, keep_filename=favicon_file)
     logger.info(f"Saved favicon: {domain} -> {favicon_file}")

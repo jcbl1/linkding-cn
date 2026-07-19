@@ -25,7 +25,6 @@ from bookmarks.models import (
     BookmarkAsset,
     BookmarkBundle,
     BookmarkSearch,
-    FaviconCache,
     Tag,
     User,
     UserProfile,
@@ -58,45 +57,20 @@ def _tag_sort_key(name: str):
 
 
 class FaviconLookup:
-    """一次查询加载全部 FaviconCache，提供 O(1) 域名→favicon 查表。
+    """将 hostname 解析为 favicon 规范域名（用于 /favicon/{domain} URL）。
 
-    加载所有状态的记录，区分"有图标"和"已知不可用"：
-    - get(domain) 返回 favicon 文件名，无则返回 ""
-    - is_unavailable(domain) 返回 True 表示该域名已尝试过且失败/缺失，
-      前端不需要再触发懒加载请求。
+    支持自定义域名别名展开。
     """
 
     def __init__(self, domain_config=None):
-        self._map: dict[str, str] = {}
-        self._unavailable: set[str] = set()
-        now = timezone.now()
-        for domain, favicon_file, status, next_retry_at in FaviconCache.objects.values_list(
-            "domain", "favicon_file", "status", "next_retry_at"
-        ):
-            if status == FaviconCache.STATUS_SUCCESS and favicon_file:
-                self._map[domain] = favicon_file
-            elif status == FaviconCache.STATUS_MISSING:
-                self._unavailable.add(domain)
-            elif status == FaviconCache.STATUS_FAILED:
-                if next_retry_at and next_retry_at > now:
-                    self._unavailable.add(domain)
+        self._domain_config = domain_config
 
-        # 别名展开
-        if domain_config:
-            from bookmarks.utils import get_alias_domains_for_root
-            for domain in list(self._map.keys()) + list(self._unavailable):
-                aliases = get_alias_domains_for_root(domain, domain_config)
-                for alias in aliases:
-                    if domain in self._map and alias not in self._map:
-                        self._map[alias] = self._map[domain]
-                    if domain in self._unavailable:
-                        self._unavailable.add(alias)
-
-    def get(self, domain: str) -> str:
-        return self._map.get(domain, "")
-
-    def is_unavailable(self, domain: str) -> bool:
-        return domain in self._unavailable
+    def get_domain(self, hostname: str) -> str:
+        """将 hostname 解析为规范域名（用于 /favicon/{domain} URL）。"""
+        if self._domain_config:
+            from bookmarks.utils import resolve_favicon_domain
+            return resolve_favicon_domain(hostname, config=self._domain_config)
+        return hostname
 
 
 class RequestContext:
@@ -242,8 +216,7 @@ class BookmarkItem:
                     bookmark.url, bookmark.date_added
                 )
         hostname = utils.extract_hostname(bookmark.url)
-        self.favicon_file = context._favicon_lookup.get(hostname)
-        self.favicon_unavailable = not self.favicon_file and context._favicon_lookup.is_unavailable(hostname)
+        self.favicon_domain = context._favicon_lookup.get_domain(hostname)
         self.preview_image_remote_url = bookmark.preview_image_remote_url
         self.preview_image_file = bookmark.preview_image_file
         self.is_archived = bookmark.is_archived
@@ -2045,8 +2018,6 @@ class DomainTreeNode:
         self.is_under_group_node = is_under_group_node
         self.total = 0
         self.children: dict[str, DomainTreeNode] = {}
-        self._exact_favicon_file = ""
-        self._fallback_favicon_file = ""
         self._filter_value_override = filter_value_override
 
     @property
@@ -2059,22 +2030,8 @@ class DomainTreeNode:
             self.hostname, include_subdomains=self.include_subdomains
         )
 
-    @property
-    def favicon_file(self) -> str:
-        if self.is_group_node:
-            return ""
-        return self._exact_favicon_file or self._fallback_favicon_file
-
-    def add_bookmark(self, bookmark_host: str, favicon_file: str) -> None:
+    def add_bookmark(self) -> None:
         self.total += 1
-        if favicon_file and not self._fallback_favicon_file:
-            self._fallback_favicon_file = favicon_file
-        if (
-            favicon_file
-            and bookmark_host == self.hostname
-            and not self._exact_favicon_file
-        ):
-            self._exact_favicon_file = favicon_file
 
 
 class DomainItem:
@@ -2093,7 +2050,7 @@ class DomainItem:
         self.count = node.total
         self.level = node.level
         self.filter_value = node.filter_value
-        self.favicon_file = node.favicon_file or "favicon.svg"
+        self.favicon_domain = node.hostname
         self.is_group_node = node.is_group_node
         self.is_under_group_node = node.is_under_group_node
         self.prefers_icon_layout = node.level == 0 or node.is_under_group_node
@@ -2165,7 +2122,7 @@ class DomainsContext:
         )
         bookmarks.sort(key=lambda bookmark: bookmark["url"])
 
-        root_nodes = self._build_domain_tree(bookmarks, config, request_context._favicon_lookup)
+        root_nodes = self._build_domain_tree(bookmarks, config)
         if self.is_compact_mode:
             root_nodes = self._compact_root_nodes(root_nodes)
         self.roots = self._build_items(
@@ -2181,7 +2138,6 @@ class DomainsContext:
     def _build_domain_tree(
         bookmarks: list[dict],
         config: utils.DomainConfig,
-        favicon_lookup: FaviconLookup | None = None,
     ) -> list[DomainTreeNode]:
         root_nodes: dict[str, DomainTreeNode] = {}
 
@@ -2221,7 +2177,7 @@ class DomainsContext:
                     )
                     current_nodes[node_host] = node
 
-                node.add_bookmark(hostname, favicon_lookup.get(hostname) if favicon_lookup else "")
+                node.add_bookmark()
                 current_nodes = node.children
 
         return DomainsContext._sorted_nodes(root_nodes.values())
@@ -2380,9 +2336,7 @@ class BookmarkDetailsContext:
         self.sharing_enabled = user_profile.enable_sharing
         self.preview_image_enabled = user_profile.enable_preview_images
         hostname = utils.extract_hostname(bookmark.url)
-        self.favicon_file = request_context._favicon_lookup.get(hostname)
-        self.favicon_unavailable = not self.favicon_file and request_context._favicon_lookup.is_unavailable(hostname)
-        self.show_link_icons = user_profile.enable_favicons and bool(self.favicon_file)
+        self.favicon_domain = request_context._favicon_lookup.get_domain(hostname)
         self.snapshots_enabled = settings.LD_ENABLE_SNAPSHOTS
         self.uploads_enabled = not settings.LD_DISABLE_ASSET_UPLOAD
 
@@ -2631,7 +2585,7 @@ class HighlightDomainsContext(DomainsContext):
         bookmarks.sort(key=lambda b: b["url"])
 
         request_context = HighlightRequestContext(request)
-        root_nodes = self._build_domain_tree(bookmarks, config, request_context._favicon_lookup)
+        root_nodes = self._build_domain_tree(bookmarks, config)
 
         # Replace bookmark counts with highlight counts
         _replace_node_counts_with_highlights(root_nodes, hostname_hl_counts)
