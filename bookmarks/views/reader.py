@@ -3,15 +3,13 @@ import html
 from django.contrib.auth.decorators import login_required
 from django.http import (
     HttpResponseBadRequest,
-    HttpResponseRedirect,
 )
 from django.shortcuts import render
 from django.utils import timezone
 from django.urls import reverse
-from django.utils.translation import gettext as _
 
 from bookmarks.models import Bookmark, BookmarkAsset
-from bookmarks.services import tasks, website_loader
+from bookmarks.services import tasks
 from bookmarks.type_defs import HttpRequest
 from bookmarks.views import access
 
@@ -150,25 +148,6 @@ def read(request: HttpRequest, bookmark_id: int):
             "api_base_url": api_base_url,
         },
     )
-
-
-@login_required
-def reparse(request: HttpRequest, bookmark_id: int):
-    if request.method != "POST":
-        return HttpResponseBadRequest("POST required")
-
-    bookmark = access.bookmark_write(request, bookmark_id)
-
-    try:
-        content = website_loader.load_full_page(bookmark.url)
-    except Exception as e:
-        content = f"<html><body><p>{_('Unable to load page content: %(error)s') % {'error': str(e)}}</p></body></html>"
-
-    from bookmarks.services.articles import create_article
-
-    create_article(bookmark, content, title=bookmark.resolved_title)
-
-    return HttpResponseRedirect(reverse("linkding:bookmarks.read", args=[bookmark_id]))
 
 
 @login_required

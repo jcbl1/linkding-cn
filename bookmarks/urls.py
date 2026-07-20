@@ -37,9 +37,6 @@ urlpatterns = [
         "bookmarks/<int:bookmark_id>/read", views.reader.read, name="bookmarks.read"
     ),
     path(
-        "bookmarks/<int:bookmark_id>/reparse", views.reader.reparse, name="bookmarks.reparse"
-    ),
-    path(
         "bookmarks/<int:bookmark_id>/export", views.reader.export, name="bookmarks.export"
     ),
     path(
