@@ -298,17 +298,19 @@ class BookmarkItem extends Behavior {
   onQuickEdit(event) {
     event.preventDefault();
     event.stopPropagation();
-    const btn = event.currentTarget;
-    const type = btn.dataset.quickEdit;
+    const type = event.currentTarget.dataset.quickEdit;
+    this.startQuickEdit(type);
+  }
 
-    if (isActiveEditor(this.bookmarkId, type)) {
+  startQuickEdit(fieldType) {
+    if (isActiveEditor(this.bookmarkId, fieldType)) {
       closeActiveEditor();
       return;
     }
 
     closeActiveEditor();
 
-    switch (type) {
+    switch (fieldType) {
       case "title":
         this._startEditTitle();
         break;

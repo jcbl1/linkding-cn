@@ -49,6 +49,33 @@ document.addEventListener("keydown", (event) => {
     }
   }
 
+  if (event.key === "q") {
+    const li = document.querySelector("li[ld-bookmark-item]:hover");
+    if (!li) return;
+
+    let fieldType;
+    if (li.querySelector(".inline-edit-notes:hover, .toggle-notes:hover")) {
+      fieldType = "notes";
+    } else if (li.querySelector(".tags:hover")) {
+      fieldType = "tags";
+    } else if (li.querySelector(".description-container:hover")) {
+      fieldType = "description";
+    } else if (li.querySelector(".title:hover, .title-link:hover")) {
+      fieldType = "title";
+    }
+
+    if (!fieldType) return;
+
+    const item = li.__behaviors?.find(
+      (b) => typeof b.startQuickEdit === "function",
+    );
+    if (item) {
+      event.preventDefault();
+      item.startQuickEdit(fieldType);
+    }
+    return;
+  }
+
   if (event.key === "n") {
     window.location.assign("/bookmarks/new");
   }
