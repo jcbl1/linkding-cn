@@ -32,7 +32,7 @@
                 </span>
               {% else %}
                 <img class="favicon" src="{% url 'linkding:favicon_image' domain=domain.favicon_domain %}"
-                     alt="" width="16" height="16">
+                     alt="" width="16" height="16" loading="lazy">
               {% endif %}
               <span class="domain-text domain-text-icon">
                 <span class="domain-label">
@@ -52,7 +52,7 @@
               </span>
             {% else %}
               <img class="favicon" src="{% url 'linkding:favicon_image' domain=domain.favicon_domain %}"
-                   alt="" width="16" height="16">
+                   alt="" width="16" height="16" loading="lazy">
             {% endif %}
             <span class="domain-text">
               <span class="domain-label">

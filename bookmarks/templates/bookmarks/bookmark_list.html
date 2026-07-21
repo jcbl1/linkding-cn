@@ -21,7 +21,7 @@
               </label>
               {% if bookmark_list.show_favicons %}
               <a href="?q=domain:%22{{ bookmark_item.url|extract_domain:request.user_profile }}%22" class="favicon-link">
-                <img class="favicon" src="{% url 'linkding:favicon_image' domain=bookmark_item.favicon_domain %}" alt="">
+                <img class="favicon" src="{% url 'linkding:favicon_image' domain=bookmark_item.favicon_domain %}" alt="" loading="lazy">
               </a>
               {% endif %}
               <a href="{{ bookmark_item.url }}" target="{{ bookmark_list.link_target }}" rel="noopener" class="title-link truncate">
