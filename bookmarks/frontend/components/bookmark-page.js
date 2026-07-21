@@ -744,6 +744,7 @@ class BookmarkItem extends Behavior {
     tagsContainer.style.display = "none";
 
     const autocomplete = document.createElement("ld-tag-autocomplete");
+    autocomplete.classList.add("quick-edit-tags-container");
     autocomplete.setAttribute("input-value", currentTags.join(" "));
     autocomplete.setAttribute("input-placeholder", gettext("Enter tags"));
     tagsContainer.parentNode.insertBefore(
