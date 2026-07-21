@@ -570,6 +570,10 @@
     }
   }
 
+  .settings-switch.is-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+  }
   /* Legacy settings-help styles - used in settings page */
   .settings-help {
     position: relative;

@@ -246,6 +246,7 @@ class SettingsPageBehavior extends Behavior {
         });
         this.sortableInstances.push(sortable);
       }
+      this.applyAutoHideDateLock(form);
       this.syncBookmarkToolbarModules(form);
       this.syncToolbarConfigPanels(form);
 
@@ -514,6 +515,7 @@ class SettingsPageBehavior extends Behavior {
     }
 
     if (form.matches("[data-bookmark-toolbar-form]")) {
+      this.applyAutoHideDateLock(form);
       this.syncBookmarkToolbarModules(form);
       this.syncToolbarConfigPanels(form);
       this.syncBookmarkActions(form);
@@ -562,6 +564,7 @@ class SettingsPageBehavior extends Behavior {
     }
 
     if (form.matches("[data-bookmark-toolbar-form]")) {
+      this.applyAutoHideDateLock(form);
       this.syncBookmarkToolbarModules(form);
       this.syncBookmarkActions(form);
       this.syncBookmarkStatuses(form);
@@ -1508,6 +1511,25 @@ class SettingsPageBehavior extends Behavior {
 
     if (hiddenInput) {
       hiddenInput.value = JSON.stringify(items);
+    }
+  }
+
+  // Auto-hide toolbar: force-enable "date" module when auto-hide is on.
+  applyAutoHideDateLock(form) {
+    const autoHide = form.querySelector("[data-toolbar-auto-hide]");
+    if (!autoHide) return;
+    const dateToggle = form.querySelector(
+      '[data-toolbar-module-key="date"] [data-toolbar-module-enabled]',
+    );
+    if (!dateToggle) return;
+
+    if (autoHide.checked) {
+      dateToggle.checked = true;
+      dateToggle.disabled = true;
+      dateToggle.closest(".settings-switch")?.classList.add("is-disabled");
+    } else {
+      dateToggle.disabled = false;
+      dateToggle.closest(".settings-switch")?.classList.remove("is-disabled");
     }
   }
 

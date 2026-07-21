@@ -2184,6 +2184,20 @@ msgstr "工具栏模块"
 msgid "Drag to reorder modules and toggle whether they are shown in the bookmark toolbar."
 msgstr "拖拽排序模块；开关切换其是否在书签工具栏显示。"
 
+#: bookmarks/templates/settings/general.html:788
+msgid "Auto-hide toolbar"
+msgstr "自动隐藏工具栏"
+
+#: bookmarks/templates/settings/general.html:790
+msgid ""
+"· When enabled, toolbar items (except date) are hidden by default and only shown on hover (PC) or tap on empty area (mobile).<br>\n"
+"· When enabled, \"Bookmark date\" is forced on and cannot be disabled.<br>\n"
+"· Recommended: place \"Bookmark date\" first for the best experience."
+msgstr ""
+"· 开启后，工具栏（除书签日期外）默认隐藏，仅在鼠标悬浮其上（PC端）、或触摸工具栏空白处（移动端）时显示。<br>\n"
+"· 开启后「书签日期」将被强制启用，无法禁用。<br>\n"
+"· 建议将「书签日期」排序在第一位，以获得最佳体验。"
+
 #: bookmarks/templates/settings/general.html:840
 msgid "Configure how bookmark dates are displayed and what happens when clicking them."
 msgstr "配置书签日期的显示方式和点击行为。"

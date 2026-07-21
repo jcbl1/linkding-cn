@@ -1415,6 +1415,7 @@ class BookmarkListContext:
         self.show_preview_image_placeholders = user_profile.enable_preview_image_placeholders
         self.show_notes = user_profile.permanent_notes
         self.show_sidebar = user_profile.show_sidebar
+        self.toolbar_auto_hide = user_profile.bookmark_toolbar_auto_hide
         self.is_preview = False
         self.snapshot_feature_enabled = settings.LD_ENABLE_SNAPSHOTS
 

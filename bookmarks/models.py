@@ -1146,6 +1146,7 @@ class UserProfile(models.Model):
     reader_settings = models.JSONField(default=dict, null=False)
     bookmark_quick_tags = models.JSONField(default=list, blank=True, null=False)
     bookmark_toolbar_modules = models.JSONField(default=list, blank=True, null=False)
+    bookmark_toolbar_auto_hide = models.BooleanField(default=False, null=False)
 
     # 随机按钮设置
     RANDOM_MODE_LIST = "list"
@@ -1624,6 +1625,7 @@ class UserProfileForm(forms.ModelForm):
             "bookmark_quick_edits",
             "bookmark_quick_tags",
             "bookmark_toolbar_modules",
+            "bookmark_toolbar_auto_hide",
             "bookmark_action_display_mode",
             "bookmark_status_display_mode",
             "bookmark_quick_edit_display_mode",
@@ -1685,6 +1687,7 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
             "bookmark_action_display_mode",
             "bookmark_status_display_mode",
             "bookmark_quick_edit_display_mode",
+            "bookmark_toolbar_auto_hide",
             "permanent_notes",
             "default_mark_unread",
             "default_mark_shared",

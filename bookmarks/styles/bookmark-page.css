@@ -654,6 +654,49 @@ button.btn-link.quick-tag-btn.active:focus {
   }
 }
 
+/* ── Hover toolbar mode ── */
+/* Hidden on all devices by default. Desktop uses :hover; mobile uses
+   .toolbar-visible toggled by JS on tap. Targets ALL direct children
+   of .actions so the feature works regardless of toolbar module order. */
+
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item] .actions > *:not(.toolbar-date) {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+/* Hover mode: pin date to the left regardless of toolbar module order */
+ul.bookmark-list.toolbar-auto-hide .toolbar-date {
+  order: -1;
+}
+/* Desktop: reveal on hover */
+@media (hover: hover) and (pointer: fine) {
+  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .actions > *:not(.toolbar-date) {
+    max-height: none;
+    overflow: visible;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .toolbar-date {
+    order: unset;
+  }
+}
+
+/* Mobile + desktop: reveal when JS toggles .toolbar-visible */
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .actions > *:not(.toolbar-date) {
+  max-height: none;
+  overflow: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .toolbar-date {
+  order: unset;
+}
+
 .bookmark-pagination {
   margin-top: var(--unit-4);
   border-top: solid 1px var(--secondary-border-color);

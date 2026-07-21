@@ -4,7 +4,7 @@
   {% include 'bookmarks/empty_bookmarks.html' %}
 {% else %}
   <section aria-label="{% translate 'Bookmark list' %}">
-    <ul class="bookmark-list"
+    <ul class="bookmark-list{% if bookmark_list.toolbar_auto_hide %} toolbar-auto-hide{% endif %}"
         role="list" tabindex="-1"
         style="--ld-bookmark-description-max-lines:{{ bookmark_list.description_max_lines }};"
         data-bookmarks-total="{{ bookmark_list.bookmarks_total }}"
@@ -71,6 +71,7 @@
             <div class="actions">
               {% for item in bookmark_list.toolbar_items %}
                 {% if item.has_content and item.key == "date" and bookmark_item.display_date %}
+                  <span class="toolbar-date">
                   {# 日期始终渲染（含 preview 模式） #}
                   {% if bookmark_list.date_route == "disabled" %}
                     <span>{{ bookmark_item.display_date }}</span>
@@ -105,6 +106,7 @@
                        target="{{ bookmark_list.link_target }}"
                        >{{ bookmark_item.display_date }}</a>
                   {% endif %}
+                  </span>
                   <span class="toolbar-sep">|</span>
 
                 {% elif not bookmark_list.is_preview and item.has_content and item.key == "actions" %}
@@ -355,6 +357,37 @@
       (function() {
         try { window.__ldQuickTagsSubmenu = JSON.parse('{{ bookmark_list.quick_tags_submenu_json|escapejs }}'); } catch(e) {}
       })();
+    </script>
+    {% endif %}
+    {% if bookmark_list.toolbar_auto_hide %}
+    <script>
+    (function() {
+      'use strict';
+      if (window.__ldToolbarAutoHideBound) return;
+      window.__ldToolbarAutoHideBound = true;
+      // Use document-level delegation so the handler survives Turbo DOM swaps
+      document.addEventListener('click', function(e) {
+        var item = e.target.closest('ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]');
+        if (!item) {
+          // Click outside any bookmark item — close all open toolbars
+          document.querySelectorAll('li[ld-bookmark-item].toolbar-visible').forEach(function(el) {
+            el.classList.remove('toolbar-visible');
+          });
+          return;
+        }
+
+        // Let interactive elements (links, buttons, inputs, textarea, labels) through
+        if (e.target.closest('a, button, input, textarea, label')) return;
+
+        // Hide all other items' toolbars
+        document.querySelectorAll('li[ld-bookmark-item].toolbar-visible').forEach(function(other) {
+          if (other !== item) other.classList.remove('toolbar-visible');
+        });
+
+        // Toggle toolbar visibility on this item
+        item.classList.toggle('toolbar-visible');
+      });
+    })();
     </script>
     {% endif %}
   </section>
