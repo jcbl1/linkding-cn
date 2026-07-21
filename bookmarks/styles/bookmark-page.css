@@ -2091,6 +2091,12 @@ ul.bookmark-list {
 
 
 .sidebar {
+  /* 模块菜单按钮去掉右侧 padding 和 border，与关闭按钮对齐 */
+  & .section-title .dropdown-toggle {
+    padding-right: 0;
+    border-right: 0;
+  }
+
   position: relative;
   max-height: var(--app-viewport-height);
   &.paginate-sticky {
