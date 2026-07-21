@@ -33,6 +33,63 @@
   }
 }
 
+/* 桌面端侧边栏模式：由「显示侧边栏」设置决定 */
+@media (min-width: 841px) {
+  /* ===== 显示侧边栏 关闭 → overlay 浮层模式 ===== */
+  .bookmarks-page[data-sidebar-default="0"],
+  .highlights-page[data-sidebar-default="0"] {
+    /* 打开时主内容保持全宽，不重排 */
+    &.sidebar-open main {
+      grid-column: span var(--grid-columns);
+    }
+
+    /* 打开时显示 close bar（含关闭按钮） */
+    &.sidebar-open .sidebar-close-bar {
+      display: flex;
+    }
+
+    &.sidebar-open .sidebar {
+      /* specificity 0-4-0 beats base .sidebar (0-1-0) and
+         .sidebar[data-sticky-on] (0-2-0), no !important needed */
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: auto;
+      width: 340px;
+      max-width: 85vw;
+      height: 100vh;
+      max-height: none;
+      z-index: var(--zindex-4);
+      overflow-y: auto;
+      overflow-x: hidden;
+      overscroll-behavior: contain;
+      background: var(--body-color);
+      box-shadow: -2px 0 12px rgba(0, 0, 0, 0.15);
+      padding: var(--unit-4);
+      scrollbar-gutter: auto;
+    }
+  }
+
+  /* ===== 显示侧边栏 开启 → push 推挤模式 ===== */
+  /* 桌面端隐藏侧边栏切换按钮（侧边栏始终可见） */
+  .bookmarks-page[data-sidebar-default="1"] [data-sidebar-toggle],
+  .highlights-page[data-sidebar-default="1"] [data-sidebar-toggle] {
+    display: none;
+  }
+
+  /* 即使 sidebar-closed 也保持侧边栏可见（防移动端关闭后缩放桌面）
+     specificity 0-4-0 > base .sidebar-closed .sidebar (0-3-0) */
+  .bookmarks-page[data-sidebar-default="1"].sidebar-closed .sidebar,
+  .highlights-page[data-sidebar-default="1"].sidebar-closed .sidebar {
+    display: block;
+  }
+  .bookmarks-page[data-sidebar-default="1"].sidebar-closed main,
+  .highlights-page[data-sidebar-default="1"].sidebar-closed main {
+    grid-column: span min(2, var(--grid-columns));
+  }
+}
+
 /* 移动端：sidebar 始终用 fixed overlay 模式
    注意：@media 不能嵌套在 CSS nesting 规则内部（postcss-nesting 不支持） */
 @media (max-width: 840px) {

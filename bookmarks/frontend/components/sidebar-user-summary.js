@@ -78,6 +78,7 @@ class SidebarUserSummaryBehavior extends Behavior {
     if (this.collectionToggle) {
       this.collectionToggle.removeEventListener("toggle", this.handleCollectionToggle);
     }
+    if (this._heatmapRaf) cancelAnimationFrame(this._heatmapRaf);
     if (this.heatmapResizeObserver) {
       this.heatmapResizeObserver.disconnect();
     }
@@ -195,8 +196,14 @@ class SidebarUserSummaryBehavior extends Behavior {
     this.syncHeatmapLayout();
 
     if (typeof ResizeObserver === "function") {
+      this._heatmapRaf = 0;
       this.heatmapResizeObserver = new ResizeObserver(() => {
-        this.syncHeatmapLayout();
+        // 用 rAF 合并同一帧内的多次 resize 回调，避免强制同步重排
+        if (this._heatmapRaf) cancelAnimationFrame(this._heatmapRaf);
+        this._heatmapRaf = requestAnimationFrame(() => {
+          this._heatmapRaf = 0;
+          this.syncHeatmapLayout();
+        });
       });
 
       this.heatmapResizeObserver.observe(this.element);

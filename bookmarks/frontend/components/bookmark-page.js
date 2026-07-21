@@ -1715,12 +1715,12 @@ function applyScrollPosition(key, selector) {
   const data = readScrollData(key);
   if (!data) return;
 
-  // 精确匹配当前 scrollHeight 的记忆位置
-  // 无匹配则用最近一次
-  const target = data.slots?.[el.scrollHeight] ?? data.s;
-
+  // 双重 rAF：第一帧绘制完成后再读 scrollHeight，此时布局已算完，无强制重排
   requestAnimationFrame(() => {
-    el.scrollTop = Math.min(target, el.scrollHeight - el.clientHeight);
+    requestAnimationFrame(() => {
+      const target = data.slots?.[el.scrollHeight] ?? data.s;
+      el.scrollTop = Math.min(target, el.scrollHeight - el.clientHeight);
+    });
   });
 }
 
