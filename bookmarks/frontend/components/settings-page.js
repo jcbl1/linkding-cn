@@ -1486,7 +1486,7 @@ class SettingsPageBehavior extends Behavior {
   syncSidebarModules(form) {
     // Scope to THIS form — avoids cross-contamination when both
     // bookmarks and highlights sidebar forms exist on the same page.
-    const hiddenInput = form.querySelector('input[name$="_sidebar_modules"]');
+    const hiddenInput = form.querySelector('input[name="sidebar_modules"], input[name="highlights_sidebar_modules"]');
     const items = Array.from(
       form.querySelectorAll("[data-sidebar-modules-list] .settings-module-item"),
     ).map((item) => ({
