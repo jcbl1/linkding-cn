@@ -1301,7 +1301,6 @@ class UserProfile(models.Model):
             {"key": cls.SIDEBAR_MODULE_BUNDLES, "enabled": bundles_enabled},
             {"key": cls.SIDEBAR_MODULE_DOMAINS, "enabled": True},
             {"key": cls.SIDEBAR_MODULE_TAGS, "enabled": True},
-            {"key": cls.SIDEBAR_MODULE_COLORS, "enabled": True},
         ]
 
     @classmethod
