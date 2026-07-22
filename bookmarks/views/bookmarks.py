@@ -155,6 +155,8 @@ def _handle_preference_toggle(request: HttpRequest):
         request.user_profile = profile
     else:
         profile.save()
+    # Update request.user_profile so the current request uses the new settings
+    request.user_profile = profile
 
     # For nav_month/nav_week, inject the target value into GET so the context picks it up
     if action == "nav_month":
