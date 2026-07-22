@@ -2095,6 +2095,9 @@ ul.bookmark-list {
   & .section-title .dropdown-toggle {
     padding-right: 0;
     border-right: 0;
+    &:hover {
+      background: transparent;
+    }
   }
 
   position: relative;
