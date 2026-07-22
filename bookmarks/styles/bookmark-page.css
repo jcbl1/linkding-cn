@@ -977,6 +977,13 @@ ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .toolbar
   flex-shrink: 0;
 }
 
+.count {
+  color: var(--secondary-text-color);
+  font-size: var(--font-size-sm);
+  flex-shrink: 0;
+  display: inline-block;
+}
+
 .tag-tree-toggle {
   display: flex;
   align-items: center;
@@ -1083,11 +1090,20 @@ ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .toolbar
   display: block;
   padding: var(--unit-1) var(--unit-2);
   border-radius: var(--border-radius);
+  text-decoration: none;
+
+  &:hover .domain-label-text {
+    text-decoration: underline;
+  }
 }
 
 .domain-link-static {
   color: var(--link-color);
   text-decoration: none;
+
+  &:hover .domain-label-text {
+    text-decoration: underline;
+  }
 }
 
 .domain-link-main {
