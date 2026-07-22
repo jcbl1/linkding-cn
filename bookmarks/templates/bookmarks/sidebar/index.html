@@ -1,5 +1,14 @@
-{% for module in sidebar_modules %}
-  <div{% if module.wrapper_id %} id="{{ module.wrapper_id }}"{% endif %} data-sidebar-module="{{ module.key }}">
-    {% include module.template_name %}
+{% load i18n %}
+{% if sidebar_lazy_load %}
+  <div data-sidebar-lazy-placeholder
+       data-sidebar-lazy-modules="domains,tags,bundles,summary"
+       style="padding: 1rem; text-align: center; color: #888;">
+    <p>{% translate "Loading sidebar..." %}</p>
   </div>
-{% endfor %}
+{% else %}
+  {% for module in sidebar_modules %}
+    <div{% if module.wrapper_id %} id="{{ module.wrapper_id }}"{% endif %} data-sidebar-module="{{ module.key }}">
+      {% include module.template_name %}
+    </div>
+  {% endfor %}
+{% endif %}

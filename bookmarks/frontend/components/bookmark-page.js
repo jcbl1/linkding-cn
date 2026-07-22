@@ -1923,11 +1923,64 @@ let sidebarJustToggled = false;
 
 function saveSidebarState(isOpen) {
   try { localStorage.setItem(getSidebarStateKey(), isOpen ? "1" : "0"); } catch {}
+  // 同步到 Cookie，让服务端判断是否需要懒加载
+  try {
+    const page = getSidebarPage();
+    const isHighlights = page && page.classList.contains("highlights-page");
+    const cookieName = isHighlights ? "ld_sidebar_highlights" : "ld_sidebar_bookmarks";
+    document.cookie = `${cookieName}=${isOpen ? "1" : "0"}; path=/; max-age=31536000; SameSite=Lax`;
+  } catch {}
 }
+
+let sidebarLazyLoaded = false;
+
+async function loadSidebarContent(page) {
+  const sidebar = page.querySelector(".sidebar");
+  if (!sidebar || sidebarLazyLoaded) return;
+
+  const placeholder = sidebar.querySelector("[data-sidebar-lazy-placeholder]");
+  if (!placeholder) return;
+
+  sidebarLazyLoaded = true;
+
+  const ctxEl = document.querySelector("[data-ctx]");
+  const ctx = ctxEl?.dataset.ctx || "active";
+
+  const modules = placeholder.dataset.sidebarLazyModules || "domains,tags,bundles,summary";
+  const cacheKey = `sidebar-content:${ctx}:${modules}`;
+
+  let html = null;
+  try { html = sessionStorage.getItem(cacheKey); } catch {}
+
+  if (html === null) {
+    const sp = new URLSearchParams();
+    sp.set("ctx", ctx);
+    sp.set("modules", modules);
+    try {
+      const resp = await fetch(`/sidebar-content?${sp.toString()}`);
+      if (!resp.ok) return;
+      html = await resp.text();
+      try { sessionStorage.setItem(cacheKey, html); } catch {}
+    } catch (e) {
+      console.error("Failed to load sidebar content:", e);
+      return;
+    }
+  }
+
+  if (html && html.trim()) {
+    placeholder.outerHTML = html;
+    document.querySelectorAll("[ld-domain-tree]").forEach(el => {
+      el.behaviors?.forEach(b => b instanceof DomainTreeBehavior && b.restoreTreeState());
+    });
+  }
+}
+
+window.loadSidebarContent = loadSidebarContent;
 
 function openSidebar(page) {
   page.classList.remove("sidebar-closed");
   page.classList.add("sidebar-open");
+  loadSidebarContent(page);
   restoreSidebar();
   if (isMobile()) {
     document.body.classList.add("sidebar-overlay-active");

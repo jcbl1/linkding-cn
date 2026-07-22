@@ -393,7 +393,37 @@ def trashed(request: HttpRequest):
     )
 
 
+def _should_lazy_load_sidebar(request) -> bool:
+    """
+    判断是否应该懒加载侧边栏内容。
+    只在以下条件同时满足时才懒加载：
+    1. 用户设置 show_sidebar=False
+    2. Cookie 中没有记录侧边栏为打开状态（即用户从未打开过侧边栏）
+    """
+    if request.user_profile.show_sidebar:
+        return False
+    
+    # 检查 Cookie：如果用户曾经打开过侧边栏，Cookie 会记录为 "1"
+    cookie_name = "ld_sidebar_bookmarks"
+    if hasattr(request, 'path') and '/highlights' in request.path:
+        cookie_name = "ld_sidebar_highlights"
+    
+    sidebar_cookie = request.COOKIES.get(cookie_name)
+    if sidebar_cookie == "1":
+        return False
+    
+    return True
+
+
 def render_bookmarks_view(request: HttpRequest, template_name, context):
+    # 懒加载：当用户设置关闭且从未打开过侧边栏时，跳过昂贵的侧边栏查询
+    if _should_lazy_load_sidebar(request):
+        context.setdefault("sidebar_summary", None)
+        context.setdefault("bundles", None)
+        context.setdefault("domains", None)
+        context.setdefault("tag_cloud", None)
+        context["sidebar_lazy_load"] = True
+    
     context["sidebar_modules"] = _build_sidebar_modules(request, context)
     profile = request.user_profile
     context.setdefault("show_sidebar", profile.show_sidebar)
