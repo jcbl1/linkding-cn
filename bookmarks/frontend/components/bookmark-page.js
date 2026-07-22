@@ -1453,20 +1453,103 @@ class DomainTreeBehavior extends Behavior {
     }
   }
 
-  toggleTreeItem(item, event) {
+  async toggleTreeItem(item, event) {
     if (!item) return;
-    const childList = item.querySelector(":scope > ul.domain-children");
     const button = item.querySelector(":scope > .domain-row .folder-toggle");
-
-    if (!childList || !button) return;
+    if (!button) return;
     if (event) event.preventDefault();
+
+    // P0: guard against rapid clicks while loading
+    if (item.dataset.loading === "true") return;
 
     const expanded = button.getAttribute("aria-expanded") === "true";
     const newState = !expanded;
 
     button.setAttribute("aria-expanded", newState);
-    childList.style.display = newState ? "" : "none";
-    this.setNodeState(item.dataset.domainNodeId, newState);
+    
+    const nodeId = item.dataset.domainNodeId;
+    
+    if (newState && item.dataset.loaded !== "true") {
+      // Children not yet loaded — fetch from server.
+      await this.loadChildren(item, nodeId);
+    } else {
+      // Already loaded — just show/hide.
+      const childList = item.querySelector(":scope > ul.domain-children");
+      if (childList) childList.style.display = newState ? "" : "none";
+    }
+    
+    this.setNodeState(nodeId, newState);
+  }
+
+  _buildSearchParams(nodeId) {
+    // Forward all search/filter params that affect bookmark querying (and thus domain counts).
+    // Exclude pure UI state params that don't affect data: sort, details.
+    const SKIP = new Set(["node_id", "ctx", "sort", "details", "view_mode"]);
+    const sp = new URLSearchParams();
+    sp.set("node_id", nodeId);
+    const page = document.querySelector("[data-ctx]");
+    sp.set("ctx", page?.dataset.ctx || "active");
+    // Include view_mode so browser HTTP cache differentiates icon/full mode responses
+    const viewMode = this.element?.dataset.domainViewMode || "full";
+    sp.set("view_mode", viewMode);
+    for (const [key, val] of new URLSearchParams(window.location.search)) {
+      if (!SKIP.has(key) && val) sp.set(key, val);
+    }
+    return sp;
+  }
+
+  async loadChildren(item, nodeId) {
+    // P0: loading guard
+    if (item.dataset.loading === "true") return;
+    item.dataset.loading = "true";
+
+    const sp = this._buildSearchParams(nodeId);
+    // sessionStorage cache key matches the URL params (which now include view_mode)
+    const cacheKey = `domain-tree:${sp.toString()}`;
+    const button = item.querySelector(":scope > .domain-row .folder-toggle");
+
+    // 1. Check sessionStorage cache first
+    let html = null;
+    try { html = sessionStorage.getItem(cacheKey); } catch {}
+
+    if (html === null) {
+      // 2. Cache miss — fetch from server
+      try {
+        const resp = await fetch(`/domain-tree/children?${sp.toString()}`);
+        if (!resp.ok) {
+          this._loadChildrenFailed(item, button);
+          return;
+        }
+        html = await resp.text();
+        try { sessionStorage.setItem(cacheKey, html); } catch {}
+      } catch {
+        this._loadChildrenFailed(item, button);
+        return;
+      }
+    }
+
+    item.dataset.loading = "false";
+
+    // 3. Insert into DOM
+    if (html && html.trim()) {
+      const ul = document.createElement("ul");
+      // Match icon mode: if the domain tree is in icon mode, add grid layout class
+      const menu = item.closest(".domain-menu");
+      const isIconMode = menu?.dataset.domainViewMode === "icon";
+      ul.className = isIconMode ? "domain-children domain-children-icon" : "domain-children";
+      ul.innerHTML = html;
+      item.appendChild(ul);
+      item.dataset.loaded = "true";
+    } else {
+      item.dataset.domainHasChildren = "false";
+      if (button) button.remove();
+    }
+  }
+
+  _loadChildrenFailed(item, button) {
+    item.dataset.loading = "false";
+    // Revert aria-expanded to collapsed state
+    if (button) button.setAttribute("aria-expanded", "false");
   }
 
   setNodeState(nodeId, expanded) {
@@ -1489,17 +1572,24 @@ class DomainTreeBehavior extends Behavior {
         const button = item.querySelector(
           ":scope > .domain-row .folder-toggle",
         );
-        const childList = item.querySelector(":scope > ul.domain-children");
-        if (!button || !childList) return;
+        if (!button) return;
 
         const nodeId = item.dataset.domainNodeId;
-        const hasSelectedDescendant = childList.querySelector(
+        const hasSelectedDescendant = item.querySelector(
           ".domain-menu-item.selected",
         );
         const expanded = hasSelectedDescendant ? true : state[nodeId] === true;
 
         button.setAttribute("aria-expanded", expanded);
-        childList.style.display = expanded ? "" : "none";
+        
+        if (item.dataset.loaded === "true") {
+          // Already loaded (server-rendered group nodes) — toggle display
+          const childList = item.querySelector(":scope > ul.domain-children");
+          if (childList) childList.style.display = expanded ? "" : "none";
+        } else if (expanded) {
+          // Not loaded yet but should be expanded — fetch from server
+          this.loadChildren(item, nodeId);
+        }
       });
   }
 }
