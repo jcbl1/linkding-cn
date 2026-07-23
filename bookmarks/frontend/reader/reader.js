@@ -430,6 +430,11 @@ function _initHighlightsJumpMode(contentArea, articleContent, bookmarkId, assetI
 function postProcess(articleContent) {
   articleContent.querySelectorAll("table").forEach((table) => {
     table.classList.add("table");
+    // Wrap wide tables in a horizontally scrollable container
+    const wrapper = document.createElement("div");
+    wrapper.className = "table-scroll-wrapper";
+    table.parentNode.insertBefore(wrapper, table);
+    wrapper.appendChild(table);
   });
 }
 
