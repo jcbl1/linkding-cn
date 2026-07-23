@@ -3,6 +3,7 @@ import mimetypes
 import os
 import os.path
 import re
+import struct
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -299,27 +300,43 @@ def _resolve_url(href: str, base_url: str) -> str:
 
 
 def _calculate_favicon_score(size, fmt: str, rel: str) -> int:
-    """为 favicon 候选打分，分数越高越优先。"""
-    score = 50
+    """为 favicon 候选打分，分数越高越优先。
+
+    优先选择 32×32 的图标（覆盖 16px Retina 显示）。
+    SVG 矢量图标始终最优（缩放无损）。
+    """
+    # SVG 矢量图标始终最优
     if "svg" in fmt:
-        score += 100
+        return 200
+
+    score = 100
+
+    # 距离 32px 越近分越高
     if size:
-        if size >= 128:
-            score += 60
-        elif size >= 64:
-            score += 50
-        elif size >= 32:
-            score += 40
-        elif size >= 16:
-            score += 20
+        distance = abs(size - 32)
+        if distance == 0:
+            score += 80   # 32px 最佳
+        elif distance <= 16:
+            score += 60 + (1 if size > 32 else 0)  # 同距离时偏好更大尺寸（48px > 16px）
+        elif distance <= 32:
+            score += 45   # 64px
+        elif distance <= 64:
+            score += 25   # 96px
+        else:
+            score += 5    # >96px，最后兜底
+    else:
+        score += 20  # 无尺寸信息，中等优先级
+
+    # 格式偏好
     if "png" in fmt:
-        score += 20
-    elif "webp" in fmt:
         score += 15
-    elif "ico" in fmt:
-        score += 5
-    if "apple-touch-icon" in rel:
+    elif "webp" in fmt:
         score += 10
+
+    # apple-touch-icon 通常是大图，降低优先级
+    if "apple-touch-icon" in rel:
+        score -= 30
+
     return score
 
 
@@ -560,6 +577,61 @@ def _is_valid_image(data: bytes) -> bool:
     return False
 
 
+
+# ---------------------------------------------------------------------------
+# ICO 单帧提取（纯 Python，无需 Pillow）
+# ---------------------------------------------------------------------------
+
+def _extract_best_ico_frame(data: bytes, target_size: int = 32) -> bytes | None:
+    """从 ICO 文件中提取最接近 target_size 的 PNG 帧。
+
+    ICO 格式：6 字节头 + N×16 字节目录 + 图像数据。
+    现代 ICO 通常在 256×256 entry 中嵌入 PNG，较小尺寸为 BMP。
+    本函数只提取 PNG 帧（直接可用），不处理 BMP 帧（需要 Pillow 转换）。
+
+    返回提取的 PNG 字节，无可用 PNG 帧时返回 None。
+    """
+    if len(data) < 6 or data[:4] != b"\x00\x00\x01\x00":
+        return None
+
+    _, _, count = struct.unpack("<HHH", data[:6])
+    if count == 0 or len(data) < 6 + count * 16:
+        return None
+
+    best_entry = None
+    best_distance = float("inf")
+
+    for i in range(count):
+        off = 6 + i * 16
+        entry = data[off : off + 16]
+        w = entry[0] or 256  # 0 表示 256
+        h = entry[1] or 256
+        size = struct.unpack("<I", entry[8:12])[0]
+        offset = struct.unpack("<I", entry[12:16])[0]
+
+        # 检查是否为 PNG 帧
+        if offset + 4 > len(data):
+            continue
+        if data[offset : offset + 4] != b"\x89PNG":
+            continue
+
+        distance = abs(w - target_size)
+        if distance < best_distance:
+            best_distance = distance
+            best_entry = {"offset": offset, "size": size}
+
+    if best_entry is None:
+        return None
+
+    offset = best_entry["offset"]
+    size = best_entry["size"]
+    frame = data[offset : offset + size]
+    if len(frame) < 8:
+        return None
+
+    return frame
+
+
 def fetch_and_save_favicon(domain: str, scheme: str = "https", timeout: int = 10) -> str:
     """为指定域名获取 favicon 并保存到磁盘，返回文件名。
 
@@ -579,6 +651,13 @@ def fetch_and_save_favicon(domain: str, scheme: str = "https", timeout: int = 10
     if not _is_valid_image(body):
         logger.warning(f"Favicon provider returned invalid image data for {domain} (content_type={content_type}, size={len(body)})")
         return ""
+
+    # ICO 文件：提取最接近 32×32 的 PNG 帧，避免存储多分辨率 bundle
+    if content_type in ("image/x-icon", "image/vnd.microsoft.icon") or body[:4] == b"\x00\x00\x01\x00":
+        extracted = _extract_best_ico_frame(body)
+        if extracted:
+            body = extracted
+            content_type = "image/png"
 
     file_extension = mimetypes.guess_extension(content_type) or ".png"
     name = domain_to_filename(domain)

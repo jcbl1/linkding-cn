@@ -254,3 +254,183 @@ class FaviconLoaderTestCase(TestCase):
         self.assertEqual(favicon_loader.domain_to_filename("example.com"), "example_com")
         self.assertEqual(favicon_loader.domain_to_filename("sub.example.com"), "sub_example_com")
         self.assertEqual(favicon_loader.domain_to_filename("a-b.com"), "a_b_com")
+
+    # --- _calculate_favicon_score ---
+
+    def test_score_prefers_32px(self):
+        """32px 应该得到最高分（SVG 除外）。"""
+        score_32 = favicon_loader._calculate_favicon_score(32, "image/png", "icon")
+        score_16 = favicon_loader._calculate_favicon_score(16, "image/png", "icon")
+        score_48 = favicon_loader._calculate_favicon_score(48, "image/png", "icon")
+        score_64 = favicon_loader._calculate_favicon_score(64, "image/png", "icon")
+        score_128 = favicon_loader._calculate_favicon_score(128, "image/png", "icon")
+
+        self.assertGreater(score_32, score_16)
+        self.assertGreater(score_32, score_48)
+        self.assertGreater(score_32, score_64)
+        self.assertGreater(score_32, score_128)
+
+    def test_score_prefers_closer_to_32px(self):
+        """距离 32px 越近，分数越高。"""
+        score_16 = favicon_loader._calculate_favicon_score(16, "image/png", "icon")
+        score_48 = favicon_loader._calculate_favicon_score(48, "image/png", "icon")
+        score_64 = favicon_loader._calculate_favicon_score(64, "image/png", "icon")
+        score_128 = favicon_loader._calculate_favicon_score(128, "image/png", "icon")
+
+        # 16px 和 48px 距离相同，但偏好更大尺寸（48px > 16px）
+        self.assertGreater(score_48, score_16)
+        self.assertGreater(score_48, score_64)
+        self.assertGreater(score_64, score_128)
+
+    def test_score_svg_always_best(self):
+        """SVG 应该得到最高分。"""
+        score_svg = favicon_loader._calculate_favicon_score(None, "image/svg+xml", "icon")
+        score_32 = favicon_loader._calculate_favicon_score(32, "image/png", "icon")
+
+        self.assertGreater(score_svg, score_32)
+
+    def test_score_penalizes_apple_touch_icon(self):
+        """apple-touch-icon 应该被降分。"""
+        score_normal = favicon_loader._calculate_favicon_score(180, "image/png", "icon")
+        score_apple = favicon_loader._calculate_favicon_score(180, "image/png", "apple-touch-icon")
+
+        self.assertGreater(score_normal, score_apple)
+
+    # --- _extract_best_ico_frame ---
+
+    def _create_valid_ico(self, entries):
+        """创建一个有效的 ICO 文件用于测试。
+
+        entries: list of (width, height, is_png, data)
+        """
+        import struct
+
+        count = len(entries)
+        header = struct.pack("<HHH", 0, 1, count)
+
+        # 计算每个 entry 的 offset
+        dir_size = 6 + count * 16
+        current_offset = dir_size
+
+        directory = b""
+        image_data = b""
+        for width, height, is_png, data in entries:
+            # Directory entry: width(1), height(1), colors(1), reserved(1), planes(2), bpp(2), size(4), offset(4)
+            w = 0 if width == 256 else width
+            h = 0 if height == 256 else height
+            entry = struct.pack("<BBBBHHII", w, h, 0, 0, 1, 32, len(data), current_offset)
+            directory += entry
+            image_data += data
+            current_offset += len(data)
+
+        return header + directory + image_data
+
+    def test_extract_ico_frame_with_png(self):
+        """从 ICO 中提取 PNG 帧。"""
+        # 创建一个包含 32x32 PNG 的 ICO
+        png_data = b"\x89PNG" + b"\x00" * 100  # 假的 PNG 数据
+        ico_data = self._create_valid_ico([(32, 32, True, png_data)])
+
+        result = favicon_loader._extract_best_ico_frame(ico_data)
+        self.assertEqual(result, png_data)
+
+    def test_extract_ico_frame_prefers_closest_to_32(self):
+        """应该选择最接近 32px 的 PNG 帧。"""
+        png_16 = b"\x89PNG" + b"\x00" * 50
+        png_32 = b"\x89PNG" + b"\x00" * 100
+        png_64 = b"\x89PNG" + b"\x00" * 200
+        ico_data = self._create_valid_ico([
+            (16, 16, True, png_16),
+            (32, 32, True, png_32),
+            (64, 64, True, png_64),
+        ])
+
+        result = favicon_loader._extract_best_ico_frame(ico_data)
+        self.assertEqual(result, png_32)
+
+    def test_extract_ico_frame_skips_bmp(self):
+        """应该跳过 BMP 帧，只提取 PNG 帧。"""
+        bmp_data = b"BM" + b"\x00" * 100  # BMP 数据
+        png_data = b"\x89PNG" + b"\x00" * 100
+        ico_data = self._create_valid_ico([
+            (32, 32, False, bmp_data),  # BMP，会被跳过
+            (256, 256, True, png_data),  # PNG
+        ])
+
+        result = favicon_loader._extract_best_ico_frame(ico_data)
+        self.assertEqual(result, png_data)
+
+    def test_extract_ico_frame_returns_none_for_no_png(self):
+        """如果没有 PNG 帧，应该返回 None。"""
+        bmp_data = b"BM" + b"\x00" * 100
+        ico_data = self._create_valid_ico([
+            (32, 32, False, bmp_data),
+        ])
+
+        result = favicon_loader._extract_best_ico_frame(ico_data)
+        self.assertIsNone(result)
+
+    def test_extract_ico_frame_returns_none_for_invalid_data(self):
+        """无效数据应该返回 None。"""
+        self.assertIsNone(favicon_loader._extract_best_ico_frame(b""))
+        self.assertIsNone(favicon_loader._extract_best_ico_frame(b"not an ico"))
+        self.assertIsNone(favicon_loader._extract_best_ico_frame(b"\x00\x00\x01\x00"))
+
+    def test_fetch_and_save_ico_extracts_png_frame(self):
+        """ICO 文件应该被提取为 PNG。"""
+        import struct
+
+        # 创建一个有效的 ICO，包含 32x32 PNG 帧
+        png_data = b"\x89PNG" + b"\x00" * 100
+        ico_data = self._create_valid_ico([(32, 32, True, png_data)])
+
+        with mock.patch("requests.get") as mock_get:
+            mock_get.return_value = self.create_mock_response(
+                icon_data=ico_data, content_type="image/x-icon"
+            )
+            result = favicon_loader.fetch_and_save_favicon("example.com")
+
+        # 应该保存为 .png（因为提取了 PNG 帧）
+        self.assertEqual(result, "example_com.png")
+        self.assertTrue(self.icon_exists("example_com.png"))
+
+        # 文件内容应该是提取的 PNG 数据
+        saved_data = self.get_icon_data("example_com.png")
+        self.assertEqual(saved_data, png_data)
+
+    def test_extract_ico_frame_returns_none_when_all_bmp(self):
+        """所有帧都是 BMP 时，应返回 None，保留原 ICO。"""
+        bmp_16 = b"BM" + b"\x00" * 50
+        bmp_32 = b"BM" + b"\x00" * 100
+        ico_data = self._create_valid_ico([
+            (16, 16, False, bmp_16),
+            (32, 32, False, bmp_32),
+        ])
+
+        result = favicon_loader._extract_best_ico_frame(ico_data)
+        self.assertIsNone(result)
+
+    def test_fetch_and_save_ico_keeps_original_when_no_png(self):
+        """ICO 只有 BMP 帧时，应保留原 ICO 文件。"""
+        bmp_data = b"BM" + b"\x00" * 100
+        ico_data = self._create_valid_ico([(32, 32, False, bmp_data)])
+
+        with mock.patch("requests.get") as mock_get:
+            mock_get.return_value = self.create_mock_response(
+                icon_data=ico_data, content_type="image/x-icon"
+            )
+            result = favicon_loader.fetch_and_save_favicon("example.com")
+
+        # 无法提取 PNG，保留原 ICO
+        self.assertEqual(result, "example_com.ico")
+        self.assertTrue(self.icon_exists("example_com.ico"))
+
+    def test_score_32px_beats_128px(self):
+        """关键行为回归：新评分下 32px 胜过 128px（旧评分下相反）。"""
+        score_32 = favicon_loader._calculate_favicon_score(32, "image/png", "icon")
+        score_128 = favicon_loader._calculate_favicon_score(128, "image/png", "icon")
+
+        self.assertGreater(score_32, score_128)
+        # 验证具体分值，防止未来改动意外反转
+        self.assertEqual(score_32, 195)
+        self.assertEqual(score_128, 120)
