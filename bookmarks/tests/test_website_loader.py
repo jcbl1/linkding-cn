@@ -1,4 +1,7 @@
 from unittest import mock
+import json
+import os
+import tempfile
 
 import requests
 from django.test import TestCase
@@ -37,6 +40,9 @@ class WebsiteLoaderTestCase(TestCase):
     def setUp(self):
         # clear cached metadata before test run
         website_loader._load_website_metadata_cached.cache_clear()
+        website_loader._load_website_metadata_config_cached.cache_clear()
+        from site_adapters.services.config.loader import _cache
+        _cache.invalidate()
 
     def render_html_document(
         self, title, description="", og_description="", og_image=""
@@ -207,7 +213,7 @@ class WebsiteLoaderTestCase(TestCase):
             )
             self.assertEqual("https://example.com/image.jpg", metadata.preview_image)
 
-    def test_load_website_metadata_prefers_description_over_og_description(self):
+    def test_load_website_metadata_prefers_og_description_over_meta_description(self):
         with mock.patch(
             "bookmarks.services.website_loader.load_page"
         ) as mock_load_page:
@@ -216,23 +222,21 @@ class WebsiteLoaderTestCase(TestCase):
             )
             metadata = website_loader.load_website_metadata("https://example.com")
             self.assertEqual("test title", metadata.title)
-            self.assertEqual("test description", metadata.description)
+            # og:description is now preferred (fivefilters-informed priority)
+            self.assertEqual("test og description", metadata.description)
 
-    def test_load_website_metadata_returns_empty_metadata_when_custom_loader_returns_none(
+    def test_load_website_metadata_returns_empty_metadata_when_script_returns_none(
         self,
     ):
-        custom_loader_module = mock.Mock()
-        custom_loader_module._load_website_metadata.return_value = None
-
         with (
             mock.patch(
-                "bookmarks.services.website_loader.search_config_for_domain",
-                return_value={"loader": "custom.py"},
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value={"script": "custom.py"},
             ),
             mock.patch("os.path.exists", return_value=True),
             mock.patch(
-                "bookmarks.services.website_loader.load_module",
-                return_value=custom_loader_module,
+                "bookmarks.services.website_loader.run_script",
+                return_value=None,
             ),
         ):
             metadata = website_loader.load_website_metadata("https://x.com/example")
@@ -258,6 +262,99 @@ class WebsiteLoaderTestCase(TestCase):
                 "https://example.com", ignore_cache=True
             )
             self.assertEqual(mock_load_page.call_count, 2)
+
+    def test_website_metadata_with_config_uses_cache(self):
+        expected_html = '<html><head><title>Test Title</title></head></html>'
+        config = {"http": {"timeout": 3}}
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch.object(
+                website_loader, "load_page", return_value=expected_html
+            ) as mock_load_page,
+        ):
+            website_loader.load_website_metadata("https://example.com")
+            website_loader.load_website_metadata("https://example.com")
+
+        mock_load_page.assert_called_once()
+
+    def test_website_metadata_uses_request_rewrite_and_selectors(self):
+        html = """
+        <html><head></head><body>
+          <h1 class="title">Selected title</h1>
+          <p class="desc">Selected description</p>
+          <img class="cover" src="/cover.jpg">
+        </body></html>
+        """
+        config = {
+            "_request_url": "https://fetch.example.com/item",
+            "_rewrite_url": "https://final.example.com/item",
+            "select_title": [".title"],
+            "select_description": [".desc"],
+            "select_image": [".cover"],
+            "headers": {},
+        }
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch.object(
+                website_loader, "load_page", return_value=html
+            ) as mock_load_page,
+        ):
+            metadata = website_loader.load_website_metadata("https://original.example.com/item")
+
+        mock_load_page.assert_called_once_with("https://fetch.example.com/item", config)
+        self.assertEqual(metadata.url, "https://final.example.com/item")
+        self.assertEqual(metadata.title, "Selected title")
+        self.assertEqual(metadata.description, "Selected description")
+        self.assertEqual(metadata.preview_image, "https://fetch.example.com/cover.jpg")
+
+    def test_build_request_cookies_prefers_cookie_config_file(self):
+        fd, path = tempfile.mkstemp()
+        os.close(fd)
+        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump([{"name": "a", "value": "1"}, {"name": "b", "value": "2"}], f)
+
+        cookies = website_loader.build_request_cookies({
+            "cookie": {"file": path},
+            "headers": {"Cookie": "ignored=1"},
+        })
+
+        self.assertEqual(cookies, {"a": "1", "b": "2"})
+
+    def test_load_website_metadata_for_test_returns_selector_sources(self):
+        html = """
+        <html><body>
+          <h1 class="title">Selected title</h1>
+          <p class="desc">Selected description</p>
+        </body></html>
+        """
+        config = {
+            "select_title": [".title"],
+            "select_description": [".desc"],
+            "headers": {},
+        }
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata, sources, returned_config = website_loader.load_website_metadata_for_test("https://example.com")
+
+        self.assertEqual(metadata.title, "Selected title")
+        self.assertEqual(sources["title"]["selector"], ".title")
+        self.assertEqual(sources["description"]["selector"], ".desc")
+        self.assertIs(returned_config, config)
 
 
 class ContentTypeDetectionTestCase(TestCase):
@@ -352,3 +449,194 @@ class ContentTypeDetectionTestCase(TestCase):
         self.assertFalse(website_loader.is_pdf_content_type("text/html"))
         self.assertFalse(website_loader.is_pdf_content_type(None))
         self.assertFalse(website_loader.is_pdf_content_type(""))
+
+
+class MetadataFallbacksTestCase(TestCase):
+    """Test Twitter card and JSON-LD metadata fallbacks."""
+
+    def setUp(self):
+        website_loader._load_website_metadata_cached.cache_clear()
+        website_loader._load_website_metadata_config_cached.cache_clear()
+        from site_adapters.services.config.loader import _cache
+        _cache.invalidate()
+
+    def test_twitter_title_fallback(self):
+        html = '<html><head><meta name="twitter:title" content="TW Title"></head><body></body></html>'
+        with mock.patch.object(website_loader, "load_page", return_value=html):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.title, "TW Title")
+
+    def test_twitter_description_fallback(self):
+        html = '<html><head><title>T</title><meta name="twitter:description" content="TW Desc"></head><body></body></html>'
+        with mock.patch.object(website_loader, "load_page", return_value=html):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.description, "TW Desc")
+
+    def test_twitter_image_fallback(self):
+        html = '<html><head><title>T</title><meta name="twitter:image" content="https://x.com/img.jpg"></head><body></body></html>'
+        with mock.patch.object(website_loader, "load_page", return_value=html):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.preview_image, "https://x.com/img.jpg")
+
+    def test_json_ld_article(self):
+        html = '''<html><head>
+        <script type="application/ld+json">
+        {"@type": "Article", "headline": "Article Title", "description": "Art Desc", "image": "https://x.com/ld.jpg"}
+        </script></head><body></body></html>'''
+        with mock.patch.object(website_loader, "load_page", return_value=html):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.title, "Article Title")
+        self.assertEqual(metadata.description, "Art Desc")
+        self.assertEqual(metadata.preview_image, "https://x.com/ld.jpg")
+
+    def test_json_ld_graph(self):
+        html = '''<html><head>
+        <script type="application/ld+json">
+        {"@graph": [
+            {"@type": "WebSite", "name": "Skip Me"},
+            {"@type": "NewsArticle", "headline": "Graph Title", "description": "Graph Desc"}
+        ]}
+        </script></head><body></body></html>'''
+        with mock.patch.object(website_loader, "load_page", return_value=html):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.title, "Graph Title")
+        self.assertEqual(metadata.description, "Graph Desc")
+
+    def test_json_ld_image_object(self):
+        html = '''<html><head><title>T</title>
+        <script type="application/ld+json">
+        {"@type": "Article", "headline": "H", "image": {"url": "https://x.com/obj.jpg"}}
+        </script></head><body></body></html>'''
+        with mock.patch.object(website_loader, "load_page", return_value=html):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.preview_image, "https://x.com/obj.jpg")
+
+    def test_json_ld_image_array(self):
+        html = '''<html><head><title>T</title>
+        <script type="application/ld+json">
+        {"@type": "Article", "headline": "H", "image": ["https://x.com/first.jpg", "https://x.com/second.jpg"]}
+        </script></head><body></body></html>'''
+        with mock.patch.object(website_loader, "load_page", return_value=html):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.preview_image, "https://x.com/first.jpg")
+
+    def test_json_ld_skips_web_site_type(self):
+        html = '''<html><head><title>Page Title</title>
+        <script type="application/ld+json">
+        {"@type": "WebSite", "name": "Site Name", "description": "Site Desc"}
+        </script></head><body></body></html>'''
+        with mock.patch.object(website_loader, "load_page", return_value=html):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        # Should fall back to <title>, not JSON-LD WebSite name
+        self.assertEqual(metadata.title, "Page Title")
+
+    def test_twitter_over_json_ld(self):
+        """Twitter card should be preferred over JSON-LD."""
+        html = '''<html><head>
+        <meta name="twitter:title" content="TW Title">
+        <script type="application/ld+json">
+        {"@type": "Article", "headline": "LD Title"}
+        </script></head><body></body></html>'''
+        with mock.patch.object(website_loader, "load_page", return_value=html):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.title, "TW Title")
+
+    def test_og_over_twitter(self):
+        """OG tags should be preferred over Twitter cards."""
+        html = '''<html><head>
+        <meta property="og:title" content="OG Title">
+        <meta name="twitter:title" content="TW Title">
+        </head><body></body></html>'''
+        with mock.patch.object(website_loader, "load_page", return_value=html):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.title, "OG Title")
+
+    def test_explicit_selector_blocks_twitter_fallback(self):
+        """Explicit selectors should prevent all fallbacks."""
+        html = '''<html><head>
+        <meta name="twitter:title" content="TW Title">
+        </head><body><h1 class="t">Explicit</h1></body></html>'''
+        config = {"select_title": [".t"], "headers": {}}
+        with (
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.title, "Explicit")
+
+    def test_json_ld_invalid_json_ignored(self):
+        """Invalid JSON-LD should be silently ignored."""
+        html = '''<html><head><title>Page</title>
+        <script type="application/ld+json">{invalid json</script>
+        </head><body></body></html>'''
+        with mock.patch.object(website_loader, "load_page", return_value=html):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.title, "Page")
+
+
+class MetadataRetryTestCase(TestCase):
+    """Test exponential backoff retry on RetryableMetadataError."""
+
+    def setUp(self):
+        website_loader._load_website_metadata_cached.cache_clear()
+        website_loader._load_website_metadata_config_cached.cache_clear()
+        from site_adapters.services.config.loader import _cache
+        _cache.invalidate()
+
+    def test_retries_on_retryable_error_then_succeeds(self):
+        """Should retry on 503 and succeed on second attempt."""
+        fail_response = MockStreamingResponse(num_chunks=1, chunk_size=10, status_code=503)
+        ok_html = '<html><head><title>OK</title></head><body></body></html>'
+        ok_response = MockStreamingResponse(num_chunks=1, chunk_size=0, status_code=200)
+        ok_response.chunks[0] = ok_html.encode()
+
+        with (
+            mock.patch("requests.get", side_effect=[fail_response, ok_response]),
+            mock.patch("bookmarks.services.website_loader._wait_for_domain"),
+            mock.patch("bookmarks.services.website_loader.time.sleep") as mock_sleep,
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.title, "OK")
+        mock_sleep.assert_called_once_with(1.0)
+
+    def test_raises_after_max_retries(self):
+        """Should raise RetryableMetadataError after exhausting retries."""
+        fail_response = MockStreamingResponse(num_chunks=1, chunk_size=10, status_code=503)
+
+        with (
+            mock.patch("requests.get", return_value=fail_response),
+            mock.patch("bookmarks.services.website_loader._wait_for_domain"),
+            mock.patch("bookmarks.services.website_loader.time.sleep"),
+            self.assertRaises(website_loader.RetryableMetadataError),
+        ):
+            website_loader.load_website_metadata("https://example.com")
+
+    def test_exponential_backoff_delays(self):
+        """Delays should be 1s, 2s, 4s."""
+        fail_response = MockStreamingResponse(num_chunks=1, chunk_size=10, status_code=503)
+        ok_html = '<html><head><title>OK</title></head><body></body></html>'
+        ok_response = MockStreamingResponse(num_chunks=1, chunk_size=0, status_code=200)
+        ok_response.chunks[0] = ok_html.encode()
+
+        with (
+            mock.patch("requests.get", side_effect=[fail_response, fail_response, fail_response, ok_response]),
+            mock.patch("bookmarks.services.website_loader._wait_for_domain"),
+            mock.patch("bookmarks.services.website_loader.time.sleep") as mock_sleep,
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.title, "OK")
+        delays = [call.args[0] for call in mock_sleep.call_args_list]
+        self.assertEqual(delays, [1.0, 2.0, 4.0])
+
+    def test_no_retry_on_non_retryable_error(self):
+        """Should NOT retry on 403 (NonRetryableMetadataError)."""
+        fail_response = MockStreamingResponse(num_chunks=1, chunk_size=10, status_code=403)
+
+        with (
+            mock.patch("requests.get", return_value=fail_response),
+            mock.patch("bookmarks.services.website_loader._wait_for_domain"),
+            mock.patch("bookmarks.services.website_loader.time.sleep") as mock_sleep,
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertIsNone(metadata.title)
+        mock_sleep.assert_not_called()

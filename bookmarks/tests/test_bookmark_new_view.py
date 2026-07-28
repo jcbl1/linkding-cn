@@ -253,7 +253,7 @@ class BookmarkNewViewTestCase(TestCase, BookmarkFactoryMixin):
         from bookmarks.services import favicon_loader
         import os
         # 创建临时 favicon 文件
-        favicon_path = favicon_loader._get_favicon_path('example_com.png')
+        favicon_path = favicon_loader.get_favicon_path('example_com.png')
         os.makedirs(favicon_path.parent, exist_ok=True)
         with open(favicon_path, 'wb') as f:
             f.write(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)  # Minimal PNG header

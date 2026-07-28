@@ -8,13 +8,13 @@ from django.urls import reverse
 from django.utils import timezone, translation
 
 from bookmarks.models import BookmarkSearch, UserProfile
-from bookmarks.views.contexts import SidebarUserSummaryContext
 from bookmarks.tests.helpers import (
     BookmarkFactoryMixin,
     BookmarkListTestMixin,
     DomainSidebarTestMixin,
     TagCloudTestMixin,
 )
+from bookmarks.views.contexts import SidebarUserSummaryContext
 
 
 class BookmarkIndexViewTestCase(
@@ -1200,22 +1200,9 @@ class BookmarkIndexViewTestCase(
 
         other_item = soup.select_one('li[data-domain-host="__other__"]')
         self.assertIsNotNone(other_item)
-
-        other_children = other_item.select_one(
-            ":scope > ul.domain-children.domain-children-icon"
-        )
-        self.assertIsNotNone(other_children)
-
-        other_child = other_children.select_one(
-            'li[data-domain-host="domain-10.example.com"]'
-        )
-        self.assertIsNotNone(other_child)
-        self.assertIsNotNone(
-            other_child.select_one(":scope > .domain-row.domain-row-icon")
-        )
-        self.assertIsNotNone(
-            other_child.select_one(":scope > .domain-row .domain-root-icon-summary")
-        )
+        # Group nodes load children dynamically, not server-side
+        self.assertEqual(other_item.get("data-domain-group"), "true")
+        self.assertEqual(other_item.get("data-loaded"), "false")
 
     def test_sidebar_summary_renders_compact_stats_and_calendar_shell(self):
         with translation.override("zh-hans"):
