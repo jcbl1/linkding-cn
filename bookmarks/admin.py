@@ -90,6 +90,18 @@ class LinkdingAdminSite(AdminSite):
         context_path = os.getenv("LD_CONTEXT_PATH", "")
         app_list += [
             {
+                "name": "Domain",
+                "app_label": "domain_app",
+                "models": [
+                    {
+                        "name": "Site Adapters",
+                        "object_name": "site_adapters",
+                        "admin_url": f"/{context_path}admin/site-adapters",
+                        "view_only": True,
+                    }
+                ],
+            },
+            {
                 "name": "Huey",
                 "app_label": "huey_app",
                 "models": [

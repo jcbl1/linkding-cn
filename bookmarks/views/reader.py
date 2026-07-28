@@ -1,12 +1,19 @@
 import html
+import re
 
 from django.contrib.auth.decorators import login_required
 from django.http import (
     HttpResponseBadRequest,
 )
 from django.shortcuts import render
-from django.utils import timezone
 from django.urls import reverse
+
+
+def _safe_filename(name: str) -> str:
+    """Sanitize filename for Content-Disposition header."""
+    name = name.replace('"', '_').replace('\n', '_').replace('\r', '_')
+    return re.sub(r'[^\w\s.\-()\u4e00-\u9fff]', '_', name)
+
 
 from bookmarks.models import Bookmark, BookmarkAsset
 from bookmarks.services import tasks
@@ -45,7 +52,11 @@ def read(request: HttpRequest, bookmark_id: int):
                 bookmark.url, bookmark.date_added
             )
 
-            from bookmarks.utils import extract_hostname, parse_domain_roots, resolve_favicon_domain
+            from bookmarks.utils import (
+                extract_hostname,
+                parse_domain_roots,
+                resolve_favicon_domain,
+            )
             hostname = extract_hostname(bookmark.url)
             favicon_domain = ""
             if hostname:
@@ -193,7 +204,7 @@ def export(request: HttpRequest, bookmark_id: int):
 
         response = HttpResponse(content, content_type="text/html")
         response["Content-Disposition"] = (
-            f'attachment; filename="{bookmark.resolved_title}.html"'
+            f'attachment; filename="{_safe_filename(bookmark.resolved_title)}.html"'
         )
         return response
 
@@ -213,7 +224,7 @@ def export(request: HttpRequest, bookmark_id: int):
 
         response = HttpResponse(md, content_type="text/markdown")
         response["Content-Disposition"] = (
-            f'attachment; filename="{bookmark.resolved_title}.md"'
+            f'attachment; filename="{_safe_filename(bookmark.resolved_title)}.md"'
         )
         return response
 

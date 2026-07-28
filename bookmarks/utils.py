@@ -1,9 +1,11 @@
+import contextlib
 import datetime
 import importlib
 import json
 import logging
 import os
 import re
+import tempfile
 import unicodedata
 import urllib.parse
 from dataclasses import dataclass
@@ -19,9 +21,8 @@ from django.utils.translation import ngettext
 
 try:
     with open("version.txt") as f:
-        app_version = f.read().strip("\n")
-except Exception as exc:
-    logging.exception(exc)
+        app_version = f.read().strip()
+except (OSError, FileNotFoundError):
     app_version = ""
 
 
@@ -241,38 +242,6 @@ def get_registrable_domain(url: str) -> str:
     return hostname.lower()
 
 
-def search_config_for_domain(url, settings_path, settings_cache=None):
-    config = None
-
-    if os.path.exists(settings_path):
-        domain_map = load_settings(settings_path, settings_cache)
-        if domain_map == "__JSON_ERROR__":
-            logging.error(f"【错误】配置文件解析失败：{settings_path}")
-            return config
-    else:
-        logging.error(f"【错误】配置文件路径不存在：{settings_path}")
-        return config
-
-    domain = get_domain(url)
-    if domain in domain_map:  # 直接命中
-        config = domain_map[domain]
-    if not config:
-        for key in domain_map:  # 解析命中（通用匹配符*）
-            if key.startswith("*.") and domain.endswith(key[1:]):
-                config = domain_map[key]
-
-    # 域名别名（配置复用）：将另一个域名的配置作为当前域名的配置
-    visited = {domain}
-    while isinstance(config, str):
-        alias = config
-        if alias in visited:
-            break
-        visited.add(alias)
-        config = domain_map.get(alias)
-
-    return config
-
-
 def load_settings(path, cache):
     base_dir = Path(path).resolve().parent
     cache = {} if cache is None else cache
@@ -300,7 +269,7 @@ def load_settings(path, cache):
 
 
 def _process_path(node, base_dir):
-    """解析相对路径"""
+    """解析相对路径，校验结果不越出 base_dir。"""
     if isinstance(node, dict):
         for key, value in node.items():
             node[key] = _process_path(value, base_dir)
@@ -308,16 +277,26 @@ def _process_path(node, base_dir):
         for i, item in enumerate(node):
             node[i] = _process_path(item, base_dir)
     elif isinstance(node, str) and (node.startswith("./") or node.startswith("../")):
-        # 如果是字符串且以 ./ 或 ../ 开头，就解析它
-        # (base_dir / node) 将路径拼接起来
-        # .resolve() 将其转换为绝对路径，并处理 ".." 等情况
-        return str((base_dir / node).resolve())
+        resolved = (base_dir / node).resolve()
+        # Ensure resolved path stays within base_dir
+        try:
+            if base_dir.resolve() not in resolved.parents and resolved != base_dir.resolve():
+                return node  # reject traversal, return original string
+        except (ValueError, OSError):
+            return node
+        return str(resolved)
 
     return node
 
 
 def load_module(path, cache):
     cache = {} if cache is None else cache
+    # Safety: only load .py files from the data directory
+    abs_path = Path(path).resolve()
+    data_dir = Path(settings.BASE_DIR, "data").resolve()
+    if not str(abs_path).endswith(".py") or (data_dir not in abs_path.parents and abs_path.parent != data_dir):
+        logging.getLogger(__name__).warning("Refusing to load module outside data/: %s", path)
+        return None
     try:
         mtime = os.path.getmtime(path)
     except (OSError, FileNotFoundError):
@@ -624,3 +603,35 @@ def sanitize_svg_body(svg_body: str) -> str:
     svg_body = _EVENT_ATTRS.sub("", svg_body)
     svg_body = _JS_PROTOCOL.sub("", svg_body)
     return svg_body
+
+
+def atomic_write(path: str, content: str, encoding: str = 'utf-8'):
+    """Write text to file atomically via tempfile + os.replace."""
+    dir_name = os.path.dirname(path) or '.'
+    os.makedirs(dir_name, exist_ok=True)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile('w', dir=dir_name, suffix='.tmp', delete=False, encoding=encoding) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        os.replace(tmp_path, path)
+    except Exception:
+        if tmp_path:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
+        raise
+
+
+def is_safe_domain_key(domain_key: str) -> bool:
+    """Check that a domain key is safe for use as a filename component.
+
+    Disallows path traversal, leading dots, and characters outside
+    alphanumeric + hyphen + underscore + dot.
+    """
+    if not domain_key:
+        return False
+    if domain_key.startswith('.'):
+        return False
+    if '/' in domain_key or '\\' in domain_key or '..' in domain_key:
+        return False
+    return bool(re.match(r'^[A-Za-z0-9][A-Za-z0-9._-]*$', domain_key))

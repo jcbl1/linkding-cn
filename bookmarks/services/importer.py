@@ -71,7 +71,7 @@ def import_netscape_html(
         raise
 
     parse_end = timezone.now()
-    logger.debug(f"Parse duration: {parse_end - import_start}")
+    logger.debug("Parse duration: %s", parse_end - import_start)
 
     # Create and cache all tags beforehand
     _create_missing_tags(netscape_bookmarks, user)
@@ -88,7 +88,7 @@ def import_netscape_html(
     tasks.schedule_bookmarks_without_previews(user)
 
     end = timezone.now()
-    logger.debug(f"Import duration: {end - import_start}")
+    logger.debug("Import duration: %s", end - import_start)
 
     return result
 

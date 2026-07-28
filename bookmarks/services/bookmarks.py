@@ -94,7 +94,8 @@ def update_bookmark(bookmark: Bookmark, tag_string, current_user: User):
 
 
 def enhance_with_website_metadata(bookmark: Bookmark):
-    metadata = website_loader.load_website_metadata(bookmark.url)
+    username = bookmark.owner.username if bookmark.owner else ''
+    metadata = website_loader.load_website_metadata(bookmark.url, username=username)
     update_fields = []
 
     if not bookmark.title:
