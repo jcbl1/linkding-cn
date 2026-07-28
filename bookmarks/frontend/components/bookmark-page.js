@@ -1492,6 +1492,10 @@ class DomainTreeBehavior extends Behavior {
     // Include view_mode so browser HTTP cache differentiates icon/full mode responses
     const viewMode = this.element?.dataset.domainViewMode || "full";
     sp.set("view_mode", viewMode);
+    // Include domain config fingerprint to bust sessionStorage cache when
+    // custom domain normalization rules change
+    const fingerprint = this.element?.dataset.domainConfigFingerprint;
+    if (fingerprint) sp.set("fp", fingerprint);
     for (const [key, val] of new URLSearchParams(window.location.search)) {
       if (!SKIP.has(key) && val) sp.set(key, val);
     }
@@ -1947,7 +1951,8 @@ async function loadSidebarContent(page) {
   const ctx = ctxEl?.dataset.ctx || "active";
 
   const modules = placeholder.dataset.sidebarLazyModules || "domains,tags,bundles,summary";
-  const cacheKey = `sidebar-content:${ctx}:${modules}`;
+  const fingerprint = placeholder.dataset.domainConfigFingerprint || "";
+  const cacheKey = `sidebar-content:${ctx}:${modules}` + (fingerprint ? `:${fingerprint}` : "");
 
   let html = null;
   try { html = sessionStorage.getItem(cacheKey); } catch {}

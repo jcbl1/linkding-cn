@@ -1,3 +1,4 @@
+import hashlib
 import random as rng
 import time
 import urllib.parse
@@ -423,6 +424,10 @@ def render_bookmarks_view(request: HttpRequest, template_name, context):
         context.setdefault("domains", None)
         context.setdefault("tag_cloud", None)
         context["sidebar_lazy_load"] = True
+
+    # Domain config fingerprint for client-side sessionStorage cache busting
+    raw = request.user_profile.custom_domain_root or ""
+    context["domain_config_fingerprint"] = hashlib.md5(raw.encode()).hexdigest()[:12] if raw else "default"
     
     context["sidebar_modules"] = _build_sidebar_modules(request, context)
     profile = request.user_profile

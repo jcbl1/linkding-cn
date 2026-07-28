@@ -1,3 +1,4 @@
+import hashlib
 import calendar
 import json
 import re
@@ -2105,6 +2106,11 @@ class DomainsContext:
         )
         self.toggle_compact_mode_action = compact_mode_action
         self.toggle_compact_mode_value = "0" if self.is_compact_mode else "1"
+
+        # Fingerprint of domain normalization config, used by client-side
+        # sessionStorage cache key; changes when custom domain roots change.
+        raw = request.user_profile.custom_domain_root or ""
+        self.config_fingerprint = hashlib.md5(raw.encode()).hexdigest()[:12] if raw else "default"
 
     def __init__(self, request: HttpRequest, search: BookmarkSearch) -> None:
         request_context = self.request_context(request)
