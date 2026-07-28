@@ -1,42 +1,52 @@
 import logging
 import os
 
-from django.conf import settings
-
 from bookmarks.services import singlefile
-from bookmarks.utils import load_module, search_config_for_domain
+from site_adapters.services.engine.script_runner import run_script
+from site_adapters.services.auth.cookies import (
+    load_cookie_file,
+    verify_and_refresh,
+)
+from site_adapters.services.config.resolver import get_snapshot_config
 
 logger = logging.getLogger(__name__)
 
 
-# 缓存规则设置与解析规则（function）
-_settings_cache = None
-_processors_module_cache = {}  # {loader_path: (module, mtime)}
 
 
-# 创建快照： 快照总调度
-def create_snapshot(url: str, filepath: str):
-    settings_path = settings.LD_CUSTOM_SNAPSHOT_PROCESSOR_SETTINGS
-    config = search_config_for_domain(url, settings_path, _settings_cache)
-
+def _run_snapshot(url: str, filepath: str, config: dict | None):
     if config:
-        processor_file = config.get("processor")
-        if processor_file:
-            processor_path = (
-                os.path.join(os.path.dirname(settings_path), processor_file)
-                if processor_file
-                else None
-            )
-            if processor_path and os.path.exists(processor_path):
-                module = load_module(processor_path, _processors_module_cache)
-                func = module._create_snapshot
-                return func(url, filepath, config)
-        else:
-            return _create_snapshot(url, filepath, config)
-
-    return _create_snapshot(url, filepath)
+        script_path = config.get("script")
+        if script_path:
+            if os.path.exists(script_path):
+                return run_script(script_path, url=url, config=config, output_path=filepath)
+            logger.error("Snapshot script not found: %s", script_path)
+        return _create_snapshot(url, filepath, config)
+    return _create_snapshot(url, filepath, None)
 
 
-# 创建快照： 默认方法（兜底方法）
+def _verify_snapshot_cookie(url: str, filepath: str, config: dict) -> bool:
+    cookie_config = config.get("cookie", {})
+    if not cookie_config or not cookie_config.get("file") or config.get("_user_cookie"):
+        return False
+    domain_key = config.get("_domain_key")
+    before = load_cookie_file(cookie_config.get("file"))
+    after = verify_and_refresh(
+        cookie_config,
+        config.get("_request_url", url),
+        domain_key,
+        {"url": config.get("_request_url", url), "html_path": filepath},
+    )
+    return bool(after and after != before)
+
+
+def create_snapshot(url: str, filepath: str, username: str = ''):
+    config = get_snapshot_config(url, username=username)
+    _run_snapshot(url, filepath, config)
+    if config and _verify_snapshot_cookie(url, filepath, config):
+        _run_snapshot(url, filepath, config)
+    return None
+
+
 def _create_snapshot(url: str, filepath, config: dict = None):
     return singlefile.create_snapshot(url, filepath, config)
