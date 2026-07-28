@@ -1,0 +1,278 @@
+{% extends "bookmarks/layout.html" %}
+{% load i18n static %}
+{% block head %}
+  {% translate "Site Adapters - Linkding" as page_title %}
+  {% with page_title=page_title %}
+    {{ block.super }}
+  {% endwith %}
+  <link href="{% static 'site-adapters.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
+{% endblock %}
+{% block content %}
+  <main class="settings-page" ld-settings-page ld-site-adapters aria-labelledby="main-heading">
+    <div class="settings-page-header">
+      <div class="settings-label-row">
+        <h1 id="main-heading">{% translate "Site Adapters" %}</h1>
+        <span class="settings-help" data-settings-help data-settings-help-open="false">
+          <button type="button" class="settings-help-button" data-settings-help-button aria-label="{% translate 'More info' %}" aria-expanded="false">
+            <svg width="20" height="20" aria-hidden="true"><use href="#ld-icon-info"></use></svg>
+          </button>
+          <span class="settings-help-popover" role="tooltip"><span class="form-input-hint">{% translate "Manage site-specific rules for metadata extraction, snapshots, and article parsing." %}</span></span>
+        </span>
+      </div>
+    </div>
+
+    {% if messages %}
+      {% for message in messages %}
+        <div class="toast {% if message.tags == 'success' %}toast-success{% else %}toast-error{% endif %} mb-4">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+
+    <div class="wa-test-grid">
+      <section class="settings-section wa-test-panel">
+        <div class="wa-test-panel-header">
+          <div class="settings-label-row">
+            <h2>{% translate "URL Test" %}</h2>
+            <span class="settings-help" data-settings-help data-settings-help-open="false">
+              <button type="button" class="settings-help-button" data-settings-help-button aria-label="{% translate 'More info' %}" aria-expanded="false">
+                <svg width="20" height="20" aria-hidden="true"><use href="#ld-icon-info"></use></svg>
+              </button>
+              <span class="settings-help-popover" role="tooltip"><span class="form-input-hint">{% translate "Test merged config, metadata, snapshot, reader, cookie, or full pipeline behavior for one URL." %}</span></span>
+            </span>
+            <button type="button" class="btn btn-sm" id="btn-clean-test-files">{% translate "Clean test files" %}</button>
+          </div>
+        </div>
+        <form id="test-form">
+          <div class="wa-test-row">
+            <div class="wa-url-history">
+              <input type="url" id="test-url" name="url" class="form-input" placeholder="https://www.example.com/article/xxx" autocomplete="off" required>
+              <button type="button" class="wa-url-clear" data-action="clear-url" aria-label="{% translate 'Clear' %}">&times;</button>
+              <div id="wa-url-dropdown" class="wa-url-dropdown"></div>
+            </div>
+            <div class="wa-test-actions">
+              <select name="test_type" class="form-select">
+                <option value="config">{% translate "Show Config" %}</option>
+                <option value="metadata">{% translate "Metadata" %}</option>
+                <option value="snapshot">{% translate "Snapshot" %}</option>
+                <option value="reader">{% translate "Reader" %}</option>
+                <option value="cookie">{% translate "Cookie" %}</option>
+                <option value="pipeline">{% translate "Full Pipeline" %}</option>
+              </select>
+              <input type="text" name="test_username" class="form-input" placeholder="{% translate 'Test as user (optional)' %}" style="width:160px" autocomplete="off">
+              <button type="submit" class="btn btn-primary">{% translate "Test" %}</button>
+            </div>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <section id="test-results" class="settings-section" hidden>
+      <div id="test-bar" class="wa-test-bar" hidden>
+        <button type="button" class="btn btn-sm" id="btn-show-details">{% translate "Show details" %}</button>
+        <button type="button" class="btn btn-sm" id="btn-clear-test" hidden>{% translate "清空" %}</button>
+      </div>
+      <div id="test-status"></div>
+      <pre id="test-output" class="code wa-test-output"></pre>
+      <pre id="test-raw" class="code wa-test-output" hidden></pre>
+    </section>
+
+    <div class="wa-workspace">
+      <div class="settings-section wa-workspace-header">
+        <div class="settings-label-row">
+          <h2>{% translate "Workspace" %}</h2>
+          <span class="settings-help" data-settings-help data-settings-help-open="false">
+            <button type="button" class="settings-help-button" data-settings-help-button aria-label="{% translate 'More info' %}" aria-expanded="false">
+              <svg width="20" height="20" aria-hidden="true"><use href="#ld-icon-info"></use></svg>
+            </button>
+            <span class="settings-help-popover" role="tooltip"><span class="form-input-hint">{% translate "Edit domain rules, supporting files, and remote subscriptions." %}</span></span>
+          </span>
+        </div>
+      </div>
+
+      <div class="wa-editor-mode-row">
+       <div class="settings-segmented" role="radiogroup" aria-label="{% translate 'View mode' %}">
+          <label class="settings-segmented-option">
+            <input type="radio" name="view-mode" value="subscriptions" checked>
+            <span>{% translate "Subscriptions" %}</span>
+          </label>
+          <label class="settings-segmented-option">
+            <input type="radio" name="view-mode" value="domains">
+            <span>{% translate "Domains" %}</span>
+          </label>
+          <label class="settings-segmented-option">
+            <input type="radio" name="view-mode" value="resources">
+            <span>{% translate "Resources" %}</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- ===== 域名模式 ===== -->
+      <div id="view-domains" class="settings-section wa-editor-section">
+        <div class="wa-split-layout">
+        <!-- 左侧：域名列表 -->
+        <div class="wa-domain-panel">
+          <div class="wa-domain-toolbar">
+            <input type="text" id="domain-search" class="form-input" placeholder="{% translate 'Search...' %}">
+            <button type="button" class="btn btn-sm wa-icon-btn" id="btn-sort-domains" title="{% translate 'Sort domains' %}" aria-label="{% translate 'Sort domains' %}">
+              <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#ld-icon-sort-ascending"></use></svg>
+            </button>
+            <button type="button" class="btn btn-sm wa-icon-btn" id="btn-add-domain" title="{% translate 'Add Domain' %}" aria-label="{% translate 'Add Domain' %}">
+              <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#ld-icon-plus"></use></svg>
+            </button>
+          </div>
+          <div id="domain-list" class="wa-domain-list">
+            <div class="wa-domain-item wa-domain-global" data-filename="global.jsonc" data-domain="*" data-search="* global global.jsonc defaults" data-is-global="1" data-pinned="1">
+              <code>*</code>
+              <small class="wa-domain-note">{% translate "global defaults" %}</small>
+            </div>
+            {% for domain in domain_files %}
+            <div class="wa-domain-item{% if domain.disabled %} wa-domain-sub-disabled{% endif %}" data-filename="{{ domain.filename }}" data-domain="{{ domain.domain_key }}" data-is-alias="{{ domain.is_alias|yesno:'1,0' }}" data-alias-target="{{ domain.target }}" data-requires-cookie="{{ domain.requires_cookie|yesno:'1,0' }}" data-has-cookie="{{ domain.has_cookie|yesno:'1,0' }}" data-disabled="{{ domain.disabled|yesno:'1,0' }}">
+              <code>{{ domain.domain_key }}</code>
+              {% if domain.is_alias and domain.target %}
+                <small class="wa-alias-target">→ {{ domain.target }}</small>
+              {% endif %}
+              {% if domain.requires_cookie %}
+                {% if domain.has_cookie %}
+                  <span class="wa-cookie-info" title="Cookie OK">✓</span>
+                {% else %}
+                  <span class="wa-cookie-warn" title="Cookie needed">⚠</span>
+                {% endif %}
+              {% endif %}
+              <label class="form-switch wa-domain-sub-switch wa-domain-local-switch">
+                <input type="checkbox" {% if not domain.disabled %}checked{% endif %} data-local-domain="{{ domain.domain_key }}">
+                <i class="form-icon"></i>
+              </label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- 右侧：编辑器 -->
+        <div class="wa-editor-panel">
+          <!-- Cookie banner (当域名需要 cookie 时显示) -->
+          <div id="cookie-banner" class="wa-cookie-banner" hidden>
+            <span id="cookie-banner-text"></span>
+            <button type="button" class="btn btn-sm" id="btn-paste-cookie">{% translate "Paste Cookie" %}</button>
+            <a class="btn btn-sm" href="https://github.com/WooHooDai/linkding-cn/blob/main/docs/cookie-guide.md" target="_blank" rel="noopener">{% translate "Help" %}</a>
+          </div>
+
+          <!-- 编辑器头部 -->
+          <div id="domain-editor-header" class="wa-editor-header" hidden>
+            <span id="editor-filename" class="wa-editor-title"></span>
+            <input type="text" id="editor-domain-input" class="form-input wa-domain-title-input" placeholder="example.com or *.example.com" autocomplete="off" hidden>
+            <select id="domain-type-select" class="form-select wa-domain-type-select" hidden>
+              <option value="config">{% translate "Config" %}</option>
+              <option value="alias">{% translate "Alias" %}</option>
+            </select>
+            <span id="editor-alias-target" class="wa-editor-alias-target" hidden></span>
+            <div class="wa-toolbar-spacer"></div>
+            <button type="button" class="btn btn-sm" id="btn-copy-to-local" title="{% translate 'Copy to local' %}" hidden>{% translate "Copy to local" %}</button>
+            <button type="button" class="btn btn-sm btn-error" id="btn-delete-domain" title="{% translate 'Delete' %}" hidden>{% translate "Delete" %}</button>
+            <button type="button" class="btn btn-sm" id="btn-rename-domain" title="{% translate 'Rename' %}" hidden>{% translate "Rename" %}</button>
+            <button type="button" class="btn btn-sm" id="btn-validate" hidden>{% translate "Validate" %}</button>
+            <button type="button" class="btn btn-sm btn-primary" id="btn-save-domain" hidden>{% translate "Save" %}</button>
+          </div>
+
+          <!-- CodeMirror 容器 -->
+          <div id="editor-empty" class="wa-editor-empty">
+            {% translate "Select a domain from the list" %}
+          </div>
+          <div id="editor-content" class="wa-editor-content" hidden>
+            <div id="cm-domain-container" class="wa-editor-cm"></div>
+          </div>
+          <section id="domain-validate-results" class="wa-domain-validate-results" hidden aria-live="polite">
+            <div class="wa-domain-validate-header">
+              <strong id="domain-validate-status"></strong>
+              <button type="button" class="btn btn-sm" id="btn-close-domain-validate">{% translate "Close" %}</button>
+            </div>
+            <pre id="domain-validate-output" class="code"></pre>
+          </section>
+        </div>
+        </div>
+
+        <textarea id="global-editor" hidden>{{ global_content }}</textarea>
+      </div>
+
+      <!-- ===== 资源模式 ===== -->
+      <div id="view-resources" class="settings-section wa-editor-section" hidden>
+        <div class="wa-split-layout">
+        <!-- 左侧：文件树 -->
+        <div class="wa-resource-panel">
+          <div class="wa-resource-toolbar">
+            <button type="button" class="btn btn-sm wa-icon-btn" id="btn-resource-new-folder" title="{% translate 'New Folder' %}" aria-label="{% translate 'New Folder' %}">
+              <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#ld-icon-folder-plus"></use></svg>
+            </button>
+            <button type="button" class="btn btn-sm wa-icon-btn" id="btn-resource-new-file" title="{% translate 'New File' %}" aria-label="{% translate 'New File' %}">
+              <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#ld-icon-file-plus"></use></svg>
+            </button>
+            <button type="button" class="btn btn-sm wa-icon-btn" id="btn-resource-rename" title="{% translate 'Rename' %}" aria-label="{% translate 'Rename' %}" hidden>
+              <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#ld-icon-edit"></use></svg>
+            </button>
+            <button type="button" class="btn btn-sm btn-error wa-icon-btn" id="btn-resource-delete" title="{% translate 'Delete' %}" aria-label="{% translate 'Delete' %}" hidden>
+              <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#ld-icon-delete"></use></svg>
+            </button>
+          </div>
+          <div id="resource-tree" class="wa-resource-tree"></div>
+        </div>
+        <!-- 右侧：文件编辑器 -->
+        <div class="wa-editor-panel">
+          <div id="resource-editor-header" class="wa-editor-header" hidden>
+            <span id="resource-filename" class="wa-editor-title"></span>
+            <div class="wa-toolbar-spacer"></div>
+            <button type="button" class="btn btn-sm btn-primary" id="btn-save-resource" hidden>{% translate "Save" %}</button>
+          </div>
+          <div id="resource-empty" class="wa-editor-empty">
+            {% translate "Select a file from the tree" %}
+          </div>
+          <div id="resource-content" class="wa-editor-content" hidden>
+            <div id="cm-resource-container" class="wa-editor-cm"></div>
+          </div>
+        </div>
+        </div>
+      </div>
+
+      <!-- ===== 订阅管理 ===== -->
+      <div id="view-subscriptions" class="settings-section wa-editor-section" hidden>
+        <div class="wa-sub-card">
+          <div class="wa-sub-toolbar">
+            <span class="wa-sub-toolbar-spacer"></span>
+            <button type="button" class="btn btn-sm btn-primary" id="btn-add-subscription">
+              <svg width="14" height="14" aria-hidden="true"><use href="#ld-icon-plus"></use></svg> {% translate "Add" %}
+            </button>
+            <span class="settings-help" data-settings-help data-settings-help-open="false">
+              <button type="button" class="settings-help-button" data-settings-help-button aria-label="{% translate 'More info' %}" aria-expanded="false">
+                <svg width="18" height="18" aria-hidden="true"><use href="#ld-icon-info"></use></svg>
+              </button>
+              <span class="settings-help-popover wa-sub-help-left" role="tooltip"><span class="form-input-hint">{% translate "Subscriptions are remote JSONC rule packs. Drag to reorder priority. Click a row to edit." %}</span></span>
+            </span>
+          </div>
+          <div id="subscription-list" class="wa-sub-list"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    window.__ld_section_fields = {{ section_fields_json|safe }};
+    window.__ld_authority_lists = {{ authority_lists_json|safe }};
+    window.__ld_domain_files = {{ domain_files_json|safe }};
+    window.__ld_urls = {
+      action: "{% url 'linkding:settings.site_adapters.action' %}",
+      domainCreate: "{% url 'linkding:settings.site_adapters.domain_create' %}",
+      domainRead: "{% url 'linkding:settings.site_adapters.domain_read' %}",
+      domainSave: "{% url 'linkding:settings.site_adapters.domain_save' %}",
+      domainRename: "{% url 'linkding:settings.site_adapters.domain_rename' %}",
+      domainDelete: "{% url 'linkding:settings.site_adapters.domain_delete' %}",
+      domainsAll: "{% url 'linkding:settings.site_adapters.all_domains' %}",
+      localDomainToggle: "{% url 'linkding:settings.site_adapters.local_domain_toggle' %}",
+      saveCookie: "{% url 'linkding:settings.site_adapters.save_cookie' %}",
+      subscriptionDomainRead: "{% url 'linkding:settings.site_adapters.subscription_domain_read' %}",
+      subscriptionDomainToggle: "{% url 'linkding:settings.site_adapters.subscription_domain_toggle' %}",
+      subscriptionManage: "{% url 'linkding:settings.site_adapters.subscription_manage' %}",
+      viewSnapshot: "{% url 'linkding:settings.site_adapters.view_snapshot' %}",
+      resources: "{% url 'linkding:settings.site_adapters.resources' %}",
+      resourceSave: "{% url 'linkding:settings.site_adapters.resource_save' %}",
+      resourceManage: "{% url 'linkding:settings.site_adapters.resource_manage' %}",
+    };
+  </script>
+  <script src="{% static 'site-adapters.js' %}?v={{ app_version }}"></script>
+{% endblock %}
