@@ -55,6 +55,11 @@ class FaviconLoaderTestCase(TestCase):
 
     def clear_favicon_folder(self):
         folder = Path(settings.LD_FAVICON_FOLDER)
+        # 安全检查：确保不会删除真正的 favicon 文件夹
+        assert str(folder) == self.temp_favicon_folder.name, (
+            f"Refusing to clear favicon folder {folder} - expected temp folder "
+            f"{self.temp_favicon_folder.name}"
+         )
         for file in folder.iterdir():
             if file.is_file():
                 file.unlink()
@@ -88,6 +93,11 @@ class FaviconLoaderTestCase(TestCase):
         with mock.patch("requests.get") as mock_get:
             mock_get.return_value = self.create_mock_response()
             folder = Path(settings.LD_FAVICON_FOLDER)
+            # 安全检查：确保不会删除真正的 favicon 文件夹
+            assert str(folder) == self.temp_favicon_folder.name, (
+                f"Refusing to remove favicon folder {folder} - expected temp folder "
+                f"{self.temp_favicon_folder.name}"
+            )
             folder.rmdir()
             self.assertFalse(folder.exists())
 
