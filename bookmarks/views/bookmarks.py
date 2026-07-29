@@ -747,6 +747,9 @@ def favicon_image(request: HttpRequest, domain: str):
     if enable_favicons and request.user.is_authenticated:
         if not cache:
             should_fetch = True
+        elif cache.status == FaviconCache.STATUS_PENDING:
+            # 已有任务在队列中或正在执行，无需重复入队
+            pass
         elif cache.status == FaviconCache.STATUS_SUCCESS and cache.favicon_file:
             # DB 说成功但磁盘文件丢失（不一致），重新获取
             filepath = favicon_loader._get_favicon_path(cache.favicon_file)

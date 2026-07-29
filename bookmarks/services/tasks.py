@@ -243,7 +243,21 @@ def refresh_favicon(user: User, bookmark: Bookmark):
 
 
 def _enqueue_favicon_task(user_id: int, domain: str):
-    """入队 favicon 获取任务。去重由任务内部的分布式锁保证。"""
+    """入队 favicon 获取任务。
+
+    入队前检查分布式锁，避免同一域名在短时间内被反复入队，
+    防止因并发请求导致任务队列被 favicon 任务灌满。
+    任务内部仍保留分布式锁，保证同一域名同时只有一个任务在执行。
+    """
+    from django.core.cache import cache as django_cache
+
+    lock_key = f"favicon_task_lock:{domain}"
+    if django_cache.get(lock_key):
+        logger.debug(
+            f"Skipping favicon enqueue for domain={domain}, task already running or queued"
+        )
+        return
+
     _fetch_domain_favicon_task(user_id, domain)
 
 
