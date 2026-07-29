@@ -1,3 +1,12 @@
+// Track mouse position for elementFromPoint lookups
+let _lastMouseX = 0;
+let _lastMouseY = 0;
+
+document.addEventListener("mousemove", (e) => {
+  _lastMouseX = e.clientX;
+  _lastMouseY = e.clientY;
+}, { passive: true });
+
 document.addEventListener("keydown", (event) => {
   const targetNodeName = event.target.nodeName;
   const isInputTarget =
@@ -50,20 +59,22 @@ document.addEventListener("keydown", (event) => {
   }
 
   if (event.key === "q") {
-    const li = document.querySelector("li[ld-bookmark-item]:hover");
+    const target = document.elementFromPoint(_lastMouseX, _lastMouseY);
+    if (!target) return;
+
+    const li = target.closest("li[ld-bookmark-item]");
     if (!li) return;
 
     let fieldType;
-    if (li.querySelector(".inline-edit-notes:hover, .toggle-notes:hover")) {
+    if (target.closest(".inline-edit-notes, .toggle-notes")) {
       fieldType = "notes";
-    } else if (li.querySelector(".tags:hover")) {
+    } else if (target.closest(".tags")) {
       fieldType = "tags";
-    } else if (li.querySelector(".description-container:hover")) {
+    } else if (target.closest(".description-container")) {
       fieldType = "description";
-    } else if (li.querySelector(".title:hover, .title-link:hover")) {
+    } else if (target.closest(".title, .title-link")) {
       fieldType = "title";
     }
-
     if (!fieldType) return;
 
     const item = li.__behaviors?.find(
