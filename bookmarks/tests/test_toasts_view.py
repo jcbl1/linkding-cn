@@ -36,10 +36,10 @@ class ToastsViewTestCase(TestCase, BookmarkFactoryMixin):
 
         response = self.client.get(reverse("linkding:bookmarks.index"))
 
-        # Should render toasts container
-        self.assertContains(response, '<div class="message-list">')
-        # Should render two toasts
-        self.assertContains(response, '<div class="toast d-flex">', count=2)
+        # Should render fixed notice container
+        self.assertContains(response, '<div class="toast-notice-fixed">')
+        # Should render two notices
+        self.assertContains(response, '<div class="toast-notice">', count=2)
 
     def test_should_not_render_acknowledged_toasts(self):
         self.create_toast(acknowledged=True)
@@ -48,10 +48,10 @@ class ToastsViewTestCase(TestCase, BookmarkFactoryMixin):
 
         response = self.client.get(reverse("linkding:bookmarks.index"))
 
-        # Should not render toasts container
-        self.assertContains(response, '<div class="message-list">', count=0)
-        # Should not render toasts
-        self.assertContains(response, '<div class="toast">', count=0)
+        # Should not render fixed notice container
+        self.assertContains(response, '<div class="toast-notice-fixed">', count=0)
+        # Should not render notice items
+        self.assertContains(response, '<div class="toast-notice">', count=0)
 
     def test_should_not_render_toasts_of_other_users(self):
         other_user = User.objects.create_user(
@@ -64,10 +64,10 @@ class ToastsViewTestCase(TestCase, BookmarkFactoryMixin):
 
         response = self.client.get(reverse("linkding:bookmarks.index"))
 
-        # Should not render toasts container
-        self.assertContains(response, '<div class="message-list">', count=0)
-        # Should not render toasts
-        self.assertContains(response, '<div class="toast">', count=0)
+        # Should not render fixed notice container
+        self.assertContains(response, '<div class="toast-notice-fixed">', count=0)
+        # Should not render notice items
+        self.assertContains(response, '<div class="toast-notice">', count=0)
 
     def test_form_tag(self):
         self.create_toast()
@@ -79,17 +79,12 @@ class ToastsViewTestCase(TestCase, BookmarkFactoryMixin):
 
     def test_toast_content(self):
         toast = self.create_toast()
-        expected_toast = f"""
-            <div class="toast d-flex">
-                {toast.message}
-                <button type="submit" name="toast" value="{toast.id}" class="btn btn-clear"></button>
-            </div>        
-        """
-
         response = self.client.get(reverse("linkding:bookmarks.index"))
         html = response.content.decode()
 
-        self.assertInHTML(expected_toast, html)
+        self.assertIn('class="toast-notice"', html)
+        self.assertIn(toast.message, html)
+        self.assertIn(f'name="toast" value="{toast.id}" class="toast-notice-close"', html)
 
     def test_known_toast_key_uses_localized_message(self):
         toast = Toast(

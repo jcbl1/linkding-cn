@@ -216,7 +216,7 @@ class TagsMergeViewTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
 
         self.assertInHTML(
             """
-                <div class="toast toast-success" role="alert">
+                <div data-toast-message data-toast-tone="success">
                     Successfully merged 2 tags (merge_tag1, merge_tag2) into "target_tag".
                 </div>
             """,

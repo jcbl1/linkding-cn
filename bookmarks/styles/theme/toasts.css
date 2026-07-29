@@ -1,4 +1,5 @@
-/* Toasts */
+/* 统一 Toast 基础样式 — 文档流内与浮层共用 */
+
 .toast {
   background: var(--gray-600);
   border-radius: var(--border-radius);
@@ -31,5 +32,156 @@
     &:last-child {
       margin-bottom: 0;
     }
+  }
+}
+
+/* 浮层 Toast：脱离文档流，固定定位，自动消失 */
+.toast-stack {
+  position: fixed;
+  top: var(--unit-8);
+  left: 50%;
+  z-index: calc(var(--zindex-4) + 10);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--unit-2);
+  width: min(560px, calc(100vw - var(--unit-8)));
+  pointer-events: none;
+}
+
+.toast-floating {
+  pointer-events: auto;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--unit-3);
+  padding: var(--unit-3) var(--unit-4);
+  border-radius: var(--border-radius);
+  box-shadow: var(--box-shadow-lg);
+  opacity: 0;
+  transform: translateY(calc(-1 * var(--unit-3)));
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+
+  &.toast-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  &.toast-leaving {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--unit-3)));
+  }
+
+  .toast-text {
+    flex: 1 1 auto;
+    line-height: 1.4;
+  }
+
+  .toast-close {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--unit-9);
+    height: var(--unit-9);
+    padding: 0;
+    margin: calc(-1 * var(--unit-1)) calc(-1 * var(--unit-2)) calc(-1 * var(--unit-1)) 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.85;
+    border-radius: 50%;
+
+    &:hover,
+    &:focus-visible {
+      opacity: 1;
+      background: rgba(0, 0, 0, 0.18);
+    }
+
+    &:focus-visible {
+      outline: var(--focus-outline);
+      outline-offset: 1px;
+    }
+  }
+}
+
+/* Notice — 持久提示（需要用户主动关闭）。
+   默认使用主题色，固定在顶部，不自动消失。
+   语义与 toast 不同：常驻、需确认。 */
+.toast-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--unit-3);
+  background: var(--primary-color);
+  color: var(--contrast-text-color);
+  border-radius: var(--border-radius);
+  padding: var(--layout-spacing) var(--unit-4);
+
+  .toast-notice-text {
+    flex: 1 1 auto;
+    line-height: 1.4;
+  }
+
+  .toast-notice-close {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--unit-9);
+    height: var(--unit-9);
+    padding: 0;
+    margin: calc(-1 * var(--unit-1));
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.85;
+    border-radius: 50%;
+
+    &:hover,
+    &:focus-visible {
+      opacity: 1;
+      background: rgba(0, 0, 0, 0.18);
+    }
+
+    &:focus-visible {
+      outline: var(--focus-outline);
+      outline-offset: 1px;
+    }
+  }
+
+  &.toast-notice-warning {
+    background: var(--warning-color);
+  }
+
+  &.toast-notice-success {
+    background: var(--success-color);
+  }
+
+  &.toast-notice-error {
+    background: var(--error-color);
+  }
+}
+
+/* 固定定位的 Notice 容器 — 用于需要在视口顶部持久显示的场景 */
+.toast-notice-fixed {
+  position: fixed;
+  top: var(--unit-4);
+  left: 50%;
+  z-index: calc(var(--zindex-4) + 8);
+  transform: translateX(-50%);
+  width: min(640px, calc(100vw - var(--unit-8)));
+  display: flex;
+  flex-direction: column;
+  gap: var(--unit-2);
+  pointer-events: none;
+
+  .toast-notice {
+    pointer-events: auto;
+    box-shadow: var(--box-shadow-lg);
   }
 }

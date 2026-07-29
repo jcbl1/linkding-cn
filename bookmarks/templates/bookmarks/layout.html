@@ -9,20 +9,23 @@
 
 {% include 'shared/svg_icons.html' %}
 
+{% if has_toasts %}
+  <div class="toast-notice-fixed">
+    <form action="{% url 'linkding:toasts.acknowledge' %}?return_url={{ request.path | urlencode }}" method="post">
+      {% csrf_token %}
+      {% for toast in toast_messages %}
+        <div class="toast-notice">
+          <span class="toast-notice-text">{{ toast.display_message }}</span>
+          <button type="submit" name="toast" value="{{ toast.id }}" class="toast-notice-close" aria-label="{% translate 'Dismiss' %}">
+            <svg width="14" height="14" aria-hidden="true"><use href="#ld-icon-close"></use></svg>
+          </button>
+        </div>
+      {% endfor %}
+    </form>
+  </div>
+{% endif %}
+
 <header class="container">
-    {% if has_toasts %}
-      <div class="message-list">
-        <form action="{% url 'linkding:toasts.acknowledge' %}?return_url={{ request.path | urlencode }}" method="post">
-          {% csrf_token %}
-          {% for toast in toast_messages %}
-            <div class="toast d-flex">
-              {{ toast.display_message }}
-              <button type="submit" name="toast" value="{{ toast.id }}" class="btn btn-clear"></button>
-            </div>
-          {% endfor %}
-        </form>
-      </div>
-    {% endif %}
     <div class="d-flex justify-between">
       <a href="{% url 'linkding:root' %}" class="app-link d-flex align-center">
         <img class="app-logo" src="{% static 'logo.png' %}" alt="{% translate 'Application logo' %}">

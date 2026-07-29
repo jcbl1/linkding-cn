@@ -4,6 +4,7 @@ import { HIGHLIGHT_COLORS } from "./anchoring/highlighter";
 import { READER_ICONS } from "./reader-icons";
 import { gettext, ngettext, interpolate } from "../utils/i18n.js";
 import { loadReaderSettings, saveReaderSettings } from "./reader-settings.js";
+import { showToast } from "../components/toast.js";
 
 function getCSRFToken() {
   const m = document.cookie.match(/csrftoken=([^;]+)/);
@@ -33,7 +34,6 @@ export class ReaderSidebar extends LitElement {
     _allTags: { type: Array, state: true }, _colorPickerId: { type: String, state: true },
     _confirmDelAnnId: { type: String, state: true },
     _renameAssetId: { type: String, state: true }, _renameValue: { type: String, state: true }, _renameOriginal: { type: String, state: true },
-    _copyToastId: { type: String, state: true },
     _buttonMode: { type: String, state: true }, _activeAnnId: { type: String, state: true },
     _tagsEditing: { type: Boolean, state: true },
   };
@@ -48,7 +48,6 @@ export class ReaderSidebar extends LitElement {
     this.bookmarksIndexUrl = "/bookmarks";
     this._allTags = []; this._colorPickerId = null; this._colorPickerLeaveTimer = null; this._confirmDelAnnId = null;
     this._renameAssetId = null; this._renameValue = ""; this._renameOriginal = "";
-    this._copyToastId = null;
     this._buttonMode = loadReaderSettings().buttonMode || "float";
     this._activeAnnId = null;
     this._tagsEditing = false;
@@ -205,7 +204,7 @@ export class ReaderSidebar extends LitElement {
 
   _reloadAssets() { this.dispatchEvent(new CustomEvent("reload-assets", { bubbles: true, composed: true, detail: { bookmarkId: this.bookmarkData?.id } })); }
   _emitAnn(id, action, extra = {}) { this.dispatchEvent(new CustomEvent("annotation-action", { bubbles: true, composed: true, detail: { id, action, ...extra } })); }
-  _handleAnnCopy(annId) { this._emitAnn(annId, "copy"); this._copyToastId = String(annId); setTimeout(() => this._copyToastId = null, 1500); }
+  _handleAnnCopy(annId) { this._emitAnn(annId, "copy"); showToast(gettext("Copied"), { tone: "success", duration: 1500 }); }
   /** 显示确认弹窗（追加到 body，fixed 定位） */
   _showPopup(btn, onConfirm) {
     document.querySelectorAll(".reader-confirm-popup").forEach(el => el.remove());
@@ -384,7 +383,7 @@ export class ReaderSidebar extends LitElement {
             ` : html``}
           </span>
           <button class="annotation-action-btn" title=${gettext("Copy")} @click=${() => this._handleAnnCopy(ann.id)} .innerHTML=${READER_ICONS["copy"]}></button>
-          ${this._copyToastId === String(ann.id) ? html`<span class="copy-toast">${gettext("Copied")}</span>` : html``}
+          
         </div>
       </div>
     `;

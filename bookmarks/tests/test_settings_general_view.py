@@ -124,8 +124,10 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
         }
 
     def assertSuccessMessage(self, html, message: str, count=1):
+        # Django messages render as hidden [data-toast-message] placeholders that the
+        # frontend bootstrap converts into floating toasts after page load.
         self.assertInHTML(
-            f'<div class="toast toast-success mb-4">{message}</div>',
+            f'<div data-toast-message data-toast-tone="success">{message}</div>',
             html,
             count=count,
         )

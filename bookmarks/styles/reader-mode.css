@@ -1422,13 +1422,6 @@ html.reader-mode {
     gap: var(--unit-2);
   }
 
-  /* Copy toast */
-  .copy-toast {
-    font-size: var(--font-size-sm);
-    color: var(--success-color);
-    white-space: nowrap;
-  }
-
   /* contenteditable styling for info fields */
   .info-editable[contenteditable="true"] {
     box-shadow: 0 0 0 1px var(--primary-color-shade);

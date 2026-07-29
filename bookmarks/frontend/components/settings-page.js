@@ -1,4 +1,5 @@
 import { Behavior, registerBehavior } from "./runtime.js";
+import { showToast } from "./toast.js";
 import { gettext } from "../utils/i18n.js";
 import { hashIconSvg } from "../utils/svg.js";
 import {
@@ -109,9 +110,7 @@ class SettingsPageBehavior extends Behavior {
   constructor(element) {
     super(element);
 
-    this.feedbackElement =
-      element.querySelector("[data-settings-feedback]") || null;
-    this.directoryLinks = Array.from(
+this.directoryLinks = Array.from(
       element.querySelectorAll(
         "[data-settings-directory] [data-settings-section-target]",
       ),
@@ -421,7 +420,6 @@ class SettingsPageBehavior extends Behavior {
     }
     this.nativeResizeState = null;
 
-    clearTimeout(this.feedbackTimeout);
   }
 
   // 事件处理：草稿恢复按钮点击。
@@ -752,7 +750,7 @@ class SettingsPageBehavior extends Behavior {
       if (showInlineStatus) {
         this.setFormStatus(form, gettext("Saved"), "success");
       } else if (showSuccessToast) {
-        this.showToast(gettext("Saved"), "success");
+        showToast(gettext("Saved"), { tone: "success" });
       }
     } catch (_error) {
       if (showInlineStatus) {
@@ -762,10 +760,7 @@ class SettingsPageBehavior extends Behavior {
           "error",
         );
       } else {
-        this.showToast(
-          gettext("Couldn't save settings. Please try again."),
-          "error",
-        );
+        showToast(gettext("Couldn't save settings. Please try again."), { tone: "error" });
       }
     } finally {
       submitState.saveInFlight = false;
@@ -808,7 +803,7 @@ class SettingsPageBehavior extends Behavior {
     });
 
     if (hasUnhandledErrors) {
-      this.showToast(gettext("Please review the highlighted fields."), "error");
+      showToast(gettext("Please review the highlighted fields."), { tone: "error" });
     }
   }
 
@@ -2516,26 +2511,6 @@ class SettingsPageBehavior extends Behavior {
     );
   }
 
-  // 反馈提示：跨表单保存结果的轻量 toast。
-  showToast(message, tone) {
-    if (!this.feedbackElement) {
-      return;
-    }
-
-    this.feedbackElement.innerHTML = "";
-    const toast = document.createElement("div");
-    toast.className = `toast toast-${tone}`;
-    toast.setAttribute("role", tone === "error" ? "alert" : "status");
-    toast.textContent = message;
-    this.feedbackElement.appendChild(toast);
-
-    clearTimeout(this.feedbackTimeout);
-    this.feedbackTimeout = setTimeout(() => {
-      if (toast.isConnected) {
-        toast.remove();
-      }
-    }, 2400);
-  }
 }
 
 registerBehavior("ld-settings-page", SettingsPageBehavior);

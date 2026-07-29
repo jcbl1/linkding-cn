@@ -17,20 +17,18 @@
     </div>
 
     {% if success_message %}
-      <div class="toast toast-success mb-4">{{ success_message }}</div>
+      <div hidden><div data-toast-message data-toast-tone="success">{{ success_message }}</div></div>
     {% endif %}
     {% if error_message %}
-      <div class="toast toast-error mb-4">{{ error_message }}</div>
+      <div hidden><div data-toast-message data-toast-tone="error">{{ error_message }}</div></div>
     {% endif %}
     {% if error_details %}
-      <div class="toast toast-error mb-4">
+      <div hidden><div data-toast-message data-toast-tone="error">
         {% for message in error_details %}
           <div>{{ message }}</div>
         {% endfor %}
-      </div>
+      </div></div>
     {% endif %}
-    <div class="settings-feedback" data-settings-feedback></div>
-
     <div class="settings-layout">
       <div class="settings-content">
         <section id="settings-interface" class="settings-section" aria-labelledby="settings-interface-heading">
