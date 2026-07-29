@@ -10,6 +10,7 @@ from django.db.models import QuerySet
 import mimetypes
 from django.http import (
     FileResponse,
+    HttpResponse,
     HttpResponseBadRequest,
     HttpResponseNotFound,
     HttpResponseForbidden,
@@ -691,11 +692,44 @@ def share(request: HttpRequest, bookmark_id: int | str):
     bookmark.save()
 
 
+# 兜底 favicon.svg 内容的 ETag 组件，模块加载时计算一次
+_FALLBACK_FAVICON_HASH = None
+
+
+def _get_fallback_favicon_hash() -> str:
+    global _FALLBACK_FAVICON_HASH
+    if _FALLBACK_FAVICON_HASH is not None:
+        return _FALLBACK_FAVICON_HASH
+    from django.contrib.staticfiles.finders import find
+    default_path = find('favicon.svg')
+    if default_path:
+        _FALLBACK_FAVICON_HASH = hashlib.md5(Path(default_path).read_bytes()).hexdigest()[:12]
+    else:
+        _FALLBACK_FAVICON_HASH = "no-fallback"
+    return _FALLBACK_FAVICON_HASH
+
+
+def _build_etag(domain: str, cache, has_file: bool) -> str:
+    """构建 ETag：domain + cache 状态 + 文件标识（或兜底图标 hash）。
+
+    真实图标：domain + favicon_file → 文件更换时 ETag 自动变化。
+    兜底图标：domain + status + fallback_svg_hash → 状态变更或兜底图替换时 ETag 变化。
+    """
+    if has_file and cache:
+        raw = f"{domain}|{cache.status}|{cache.favicon_file}"
+    elif cache:
+        raw = f"{domain}|{cache.status}|{_get_fallback_favicon_hash()}"
+    else:
+        raw = f"{domain}|none|{_get_fallback_favicon_hash()}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
 def favicon_image(request: HttpRequest, domain: str):
     """Favicon serving 端点。
 
     查找 FaviconCache → 有文件则返回图片，无则返回默认 favicon.svg。
-    浏览器通过 Cache-Control 缓存，减少重复请求。
+    真实图标使用强缓存（24h）+ ETag；兜底图标使用 no-cache + ETag，
+    确保后台任务完成后浏览器能立即拉取真实图标。
     """
     from bookmarks.models import FaviconCache
 
@@ -725,17 +759,39 @@ def favicon_image(request: HttpRequest, domain: str):
             if cache.next_retry_at and cache.next_retry_at <= timezone.now():
                 should_fetch = True
     if should_fetch:
+        if not cache:
+            # 先创建 PENDING 记录，防止后续重复请求入队重复任务
+            FaviconCache.objects.create(domain=domain, status=FaviconCache.STATUS_PENDING)
         from bookmarks.services.tasks import _enqueue_favicon_task
         _enqueue_favicon_task(request.user.id, domain)
 
-    # 有缓存文件且磁盘存在 → 返回图片（无论状态，过期图标仍可使用）
+    # 判断是否有真实图标文件可用
+    real_file_available = False
+    favicon_filepath = None
     if cache and cache.favicon_file:
-        filepath = favicon_loader._get_favicon_path(cache.favicon_file)
-        if filepath.is_file():
-            content_type = mimetypes.guess_type(str(filepath))[0] or 'image/png'
-            resp = FileResponse(filepath.open('rb'), content_type=content_type)
-            resp['Cache-Control'] = 'public, max-age=86400'
-            return resp
+        favicon_filepath = favicon_loader._get_favicon_path(cache.favicon_file)
+        real_file_available = favicon_filepath.is_file()
+
+    etag = _build_etag(domain, cache, real_file_available)
+
+    # 处理条件请求：ETag 匹配则返回 304
+    if_none_match = request.headers.get("If-None-Match", "")
+    if if_none_match and if_none_match == etag:
+        resp = HttpResponse(status=304)
+        resp["ETag"] = etag
+        if real_file_available:
+            resp["Cache-Control"] = "public, max-age=86400"
+        else:
+            resp["Cache-Control"] = "no-cache"
+        return resp
+
+    # 有缓存文件且磁盘存在 → 返回图片（无论状态，过期图标仍可使用）
+    if real_file_available:
+        content_type = mimetypes.guess_type(str(favicon_filepath))[0] or 'image/png'
+        resp = FileResponse(favicon_filepath.open('rb'), content_type=content_type)
+        resp["Cache-Control"] = "public, max-age=86400"
+        resp["ETag"] = etag
+        return resp
 
     # 返回默认 favicon.svg
     from django.contrib.staticfiles.finders import find
@@ -744,7 +800,8 @@ def favicon_image(request: HttpRequest, domain: str):
         resp = FileResponse(Path(default_path).open('rb'), content_type='image/svg+xml')
     else:
         resp = HttpResponseNotFound()
-    resp['Cache-Control'] = 'public, max-age=3600'
+    resp["Cache-Control"] = "no-cache"
+    resp["ETag"] = etag
     return resp
 
 
