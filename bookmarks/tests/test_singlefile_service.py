@@ -115,3 +115,24 @@ class SingleFileServiceTestCase(TestCase):
             singlefile.create_snapshot("http://example.com", self.temp_html_filepath)
 
             mock_process.wait.assert_called_with(timeout=180)
+
+    def test_custom_options_type_aware_bool_true(self):
+        """Boolean True values should produce flag-only args."""
+        result = singlefile.get_custom_options({"singlefile_args": {"--remove-hidden-elements": True}})
+        self.assertIn("--remove-hidden-elements", result)
+
+    def test_custom_options_type_aware_bool_false(self):
+        """Boolean False values should be skipped."""
+        result = singlefile.get_custom_options({"singlefile_args": {"--remove-hidden-elements": False}})
+        self.assertNotIn("--remove-hidden-elements", result)
+
+    def test_custom_options_type_aware_list(self):
+        """List values should be expanded."""
+        result = singlefile.get_custom_options({"singlefile_args": {"--http-header": ["X-A: 1", "X-B: 2"]}})
+        self.assertIn("--http-header=X-A: 1", result)
+        self.assertIn("--http-header=X-B: 2", result)
+
+    def test_custom_options_type_aware_string(self):
+        """String values should be key=value."""
+        result = singlefile.get_custom_options({"singlefile_args": {"--user-agent": "CustomAgent"}})
+        self.assertIn("--user-agent=CustomAgent", result)

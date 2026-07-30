@@ -377,6 +377,9 @@ LD_SNAPSHOT_DOMAIN_COOLDOWN_MAX_SEC = int(
     os.getenv("LD_SNAPSHOT_DOMAIN_COOLDOWN_MAX_SEC", 10)
 )
 LD_SNAPSHOT_DISPATCHER_TICK_SEC = int(os.getenv("LD_SNAPSHOT_DISPATCHER_TICK_SEC", 1))
+LD_METADATA_DOMAIN_COOLDOWN_SEC = int(
+    os.getenv("LD_METADATA_DOMAIN_COOLDOWN_SEC", 0)
+)
 
 # Snapshot retry delays in seconds (comma-separated).
 # The number of retries equals the length of this array.

@@ -259,7 +259,250 @@ class WebsiteLoaderTestCase(TestCase):
             )
             self.assertEqual(mock_load_page.call_count, 2)
 
+    # --- Tests for enhanced metadata extraction (built-in defaults) ---
 
+    def test_title_fallback_to_h1_with_title_class(self):
+        """When og:title and <title> are missing in head, should fallback to body via full page load."""
+        head_html = "<html><head></head></html>"
+        body_html = """<html><head></head>
+            <body><h1 class="article-title">Article Title</h1></body></html>"""
+        with (
+            mock.patch("bookmarks.services.website_loader.load_page", return_value=head_html),
+            mock.patch("bookmarks.services.website_loader.load_full_page", return_value=body_html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("Article Title", metadata.title)
+
+    def test_title_tag_takes_priority_over_h1(self):
+        """<title> tag should be preferred over h1 when og:title is missing."""
+        with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
+            mock_load.return_value = """
+            <html><head><title>Page Title</title></head>
+            <body><h1 class="article-title">Article Title</h1></body></html>
+            """
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("Page Title", metadata.title)
+
+    def test_title_fallback_to_plain_h1(self):
+        """When no og:title or <title> in head, should fallback to body h1 via full page load."""
+        head_html = "<html><head></head></html>"
+        body_html = """<html><head></head>
+            <body><h1>Just H1</h1></body></html>"""
+        with (
+            mock.patch("bookmarks.services.website_loader.load_page", return_value=head_html),
+            mock.patch("bookmarks.services.website_loader.load_full_page", return_value=body_html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("Just H1", metadata.title)
+
+    def test_title_fallback_to_title_tag(self):
+        """When no h1 at all, should use <title> tag."""
+        with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
+            mock_load.return_value = """
+            <html><head><title>Only Title Tag</title></head>
+            <body><p>No h1 here</p></body></html>
+            """
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("Only Title Tag", metadata.title)
+
+    def test_description_fallback_to_og_when_no_meta(self):
+        """When meta description is missing, should use og:description."""
+        with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
+            mock_load.return_value = """
+            <html><head>
+            <meta property="og:description" content="OG Description">
+            </head><body></body></html>
+            """
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("OG Description", metadata.description)
+
+    def test_description_fallback_to_twitter(self):
+        """When both meta and og:description missing, should use twitter:description."""
+        with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
+            mock_load.return_value = """
+            <html><head>
+            <meta name="twitter:description" content="Twitter Description">
+            </head><body></body></html>
+            """
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("Twitter Description", metadata.description)
+
+    def test_image_fallback_to_twitter_image(self):
+        """When og:image is missing, should use twitter:image."""
+        with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
+            mock_load.return_value = """
+            <html><head>
+            <meta name="twitter:image" content="https://example.com/tw.png">
+            </head><body></body></html>
+            """
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("https://example.com/tw.png", metadata.preview_image)
+
+    def test_image_fallback_to_preload_link(self):
+        """When all meta images missing, should use link[rel=preload][as=image]."""
+        with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
+            mock_load.return_value = """
+            <html><head>
+            <link rel="preload" href="https://example.com/preload.png" as="image">
+            </head><body></body></html>
+            """
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("https://example.com/preload.png", metadata.preview_image)
+
+    def test_json_ld_title_extraction(self):
+        """Should extract title from JSON-LD when no meta tags."""
+        with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
+            mock_load.return_value = """
+            <html><head></head>
+            <body>
+            <script type="application/ld+json">
+            {"@type":"Article","headline":"JSON-LD Headline","description":"JSON-LD Desc","image":"https://example.com/ld.png"}
+            </script>
+            </body></html>
+            """
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("JSON-LD Headline", metadata.title)
+            self.assertEqual("JSON-LD Desc", metadata.description)
+            self.assertEqual("https://example.com/ld.png", metadata.preview_image)
+
+    def test_json_ld_graph_extraction(self):
+        """Should handle @graph arrays in JSON-LD."""
+        with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
+            mock_load.return_value = """
+            <html><head></head>
+            <body>
+            <script type="application/ld+json">
+            {"@graph":[{"@type":"Article","name":"Graph Article","description":"Graph Desc"}]}
+            </script>
+            </body></html>
+            """
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("Graph Article", metadata.title)
+            self.assertEqual("Graph Desc", metadata.description)
+
+    def test_json_ld_skip_non_content_types(self):
+        """Should skip JSON-LD of types like WebSite, Organization."""
+        with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
+            mock_load.return_value = """
+            <html><head><title>Real Title</title></head>
+            <body>
+            <script type="application/ld+json">
+            {"@type":"WebSite","name":"Site Name"}
+            </script>
+            </body></html>
+            """
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("Real Title", metadata.title)
+
+    def test_json_ld_image_object(self):
+        """Should handle image as object with url key."""
+        with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
+            mock_load.return_value = """
+            <html><head></head>
+            <body>
+            <script type="application/ld+json">
+            {"@type":"Article","image":{"url":"https://example.com/obj.png"}}
+            </script>
+            </body></html>
+            """
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("https://example.com/obj.png", metadata.preview_image)
+
+    def test_config_selectors_take_priority_over_defaults(self):
+        """When config provides select_title, it should override defaults."""
+        with (
+            mock.patch("bookmarks.services.website_loader.load_page") as mock_load,
+            mock.patch(
+                "bookmarks.services.website_loader.search_config_for_domain",
+                return_value={"select_title": [".custom-title"]},
+            ),
+        ):
+            mock_load.return_value = """
+            <html><head><title>Default Title</title></head>
+            <body><h1 class="custom-title">Custom Title</h1></body></html>
+            """
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("Custom Title", metadata.title)
+
+    def test_relative_image_url_is_resolved(self):
+        """Relative image URLs should be resolved to absolute."""
+        with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
+            mock_load.return_value = """
+            <html><head>
+            <meta property="og:image" content="/images/photo.png">
+            </head><body></body></html>
+            """
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("https://example.com/images/photo.png", metadata.preview_image)
+
+
+    def test_no_full_page_fallback_when_title_found_in_head(self):
+        """Should NOT load full page when title is found in head."""
+        head_html = """<html><head>
+            <title>Head Title</title>
+            <meta property="og:title" content="OG Title">
+            </head></html>"""
+        with (
+            mock.patch("bookmarks.services.website_loader.load_page", return_value=head_html),
+            mock.patch("bookmarks.services.website_loader.load_full_page") as mock_full,
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("OG Title", metadata.title)
+            mock_full.assert_not_called()
+
+    def test_full_page_fallback_called_when_title_missing_in_head(self):
+        """Should load full page when title is missing in head."""
+        head_html = "<html><head><meta name='description' content='desc'></head></html>"
+        body_html = """<html><head></head>
+            <body><h1 class="article-title">Body Title</h1></body></html>"""
+        with (
+            mock.patch("bookmarks.services.website_loader.load_page", return_value=head_html),
+            mock.patch("bookmarks.services.website_loader.load_full_page", return_value=body_html) as mock_full,
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+            mock_full.assert_called_once()
+            self.assertEqual("Body Title", metadata.title)
+
+
+    def test_full_page_fallback_uses_config_selectors(self):
+        """Body fallback should use config select_title when provided."""
+        head_html = "<html><head></head></html>"
+        body_html = """<html><head></head>
+            <body><h1 class="my-custom-title">Custom Body Title</h1></body></html>"""
+        with (
+            mock.patch("bookmarks.services.website_loader.load_page", return_value=head_html),
+            mock.patch("bookmarks.services.website_loader.load_full_page", return_value=body_html),
+            mock.patch(
+                "bookmarks.services.website_loader.search_config_for_domain",
+                return_value={"select_title": [".my-custom-title"]},
+            ),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual("Custom Body Title", metadata.title)
+
+    def test_load_full_page_has_rate_limiting(self):
+        """load_full_page should also apply per-domain rate limiting."""
+        with (
+            mock.patch("bookmarks.services.website_loader.requests.get") as mock_get,
+            mock.patch("bookmarks.services.website_loader._throttle_domain") as mock_wait,
+        ):
+            mock_response = mock.Mock()
+            mock_response.encoding = "utf-8"
+            mock_response.text = "<html></html>"
+            mock_get.return_value = mock_response
+            website_loader.load_full_page("https://example.com")
+            mock_wait.assert_called_once_with("example.com")
+
+    def test_empty_response_returns_empty_string(self):
+        """load_page should return empty string for empty response, not 'None'."""
+        with mock.patch("bookmarks.services.website_loader.requests.get") as mock_get:
+            mock_response = mock.Mock()
+            mock_response.status_code = 200
+            mock_response.iter_content = mock.Mock(return_value=iter([]))
+            mock_get.return_value.__enter__ = mock.Mock(return_value=mock_response)
+            mock_get.return_value.__exit__ = mock.Mock(return_value=False)
+            result = website_loader.load_page("https://example.com")
+            self.assertEqual("", result)
 class ContentTypeDetectionTestCase(TestCase):
     def test_detect_content_type_returns_content_type_from_head_request(self):
         with mock.patch("requests.head") as mock_head:
