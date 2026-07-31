@@ -416,6 +416,8 @@ def _guess_content_type(url: str, body: bytes) -> str:
         return "image/gif"
     if body[:4] == b"RIFF":
         return "image/webp"
+    if b"<svg" in body[:256] or body[:5] == b"<?xml":
+        return "image/svg+xml"
     if body[:2] == b"\x00\x00":
         return "image/x-icon"
     if body[:2] == b"\xff\xd8":
@@ -660,7 +662,7 @@ def fetch_and_save_favicon(domain: str, scheme: str = "https", timeout: int = 10
             body = extracted
             content_type = "image/png"
 
-    file_extension = mimetypes.guess_extension(content_type) or ".png"
+    file_extension = mimetypes.guess_extension(content_type.split(";")[0].strip()) or ".png"
     name = domain_to_filename(domain)
     favicon_file = f"{name}{file_extension}"
     favicon_path = _get_favicon_path(favicon_file)
