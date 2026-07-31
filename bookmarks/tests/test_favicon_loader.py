@@ -127,7 +127,7 @@ class FaviconLoaderTestCase(TestCase):
             self.assertTrue(self.icon_exists("other_domain_com.png"))
 
     def test_fetch_replaces_existing_variant(self):
-        """新扩展名的文件会替换旧扩展名的变体。"""
+        """下载新文件后旧变体保留（清理由 _fetch_domain_favicon_task 在缓存更新后统一执行）。"""
         with mock.patch("requests.get") as mock_get:
             mock_get.return_value = self.create_mock_response(
                 content_type="image/x-icon",
@@ -147,8 +147,8 @@ class FaviconLoaderTestCase(TestCase):
 
         self.assertEqual(result, "example_com.png")
         self.assertTrue(self.icon_exists("example_com.png"))
-        self.assertFalse(self.icon_exists("example_com.ico"))
-        self.assertEqual(self.count_icons(), 1)
+        self.assertTrue(self.icon_exists("example_com.ico"))  # 旧变体保留，任务层负责清理
+        self.assertEqual(self.count_icons(), 2)  # 新旧文件共存，任务层负责清理
         self.assertTrue(self.get_icon_data("example_com.png").startswith(bytes([0x89, 0x50, 0x4E, 0x47])))
 
     def test_fetch_returns_empty_on_request_error(self):

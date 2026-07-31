@@ -308,6 +308,13 @@ LD_ENABLE_REFRESH_FAVICONS = os.getenv("LD_ENABLE_REFRESH_FAVICONS", True) in (
     "1",
 )
 
+# Favicon 定时刷新计划（标准 cron 五字段：分钟 小时 日 月 星期）
+# 默认为每 7 天凌晨 0:00 执行
+# 设为空字符串或 "off" 可禁用定时刷新
+LD_FAVICON_REFRESH_SCHEDULE = os.getenv(
+"LD_FAVICON_REFRESH_SCHEDULE", "0 0 */7 * *"
+)
+
 # Quick tags icon cache
 LD_ICON_FOLDER = os.path.join(BASE_DIR, "data", "icons")
 LD_DEFAULT_PRESET_ICON_NAMES = [

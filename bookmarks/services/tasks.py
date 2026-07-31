@@ -151,11 +151,10 @@ def ensure_favicon(user: User, url: str):
     """确保指定 URL 的域名有 favicon。
 
     策略：
-    - 磁盘有文件 → 同步 DB 记录，过期则后台静默刷新
+    - 磁盘有文件 → 同步 DB 记录
     - 磁盘无文件但 DB 有缓存 → 按状态处理（pending 等待/failed 到期重试/missing 不重试）
     - 无任何缓存 → 入队获取任务
 
-    stale-while-revalidate：旧缓存在新缓存下载成功前保留，用户始终能看到图标。
     """
     if not is_favicon_feature_active(user):
         return
@@ -173,10 +172,6 @@ def ensure_favicon(user: User, url: str):
     if cache and cache.status == FaviconCache.STATUS_SUCCESS and cache.favicon_file:
         # DB 有记录 → 验证磁盘文件（isfile 比 os.listdir 快得多）
         if favicon_loader._get_favicon_path(cache.favicon_file).is_file():
-            if cache.fetched_at:
-                stale_threshold = timezone.now() - timedelta(days=1)
-                if cache.fetched_at < stale_threshold:
-                    _enqueue_favicon_task(user.id, domain)
             return
         # 磁盘文件丢失 → 继续到步骤 2 重新获取
 
@@ -301,6 +296,8 @@ def _fetch_domain_favicon_task(user_id: int, domain: str):
             cache.retry_count = 0
             cache.next_retry_at = None
             cache.save()
+            # 缓存已更新 → 安全清理该域名的旧扩展名变体
+            favicon_loader._remove_existing_variants(domain, keep_filename=favicon_file)
         else:
             # MISSING 状态下的重试失败
             if cache.status == FaviconCache.STATUS_MISSING:
@@ -394,6 +391,110 @@ def rename_favicon_for_domain_config(user, old_config_str: str, new_config_str: 
     """
 
 
+
+# ---------------------------------------------------------------------------
+# Favicon 定时刷新（periodic task）
+# ---------------------------------------------------------------------------
+
+
+def _parse_cron_schedule(cron_str: str) -> dict | None:
+    """解析五字段 cron 表达式为 huey crontab 的 kwargs。
+
+    标准 cron 格式：分钟 小时 日 月 星期
+    空字符串或 "off" 表示禁用定时刷新。
+    解析失败时回退到默认值 "0 0 */7 * *"。
+    """
+    if not cron_str or cron_str.strip().lower() == "off":
+        return None
+    fields = cron_str.strip().split()
+    if len(fields) != 5:
+        cron_str = "0 0 */7 * *"
+        fields = cron_str.split()
+    return {
+        "minute": fields[0],
+        "hour": fields[1],
+        "day": fields[2],
+        "month": fields[3],
+        "day_of_week": fields[4],
+    }
+
+
+def _cron_interval_seconds(schedule: dict) -> int:
+    """从 cron schedule 估算最小间隔（秒），用于 staleness 过滤。
+
+    day_of_week 非 * → 周期间隔（7 天）
+    day 为 */N → N 天
+    day 为 * → 每天
+    day 为逗号分隔日期 → 计算最小间隔天数
+    其他 → 默认 7 天
+    """
+    day = schedule.get("day", "*")
+    dow = schedule.get("day_of_week", "*")
+
+    if dow != "*":
+        return 7 * 86400
+
+    if day.startswith("*/"):
+        try:
+            n = int(day[2:])
+            if n > 0:
+                return n * 86400
+        except ValueError:
+            pass
+
+    if day == "*":
+        return 86400
+
+    if "," in day:
+        try:
+            days = sorted(int(d.strip()) for d in day.split(",") if d.strip())
+            if len(days) >= 2:
+                gaps = [days[i + 1] - days[i] for i in range(len(days) - 1)]
+                wrap = days[0] + 31 - days[-1]
+                return min(gaps + [wrap]) * 86400
+        except (ValueError, IndexError):
+            pass
+
+    return 7 * 86400
+
+_favicon_refresh_schedule = _parse_cron_schedule(
+    settings.LD_FAVICON_REFRESH_SCHEDULE
+)
+if _favicon_refresh_schedule:
+    @huey.periodic_task(crontab(**_favicon_refresh_schedule))
+    def _scheduled_favicon_refresh_task():
+        """定时刷新超过间隔天数的 favicon（基于 cron 估算的间隔）。
+
+        遍历 FaviconCache 中所有 SUCCESS 状态的域名，
+        入队重新获取任务。已存在且最新的 favicon 不会被覆盖（stale-while-revalidate）。
+        运行时检查 LD_ENABLE_REFRESH_FAVICONS 和 LD_DISABLE_BACKGROUND_TASKS。
+        """
+        if not settings.LD_ENABLE_REFRESH_FAVICONS:
+            return
+        if settings.LD_DISABLE_BACKGROUND_TASKS:
+            return
+
+        from bookmarks.models import FaviconCache
+
+
+        interval = _cron_interval_seconds(_favicon_refresh_schedule)
+        stale_threshold = timezone.now() - timedelta(seconds=interval)
+
+        domains = list(
+            FaviconCache.objects.filter(
+                status=FaviconCache.STATUS_SUCCESS,
+                fetched_at__lt=stale_threshold,
+            )
+            .exclude(favicon_file="")
+            .values_list("domain", flat=True)
+        )
+        for domain in domains:
+            _fetch_domain_favicon_task(0, domain)
+
+        logger.info(
+            "Scheduled favicon refresh: enqueued %d domains (stale > %d days)",
+            len(domains), interval // 86400,
+        )
 # ---------------------------------------------------------------------------
 # 预览图加载
 # ---------------------------------------------------------------------------

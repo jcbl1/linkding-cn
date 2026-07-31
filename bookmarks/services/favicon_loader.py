@@ -673,6 +673,5 @@ def fetch_and_save_favicon(domain: str, scheme: str = "https", timeout: int = 10
         f.write(body)
     os.rename(str(tmp_path), str(favicon_path))
 
-    _remove_existing_variants(domain, keep_filename=favicon_file)
     logger.info(f"Saved favicon: {domain} -> {favicon_file}")
     return favicon_file
