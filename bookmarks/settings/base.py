@@ -355,6 +355,12 @@ LD_DISABLE_ASSET_UPLOAD = os.getenv("LD_DISABLE_ASSET_UPLOAD", False) in (
     "true",
     "1",
 )
+
+# Browser engine: chromium (default) or cloakbrowser
+LD_BROWSER_ENGINE = os.getenv("LD_BROWSER_ENGINE", "chromium")
+# CloakBrowser license key for premium features
+CLOAKBROWSER_LICENSE_KEY = os.getenv("CLOAKBROWSER_LICENSE_KEY", "")
+
 LD_SINGLEFILE_PATH = os.getenv("LD_SINGLEFILE_PATH", "single-file")
 LD_SINGLEFILE_UBLOCK_OPTIONS = os.getenv(
     "LD_SINGLEFILE_UBLOCK_OPTIONS",

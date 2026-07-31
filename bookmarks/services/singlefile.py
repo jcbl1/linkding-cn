@@ -15,6 +15,27 @@ class SingleFileError(Exception):
 logger = logging.getLogger(__name__)
 
 
+def _resolve_browser_path() -> str | None:
+    """当 LD_BROWSER_ENGINE=cloakbrowser 时，解析 cloakbrowser 二进制路径。
+
+    返回 None 表示让 SingleFile 按默认行为从 PATH 寻找 chromium。
+    放在 required_options（最低优先级），用户可通过 LD_SINGLEFILE_OPTIONS 显式覆盖。
+    """
+    engine = getattr(settings, 'LD_BROWSER_ENGINE', 'chromium')
+    if engine != 'cloakbrowser':
+        return None
+    try:
+        from cloakbrowser import ensure_binary
+        return ensure_binary()
+    except ImportError:
+        logger.warning(
+            "LD_BROWSER_ENGINE=cloakbrowser but cloakbrowser package not installed. "
+            "Install with: pip install cloakbrowser && python -m cloakbrowser install. "
+            "Falling back to system chromium."
+        )
+        return None
+
+
 def get_custom_options(config: dict):
     if config:
         custom_options = config.get("singlefile_args")
@@ -57,6 +78,10 @@ def create_snapshot(url: str, filepath: str, config: dict = None):
         "--browser-arg=--disable-blink-features=AutomationControlled",
         f"--user-agent={settings.LD_DEFAULT_USER_AGENT}",
     ]
+    # 自动解析 cloakbrowser 路径（最低优先级，允许显式覆盖）
+    browser_path = _resolve_browser_path()
+    if browser_path:
+        required_options.append(f"--browser-executable-path={browser_path}")
 
     # Args that allow multiple values (not deduplicated by name)
     multi_value_arg_list = [

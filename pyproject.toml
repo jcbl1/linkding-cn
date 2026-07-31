@@ -33,6 +33,14 @@ dev = [
     "pytest-xdist>=3.8.0",
     "ruff>=0.15.12",
 ]
+
+# CloakBrowser (stealth Chromium) — 可选，非 Docker 环境安装:
+#   uv sync --group cloakbrowser
+#   python -m cloakbrowser install
+cloakbrowser = [
+    "cloakbrowser>=0.5.3",
+    "playwright>=1.59.0",
+]
 # For PostgreSQL support, use the binary release for development so that not
 # everyone needs to build from source. For production, use a separate dependency
 # group that builds the driver from source. uv also needs to build it from
