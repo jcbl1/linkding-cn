@@ -181,7 +181,8 @@ def _find_cached_favicon_file(domain: str) -> str | None:
             # 校验文件内容是否为有效图片（防止残留损坏文件）
             try:
                 with open(path, "rb") as f:
-                    header = f.read(16)
+                    # 512 字节覆盖 <?xml 前缀 SVG 的 _is_valid_image 检测
+                    header = f.read(512)
                 if not _is_valid_image(header):
                     logger.warning(f"Removing corrupted favicon file: {filename}")
                     path.unlink()
