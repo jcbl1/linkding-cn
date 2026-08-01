@@ -20,6 +20,78 @@ logger = logging.getLogger(__name__)
 # mimetypes of the Docker image
 mimetypes.add_type("image/x-icon", ".ico")
 
+# ---------------------------------------------------------------------------
+# 统一图片格式检测
+# ---------------------------------------------------------------------------
+
+# 二进制格式签名表（magic bytes → MIME type）
+# 所有二进制格式只需前 16 字节即可判断
+_BINARY_SIGNATURES = [
+    (b"\x89PNG", "image/png"),           # PNG
+    (b"\xff\xd8\xff", "image/jpeg"),   # JPEG
+    (b"GIF8", "image/gif"),              # GIF87a / GIF89a
+    (b"\x00\x00\x01\x00", "image/x-icon"),  # ICO
+    (b"RIFF", "image/webp"),             # WebP (需额外校验 WEBP 签名)
+]
+
+_SVG_SCAN_BYTES = 1024  # SVG: 需要扫描更多字节找 <svg 标签
+
+
+def _detect_image_type(data: bytes) -> str | None:
+    """从文件头检测图片 MIME type，返回 MIME string 或 None。
+
+    统一的图片格式检测，供 _is_valid_image 和 _guess_content_type 共用。
+    渐进式判断：先快速匹配二进制格式（前 16 字节），再判断 SVG（需更多字节）。
+    """
+    if len(data) < 8:
+        return None
+
+    # 快速匹配二进制格式（前 16 字节足够）
+    for sig, mime in _BINARY_SIGNATURES:
+        if data[:len(sig)] == sig:
+            # WebP 需要额外校验 RIFF....WEBP 签名
+            if mime == "image/webp":
+                if len(data) >= 12 and data[8:12] == b"WEBP":
+                    return "image/webp"
+                continue
+            return mime
+
+    # SVG: 文件头是 < 时才可能是 XML/SVG
+    if data[:1] == b"<":
+        if b"<svg" in data[:_SVG_SCAN_BYTES]:
+            return "image/svg+xml"
+        if data[:5] == b"<?xml" and b"<svg" in data[:_SVG_SCAN_BYTES]:
+            return "image/svg+xml"
+
+    return None
+
+
+def _detect_image_type_from_file(path: Path) -> str | None:
+    """渐进式读取文件检测图片类型，最小化磁盘 I/O。
+
+    先读 32 字节判断二进制格式，只有文件头是 '<' 时才读 1024 字节找 SVG。
+    """
+    try:
+        with open(path, "rb") as f:
+            header = f.read(32)
+    except OSError:
+        return None
+
+    # 快速匹配二进制格式
+    detected = _detect_image_type(header)
+    if detected:
+        return detected
+
+    # 只有文件头是 < 时才可能是 SVG，需要读更多字节
+    if header[:1] == b"<":
+        try:
+            with open(path, "rb") as f:
+                header = f.read(_SVG_SCAN_BYTES)
+            return _detect_image_type(header)
+        except OSError:
+            return None
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -179,15 +251,13 @@ def _find_cached_favicon_file(domain: str) -> str | None:
         path = _get_favicon_path(filename)
         if path.exists():
             # 校验文件内容是否为有效图片（防止残留损坏文件）
-            try:
-                with open(path, "rb") as f:
-                    # 512 字节覆盖 <?xml 前缀 SVG 的 _is_valid_image 检测
-                    header = f.read(512)
-                if not _is_valid_image(header):
-                    logger.warning(f"Removing corrupted favicon file: {filename}")
+            # 使用渐进式读取：先 32 字节，只有可能是 SVG 时才读 1024 字节
+            if not _detect_image_type_from_file(path):
+                logger.warning(f"Removing corrupted favicon file: {filename}")
+                try:
                     path.unlink()
-                    continue
-            except OSError:
+                except OSError:
+                    pass
                 continue
             entry = (ext_priority.get(ext.lower(), 99), filename)
             if base == name:
@@ -224,6 +294,81 @@ def _find_cached_favicon_file(domain: str) -> str | None:
     return None
 
 
+
+
+def _scan_favicon_folder() -> dict[str, str]:
+    """扫描 favicon 目录，返回 {domain: best_favicon_file} 映射。
+
+    一次 I/O 完成整个目录扫描，供批量任务使用，避免重复 os.listdir。
+    返回的 dict 中 domain 不含 scheme，value 是最佳优先级的文件名。
+    """
+    favicon_folder = Path(settings.LD_FAVICON_FOLDER)
+    if not favicon_folder.exists():
+        return {}
+
+    ext_priority = {".svg": 0, ".png": 1, ".jpg": 2, ".jpeg": 3, ".ico": 4, ".gif": 5}
+
+    # 反向映射：filename_base -> domain
+    # 新约定：domain_to_filename(domain) 直接对应
+    # 旧约定：https_{name} / http_{name} 对应同一个 domain
+
+    # 第一步：收集所有有效图片文件，按 base 分组
+    candidates_by_base: dict[str, list[tuple[int, str]]] = {}
+
+    for filename in os.listdir(settings.LD_FAVICON_FOLDER):
+        base, ext = os.path.splitext(filename)
+        ext_lower = ext.lower()
+        if ext_lower not in ext_priority:
+            continue
+
+        path = _get_favicon_path(filename)
+        if not path.exists():
+            continue
+
+        # 渐进式校验是否为有效图片
+        if not _detect_image_type_from_file(path):
+            continue
+
+        priority = ext_priority[ext_lower]
+        candidates_by_base.setdefault(base, []).append((priority, filename))
+
+    # 第二步：为每个 base 选择最佳文件，构建 domain -> filename 映射
+    result: dict[str, str] = {}
+    for base, candidates in candidates_by_base.items():
+        candidates.sort(key=lambda c: c[0])
+        best_file = candidates[0][1]
+
+        # 反推 domain：去掉 scheme 前缀
+        if base.startswith("https_"):
+            domain = base[6:]  # 去掉 https_
+        elif base.startswith("http_"):
+            domain = base[5:]  # 去掉 http_
+        else:
+            domain = base
+
+        # 如果已有新命名文件，跳过旧命名（与 _find_cached_favicon_file 逻辑一致）
+        if domain in result:
+            # 已有新命名，旧命名跳过
+            existing_is_new = not result[domain].startswith(("https_", "http_"))
+            current_is_new = not base.startswith(("https_", "http_"))
+            if existing_is_new:
+                continue
+            if current_is_new:
+                result[domain] = best_file
+                continue
+
+        result[domain] = best_file
+
+    return result
+
+
+def _find_cached_favicon_file_from_scan(domain: str, scan_result: dict[str, str]) -> str | None:
+    """从预扫描结果中查找域名对应的 favicon 文件名。
+
+    scan_result 是 _scan_favicon_folder() 的返回值。
+    """
+    name = domain_to_filename(domain)
+    return scan_result.get(name)
 def _remove_existing_variants(domain: str, keep_filename: str | None = None):
     """删除指定域名的所有旧扩展名变体（保留 keep_filename），包括旧 scheme 前缀命名。
 
@@ -402,7 +547,11 @@ def _download_favicon_candidate(url: str, timeout: int, use_browser_ua: bool = F
 
 
 def _guess_content_type(url: str, body: bytes) -> str:
-    """从 URL 扩展名和文件头猜测 content_type。"""
+    """从 URL 扩展名和文件头猜测 content_type。
+
+    优先使用 URL 扩展名（mimetypes 库），不可靠时回退到文件头检测。
+    """
+    # 1. 先信 URL 扩展名
     ext = ""
     if "." in url.split("/")[-1]:
         ext = url.rsplit(".", 1)[-1].split("?")[0].lower()
@@ -410,18 +559,13 @@ def _guess_content_type(url: str, body: bytes) -> str:
         ct = mimetypes.guess_type(f"x.{ext}")[0]
         if ct:
             return ct
-    if body[:4] == b"\x89PNG":
-        return "image/png"
-    if body[:3] == b"GIF":
-        return "image/gif"
-    if body[:4] == b"RIFF":
-        return "image/webp"
-    if b"<svg" in body[:256] or body[:5] == b"<?xml":
-        return "image/svg+xml"
-    if body[:2] == b"\x00\x00":
-        return "image/x-icon"
-    if body[:2] == b"\xff\xd8":
-        return "image/jpeg"
+
+    # 2. 回退到文件头检测
+    detected = _detect_image_type(body)
+    if detected:
+        return detected
+
+    # 3. 未知格式默认 PNG
     return "image/png"
 
 
@@ -556,28 +700,8 @@ def _try_fetch_from_providers(domain: str, scheme: str = "https", timeout: int =
 
 
 def _is_valid_image(data: bytes) -> bool:
-    """Check if data starts with known image file magic bytes."""
-    if len(data) < 8:
-        return False
-    # PNG
-    if data[:4] == b"\x89PNG":
-        return True
-    # JPEG
-    if data[:3] == b"\xff\xd8\xff":
-        return True
-    # GIF
-    if data[:4] == b"GIF8":
-        return True
-    # ICO
-    if data[:4] == b"\x00\x00\x01\x00":
-        return True
-    # SVG: must contain <svg tag (not just any < character like HTML)
-    if b"<svg" in data[:256] or (data[:5] == b"<?xml" and b"<svg" in data[:512]):
-        return True
-    # WebP
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return True
-    return False
+    """校验数据是否为支持的图片格式。"""
+    return _detect_image_type(data) is not None
 
 
 

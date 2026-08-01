@@ -339,6 +339,9 @@ def _batch_load_favicons_task(user_id: int):
     user = User.objects.get(id=user_id)
     domain_config = parse_domain_roots(user.profile.custom_domain_root)
 
+    # 预扫描磁盘目录（一次 I/O），避免重复 os.listdir
+    disk_scan = favicon_loader._scan_favicon_folder()
+
     # 收集所有唯一域名，逐个检查是否已有成功缓存（exists 查询走索引，不加载全量到内存）
     raw_urls = Bookmark.objects.filter(
         owner=user, is_deleted=False
@@ -348,9 +351,26 @@ def _batch_load_favicons_task(user_id: int):
         domain = _resolve_domain(url, domain_config)
         if not domain or domain in domains_to_fetch:
             continue
-        if not FaviconCache.objects.filter(
+        if FaviconCache.objects.filter(
             domain=domain, status=FaviconCache.STATUS_SUCCESS
         ).exists():
+            continue
+
+        # 从预扫描结果中查找（无额外磁盘 I/O）
+        cached_file = favicon_loader._find_cached_favicon_file_from_scan(domain, disk_scan)
+        if cached_file:
+            FaviconCache.objects.update_or_create(
+                domain=domain,
+                defaults={
+                    "favicon_file": cached_file,
+                    "status": FaviconCache.STATUS_SUCCESS,
+                    "fetched_at": timezone.now(),
+                    "retry_count": 0,
+                    "next_retry_at": None,
+                },
+            )
+            logger.debug(f"Synced manually placed favicon for {domain}: {cached_file}")
+        else:
             domains_to_fetch.add(domain)
 
     # 为缺少 favicon 的域名入队
@@ -474,8 +494,11 @@ if _favicon_refresh_schedule:
         if settings.LD_DISABLE_BACKGROUND_TASKS:
             return
 
-        from bookmarks.models import FaviconCache
-
+        # 检查是否有任何用户启用了 favicon，如果没有则跳过刷新
+        from bookmarks.models import FaviconCache, UserProfile
+        if not UserProfile.objects.filter(enable_favicons=True).exists():
+            logger.debug("No users with favicons enabled, skipping scheduled refresh")
+            return
 
         interval = _cron_interval_seconds(_favicon_refresh_schedule)
         stale_threshold = timezone.now() - timedelta(seconds=interval)
