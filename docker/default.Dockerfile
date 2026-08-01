@@ -68,11 +68,13 @@ COPY . .
 COPY --from=node-build /etc/linkding/bookmarks/static bookmarks/static/
 # copy bundled defuddle for server-side reader processing
 COPY --from=node-build /etc/linkding/bookmarks/services/vendor/defuddle.js bookmarks/services/vendor/defuddle.js
+COPY --from=node-build /etc/linkding/node_modules/defuddle/README.md /tmp/defuddle-README.md
 # Activate virtual env
 ENV VIRTUAL_ENV=/etc/linkding/.venv
 ENV PATH="/etc/linkding/.venv/bin:$PATH"
 # Generate static files
-RUN mkdir data && \
+RUN \
+    mkdir -p data && \
     python manage.py compilemessages && \
     python manage.py collectstatic
 
@@ -127,6 +129,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # install single-file from fork for now, which contains several hotfixes
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     npm install -g https://github.com/sissbruecker/single-file-cli/tarball/4c54b3bc704cfb3e96cec2d24854caca3df0b3b6
+# playwright Python package (needed by browser_fallback in chromium mode)
+RUN pip install --no-cache-dir playwright>=1.59.0
+# node_modules for JS runtime scripts (playwright-core)
+COPY package.json package-lock.json /tmp/npm-runtime/
+RUN cd /tmp/npm-runtime && npm ci --no-cache --omit=dev && mkdir -p /opt/node-runtime && mv node_modules /opt/node-runtime/ && rm -rf /tmp/npm-runtime
+ENV NODE_PATH=/opt/node-runtime/node_modules
 # copy uBlock
 COPY --from=ublock-build /etc/linkding/uBOLite.chromium.mv3 uBOLite.chromium.mv3/
 # create chromium profile folder for user running background tasks and set permissions
@@ -135,6 +143,7 @@ RUN mkdir -p chromium-profile &&  \
     chown -R www-data:www-data uBOLite.chromium.mv3
 # enable snapshot support
 ENV LD_ENABLE_SNAPSHOTS=True
+ENV LD_BROWSER_ENGINE=chromium
 # 确保chromium可以运行
 # 参考[这个issue](https://github.com/hardkoded/puppeteer-sharp/issues/2633)
 ENV XDG_CONFIG_HOME=/tmp/.chromium

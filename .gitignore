@@ -186,6 +186,10 @@ typings/
 /bookmarks/static/reader.js*
 /bookmarks/static/reader-pending.js*
 /bookmarks/static/reader-unavailable.js*
+/bookmarks/static/site-adapters.js*
+/bookmarks/static/site-adapters.css
+/bookmarks/static/cookies.js*
+/bookmarks/static/credentials.js*
 # CSS compilation output
 /bookmarks/static/theme-*.css*
 # esbuild bundled defuddle (built from defuddle_entry.js)
@@ -194,8 +198,8 @@ typings/
 /static
 # Build output, etc.
 /tmp
-# Database file
-/data
+# Runtime data: database, user config, caches, cookies, logs
+/data/*
 # ublock + chromium
 /uBOLite.chromium.mv3
 /chromium-profile

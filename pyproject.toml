@@ -10,7 +10,6 @@ dependencies = [
     "bleach-allowlist>=1.0.3",
     "django>=6.0",
     "djangorestframework>=3.17.1",
-    "drissionpage>=4.1.1.2",
     "huey>=3.0.0",
     "markdown>=3.10.2",
     "mozilla-django-oidc>=5.0.2",
@@ -20,6 +19,7 @@ dependencies = [
     "supervisor>=4.3.0",
     "uwsgi>=2.0.31",
     "waybackpy>=3.0.6",
+    "cryptography>=41.0.0",
 ]
 
 [dependency-groups]
