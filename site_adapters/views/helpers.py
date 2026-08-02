@@ -51,20 +51,8 @@ def site_adapters_required(view_func):
     return login_required(wrapped)
 
 
-def _resolve_site_adapter_path(path: str) -> str:
-    base_dir = os.path.abspath(_get_base_dir())
-    full_path = os.path.abspath(os.path.normpath(os.path.join(base_dir, path)))
-    if os.path.commonpath([base_dir, full_path]) != base_dir:
-        raise ValueError('invalid path')
-    return full_path
 
 
-def _resolve_adapter_path(path: str) -> str:
-    adapters_dir = os.path.abspath(_get_adapters_dir())
-    full_path = os.path.abspath(os.path.normpath(os.path.join(adapters_dir, path)))
-    if os.path.commonpath([adapters_dir, full_path]) != adapters_dir:
-        raise ValueError('invalid path')
-    return full_path
 
 
 def _resolve_domain_path(filename: str) -> str:
@@ -87,19 +75,10 @@ def _is_safe_subscription_name(name: str) -> bool:
     return bool(re.match(r'^[A-Za-z0-9][A-Za-z0-9._-]*$', name))
 
 
-def _is_safe_resource_name(name: str) -> bool:
-    return bool(name) and name == os.path.basename(name) and not name.startswith('.') and '..' not in name
 
 
-def _resource_full_path_and_rel(path: str) -> tuple[str, str]:
-    full_path = _resolve_site_adapter_path(path)
-    base_dir = os.path.abspath(_get_base_dir())
-    rel_path = os.path.relpath(full_path, base_dir)
-    return full_path, '' if rel_path == '.' else rel_path
 
 
-def _is_readonly_resource_path(rel_path: str) -> bool:
-    return rel_path == 'etc' or rel_path.startswith('etc' + os.sep)
 
 
 # ---------------------------------------------------------------------------
@@ -240,13 +219,17 @@ def _adapter_from_post(request) -> dict:
 
     if is_remote_source(source):
         validate_subscription_url(source)
-    elif source and not os.path.exists(source):
-        raise ValueError(f'local adapter file not found: {source}')
 
-    if not _is_safe_subscription_name(name):
-        raise ValueError('invalid adapter name')
     if adapter_id and not _is_safe_subscription_name(adapter_id):
         raise ValueError('invalid adapter id')
+    if name and not _is_safe_subscription_name(name):
+        raise ValueError('invalid adapter name')
+
+    if source and not is_remote_source(source):
+        from site_adapters.services.subscriptions import resolve_adapter_path
+        full = resolve_adapter_path(name, source)
+        if not os.path.exists(full):
+            raise ValueError(f'local adapter file not found: {source} (resolved: {full})')
 
     try:
         update_interval = int(interval_raw or 86400)
@@ -302,6 +285,7 @@ def _adapter_cache_info(adapter: dict) -> dict:
                     'version': meta.get('version', ''),
                     'changelog': meta.get('changelog', ''),
                     'source_name': meta.get('name', ''),
+                    'description': meta.get('description', ''),
                 })
         except (json.JSONDecodeError, OSError):
             pass
@@ -315,6 +299,7 @@ def _adapter_payload(index: int, adapter) -> dict:
     item.setdefault('name', '')
     item.setdefault('update_interval', 86400)
     item.setdefault('enabled', True)
+    item.setdefault('description', '')
     item['index'] = index
     from site_adapters.services.base import _adapter_dir
     item['dir'] = _adapter_dir(item)

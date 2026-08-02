@@ -103,23 +103,57 @@
             <input type="radio" name="view-mode" value="domains">
             <span>{% translate "Domains" %}</span>
           </label>
-          <label class="settings-segmented-option">
-            <input type="radio" name="view-mode" value="resources">
-            <span>{% translate "Resources" %}</span>
-          </label>
         </div>
       </div>
 
       <div id="view-subscriptions" class="settings-section wa-editor-section">
         <div class="wa-sub-card">
           <div class="wa-sub-toolbar">
-            <span class="wa-sub-toolbar-spacer"></span>
             <button type="button" class="btn btn-sm btn-primary" id="btn-add-subscription">
               <svg width="14" height="14" aria-hidden="true"><use href="#ld-icon-plus"></use></svg> {% translate "Add" %}
+            </button>
+            <span class="wa-sub-toolbar-spacer"></span>
+            <button type="button" class="btn btn-sm wa-sub-icon-btn" id="btn-update-all" title="{% translate 'Update All' %}" aria-label="{% translate 'Update All' %}">
+              <svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-refresh"></use></svg>
             </button>
           </div>
           <div id="subscription-list" class="wa-sub-list"></div>
         </div>
+      </div>
+
+      <!-- Subscription Modal -->
+      <div id="sub-modal-overlay" class="wa-modal-overlay" hidden>
+        <div class="wa-modal" role="dialog" aria-modal="true" aria-labelledby="sub-modal-title">
+          <div class="wa-modal-header">
+            <h3 id="sub-modal-title">{% translate "Add Subscription" %}</h3>
+            <button type="button" class="btn btn-sm wa-icon-btn" id="btn-modal-close" aria-label="{% translate 'Close' %}">
+              <svg width="20" height="20" aria-hidden="true"><use href="#ld-icon-close"></use></svg>
+            </button>
+          </div>
+          <form id="sub-modal-form" class="wa-modal-body">
+            <input type="hidden" name="action" value="add">
+            <input type="hidden" name="index" value="">
+            <input type="hidden" name="id" value="">
+            <div class="wa-form-group">
+              <label class="wa-form-label" for="sub-source">{% translate "Source" %} <span class="wa-required">*</span></label>
+              <input type="text" id="sub-source" name="source" class="form-input" required autocomplete="off" placeholder="https://... or ./rsshub/adapters.jsonc">
+              <span class="form-input-hint">{% translate "Remote: https:// URL. Local: relative path under adapters/." %}</span>
+            </div>
+            <div class="wa-form-group">
+              <label class="wa-form-label" for="sub-name">{% translate "Name" %} <span class="wa-optional">({% translate 'optional' %})</span></label>
+              <input type="text" id="sub-name" name="name" class="form-input" autocomplete="off" placeholder="{% translate 'Auto-detected from source' %}">
+            </div>
+            <div class="wa-form-group">
+              <label class="wa-form-label" for="sub-interval">{% translate "Update Interval (s)" %}</label>
+              <input type="number" id="sub-interval" name="update_interval" class="form-input" min="60" value="86400" step="1">
+            </div>
+          </form>
+          <div class="wa-modal-footer">
+            <button type="button" class="btn" id="btn-modal-cancel">{% translate "Cancel" %}</button>
+            <button type="button" class="btn btn-primary" id="btn-modal-save">{% translate "Save" %}</button>
+          </div>
+        </div>
+      </div>
       </div>
 
       <div id="view-domains" class="settings-section wa-editor-section" hidden>
@@ -199,40 +233,6 @@
         <textarea id="global-editor" hidden>{{ global_content }}</textarea>
       </div>
 
-      <div id="view-resources" class="settings-section wa-editor-section" hidden>
-        <div class="wa-split-layout">
-          <div class="wa-resource-panel">
-            <div class="wa-resource-toolbar">
-              <button type="button" class="btn btn-sm wa-icon-btn" id="btn-resource-new-folder" title="{% translate 'New Folder' %}" aria-label="{% translate 'New Folder' %}">
-                <svg width="24" height="24" aria-hidden="true" focusable="false"><use href="#ld-icon-folder-plus"></use></svg>
-              </button>
-              <button type="button" class="btn btn-sm wa-icon-btn" id="btn-resource-new-file" title="{% translate 'New File' %}" aria-label="{% translate 'New File' %}">
-                <svg width="24" height="24" aria-hidden="true" focusable="false"><use href="#ld-icon-file-plus"></use></svg>
-              </button>
-              <button type="button" class="btn btn-sm wa-icon-btn" id="btn-resource-rename" title="{% translate 'Rename' %}" aria-label="{% translate 'Rename' %}" hidden>
-                <svg width="24" height="24" aria-hidden="true" focusable="false"><use href="#ld-icon-edit"></use></svg>
-              </button>
-              <button type="button" class="btn btn-sm btn-error wa-icon-btn" id="btn-resource-delete" title="{% translate 'Delete' %}" aria-label="{% translate 'Delete' %}" hidden>
-                <svg width="24" height="24" aria-hidden="true" focusable="false"><use href="#ld-icon-delete"></use></svg>
-              </button>
-            </div>
-            <div id="resource-tree" class="wa-resource-tree"></div>
-          </div>
-          <div class="wa-editor-panel">
-            <div id="resource-editor-header" class="wa-editor-header" hidden>
-              <span id="resource-filename" class="wa-editor-title"></span>
-              <div class="wa-toolbar-spacer"></div>
-              <button type="button" class="btn btn-sm btn-primary" id="btn-save-resource" hidden>{% translate "Save" %}</button>
-            </div>
-            <div id="resource-empty" class="wa-editor-empty">
-              {% translate "Select a file from the tree" %}
-            </div>
-            <div id="resource-content" class="wa-editor-content" hidden>
-              <div id="cm-resource-container" class="wa-editor-cm"></div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   </main>
 
@@ -254,9 +254,6 @@
       subscriptionDomainToggle: "{% url 'linkding:settings.site_adapters.subscription_domain_toggle' %}",
       subscriptionManage: "{% url 'linkding:settings.site_adapters.subscription_manage' %}",
       viewSnapshot: "{% url 'linkding:settings.site_adapters.view_snapshot' %}",
-      resources: "{% url 'linkding:settings.site_adapters.resources' %}",
-      resourceSave: "{% url 'linkding:settings.site_adapters.resource_save' %}",
-      resourceManage: "{% url 'linkding:settings.site_adapters.resource_manage' %}",
     };
   </script>
   <script src="{% static 'site-adapters.js' %}?v={{ app_version }}"></script>

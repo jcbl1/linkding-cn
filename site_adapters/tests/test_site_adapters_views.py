@@ -26,23 +26,6 @@ class SiteAdaptersViewsTestCase(TestCase):
         self.settings_override.disable()
         shutil.rmtree(self.base_dir)
 
-    def test_resources_lists_directories_before_files(self):
-        os.makedirs(os.path.join(self.base_dir, "domains"))
-        with open(os.path.join(self.base_dir, "global.jsonc"), "w", encoding="utf-8") as f:
-            f.write("{}")
-        with open(os.path.join(self.base_dir, "notes.txt"), "w", encoding="utf-8") as f:
-            f.write("notes")
-
-        response = self.client.get(reverse("linkding:settings.site_adapters.resources"))
-
-        self.assertEqual(response.status_code, 200)
-        items = response.json()["items"]
-        self.assertEqual(
-            [item["name"] for item in items],
-            ["cookies", "domains", "logs", "scripts", "test_assets", "global.jsonc", "notes.txt"],
-        )
-        self.assertEqual([item["is_dir"] for item in items], [True, True, True, True, True, False, False])
-
     def test_site_adapters_requires_superuser(self):
         user = User.objects.create_user("site-adapter-nonstaff", password="password")
         self.client.force_login(user)
@@ -161,122 +144,6 @@ class SiteAdaptersViewsTestCase(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
-    def test_resources_reads_full_file_content(self):
-        os.makedirs(os.path.join(self.base_dir, "scripts"))
-        content = "\n".join(f"line {i}" for i in range(68))
-        with open(os.path.join(self.base_dir, "scripts", "notes.txt"), "w", encoding="utf-8") as f:
-            f.write(content)
-
-        response = self.client.get(
-            reverse("linkding:settings.site_adapters.resources"),
-            {"path": "scripts/notes.txt"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["content"], content)
-
-    def test_resource_save_writes_global_jsonc_at_root(self):
-        os.makedirs(os.path.join(self.base_dir, "domains"))
-
-        response = self.client.post(
-            reverse("linkding:settings.site_adapters.resource_save"),
-            {"path": "global.jsonc", "content": '{"*": {"http": {"timeout": 7}}}'},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(os.path.exists(os.path.join(self.base_dir, "global.jsonc")))
-        self.assertFalse(os.path.exists(os.path.join(self.base_dir, "domains", "global.jsonc")))
-
-    def test_resource_save_updates_global_scope_only(self):
-        with open(os.path.join(self.base_dir, "global.jsonc"), "w", encoding="utf-8") as f:
-            f.write('{\n  // keep this\n  "_subscriptions": [{"name": "demo"}],\n  "*": {"http": {"timeout": 5}}\n}\n')
-
-        response = self.client.post(
-            reverse("linkding:settings.site_adapters.resource_save"),
-            {
-                "path": "global.jsonc",
-                "scope": "*",
-                "content": '{"http": {"timeout": 7}}',
-            },
-        )
-
-        self.assertEqual(response.status_code, 200)
-        with open(os.path.join(self.base_dir, "global.jsonc"), encoding="utf-8") as f:
-            content = f.read()
-        config = parse_jsonc(content)
-        self.assertIn("// keep this", content)
-        self.assertEqual(config["_subscriptions"][0]["name"], "demo")
-        self.assertEqual(config["*"]["http"]["timeout"], 7)
-
-    def test_resource_save_rejects_path_traversal(self):
-        response = self.client.post(
-            reverse("linkding:settings.site_adapters.resource_save"),
-            {"path": "../outside.txt", "content": "nope"},
-        )
-
-        self.assertEqual(response.status_code, 400)
-
-    def test_resource_manage_creates_deletes_and_moves_resources(self):
-        response = self.client.post(
-            reverse("linkding:settings.site_adapters.resource_manage"),
-            {"action": "create_dir", "path": "scripts", "name": "helpers"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(os.path.isdir(os.path.join(self.base_dir, "scripts", "helpers")))
-
-        response = self.client.post(
-            reverse("linkding:settings.site_adapters.resource_manage"),
-            {"action": "create_file", "path": "scripts/helpers", "name": "cleanup.js"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        source = os.path.join(self.base_dir, "scripts", "helpers", "cleanup.js")
-        self.assertTrue(os.path.exists(source))
-
-        response = self.client.post(
-            reverse("linkding:settings.site_adapters.resource_manage"),
-            {"action": "move", "path": "scripts/helpers/cleanup.js", "target_dir": "scripts"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(os.path.exists(source))
-        moved = os.path.join(self.base_dir, "scripts", "cleanup.js")
-        self.assertTrue(os.path.exists(moved))
-
-        response = self.client.post(
-            reverse("linkding:settings.site_adapters.resource_manage"),
-            {"action": "rename", "path": "scripts/cleanup.js", "name": "cleaned.js"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["path"], "scripts/cleaned.js")
-        self.assertFalse(os.path.exists(moved))
-        self.assertTrue(os.path.exists(os.path.join(self.base_dir, "scripts", "cleaned.js")))
-
-        response = self.client.post(
-            reverse("linkding:settings.site_adapters.resource_manage"),
-            {"action": "delete", "path": "scripts/helpers"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(os.path.exists(os.path.join(self.base_dir, "scripts", "helpers")))
-
-    def test_resource_manage_rejects_etc_and_path_traversal(self):
-        response = self.client.post(
-            reverse("linkding:settings.site_adapters.resource_manage"),
-            {"action": "create_file", "path": "etc", "name": "local.txt"},
-        )
-
-        self.assertEqual(response.status_code, 400)
-
-        response = self.client.post(
-            reverse("linkding:settings.site_adapters.resource_manage"),
-            {"action": "delete", "path": "../outside.txt"},
-        )
-
-        self.assertEqual(response.status_code, 400)
-
     def test_validate_can_scope_to_current_domain_file(self):
         os.makedirs(os.path.join(self.base_dir, "domains"))
         with open(os.path.join(self.base_dir, "domains", "good.com.jsonc"), "w", encoding="utf-8") as f:
@@ -371,7 +238,9 @@ class SiteAdaptersViewsTestCase(TestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_subscription_manage_adds_subscription_and_preserves_global_comments(self):
-        with open(os.path.join(self.base_dir, "global.jsonc"), "w", encoding="utf-8") as f:
+        config_path = os.path.join(self.adapters_dir, "config.jsonc")
+        os.makedirs(self.adapters_dir, exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as f:
             f.write('{\n  // keep this\n  "*": {"http": {"timeout": 5}}\n}\n')
 
         with mock.patch("site_adapters.services.subscriptions.validate_subscription_url") as validate_url:
@@ -379,8 +248,9 @@ class SiteAdaptersViewsTestCase(TestCase):
                 reverse("linkding:settings.site_adapters.subscription_manage"),
                 {
                     "action": "add",
-                    "url": "https://example.test/site-adapters.jsonc",
-                    "name": "demo",
+                    "source": "https://example.test/site-adapters.jsonc",
+                    "id": "demo",
+                    "name": "Demo Adapter",
                     "update_interval": "3600",
                 },
             )
@@ -487,8 +357,10 @@ class SiteAdaptersViewsTestCase(TestCase):
         self.assertEqual(config["_subscriptions"][1]["update_interval"], 7200)
 
     def test_subscription_manage_update_fetches_subscription_and_reports_failure(self):
-        with open(os.path.join(self.base_dir, "global.jsonc"), "w", encoding="utf-8") as f:
-            f.write('{"_subscriptions": [{"url": "https://a.test/site-adapters.jsonc", "name": "a"}]}')
+        # Write config.jsonc with _adapters format
+        config_path = os.path.join(self.adapters_dir, "config.jsonc")
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write('{"_adapters": [{"id": "a", "name": "my-adapter", "source": "https://a.test/site-adapters.jsonc"}]}')
 
         with mock.patch("site_adapters.services.subscriptions.fetch_subscription", return_value="/tmp/sub") as fetch:
             response = self.client.post(
@@ -497,7 +369,7 @@ class SiteAdaptersViewsTestCase(TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        fetch.assert_called_once_with("https://a.test/site-adapters.jsonc", name="a", force=True)
+        fetch.assert_called_once_with("https://a.test/site-adapters.jsonc", name="my-adapter", force=False)
 
         with mock.patch("site_adapters.services.subscriptions.fetch_subscription", return_value=None):
             response = self.client.post(
@@ -505,7 +377,7 @@ class SiteAdaptersViewsTestCase(TestCase):
                 {"action": "update", "index": "0"},
             )
 
-        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.status_code, 500)
 
 
 class HelpersTestCase(TestCase):

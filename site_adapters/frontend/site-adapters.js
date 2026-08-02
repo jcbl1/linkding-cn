@@ -1,3 +1,4 @@
+import Sortable from 'sortablejs';
 (function () {
   'use strict';
 
@@ -12,7 +13,15 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
 
   function apiPost(url, data) {
     var fd = new FormData();
-    for (var k in data) { if (data.hasOwnProperty(k)) fd.append(k, data[k]); }
+    for (var k in data) {
+      if (!data.hasOwnProperty(k)) continue;
+      var v = data[k];
+      if (Array.isArray(v)) {
+        for (var i = 0; i < v.length; i++) { fd.append(k, v[i]); }
+      } else {
+        fd.append(k, v);
+      }
+    }
     return fetch(url, { method: 'POST', headers: { 'X-CSRFToken': csrfToken }, body: fd }).then(function (r) { return r.json(); });
   }
   function apiGet(url) {
@@ -32,10 +41,8 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     document.querySelectorAll('[name="view-mode"]').forEach(function (r) { r.checked = r.value === mode; });
     document.getElementById('view-subscriptions').hidden = mode !== 'subscriptions';
     document.getElementById('view-domains').hidden = mode !== 'domains';
-    document.getElementById('view-resources').hidden = mode !== 'resources';
     if (mode === 'subscriptions') loadSubscriptions();
     if (mode === 'domains') loadDomainList();
-    if (mode === 'resources') loadResourceTree('');
   }
   document.querySelectorAll('[name="view-mode"]').forEach(function (r) {
     r.addEventListener('change', function () { switchMode(this.value); });
@@ -152,119 +159,293 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
   });
 
   // ===== Subscriptions =====
-  function loadSubscriptions() { apiGet(urls.subscriptionManage).then(function (d) { renderSubscriptions(d.adapters || []); }).catch(function (e) { console.error('loadSubscriptions:', e); }); }
-  function renderSubscriptions(subs) {
+  var subData = [];
+  var subSortable = null;
+
+  function formatTimeAgo(ts) {
+    if (!ts) return gettext('never');
+    var diff = (Date.now() / 1000) - ts;
+    if (diff < 0) return gettext('just now');
+    if (diff < 60) return Math.floor(diff) + 's ago';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+  }
+
+  function formatNextFetch(lastFetch, interval) {
+    if (!lastFetch) return gettext('now');
+    var next = lastFetch + (interval || 86400);
+    var diff = next - (Date.now() / 1000);
+    if (diff <= 0) return gettext('now');
+    if (diff < 3600) return Math.ceil(diff / 60) + 'm';
+    if (diff < 86400) return Math.ceil(diff / 3600) + 'h';
+    return Math.ceil(diff / 86400) + 'd';
+  }
+
+  function loadSubscriptions() {
+    apiGet(urls.subscriptionManage).then(function (d) {
+      subData = d.adapters || [];
+      renderSubscriptions();
+    }).catch(function (e) { console.error('loadSubscriptions:', e); });
+  }
+
+  function renderSubscriptions() {
     var list = document.getElementById('subscription-list'); if (!list) return;
-    if (!subs.length) { list.innerHTML = '<p class="text-gray" style="padding:16px">' + gettext('No adapters.') + '</p>'; return; }
+    if (!subData.length) {
+      list.innerHTML = '<p class="text-gray" style="padding:16px">' + gettext('No adapters.') + '</p>';
+      return;
+    }
     var h = '';
-    subs.forEach(function (s) {
-      var label = (s.id ? s.id + '.' : '') + s.name;
-      var source = s.source || '(local)';
+    subData.forEach(function (s, i) {
+      var label = s.source_name || s.name || (s.id ? s.id : '');
+      var remote = s.source && (s.source.startsWith('https://') || s.source.startsWith('http://'));
       var enabled = s.enabled !== false;
-      h += '<div class="wa-cookie-row" style="padding:10px 12px"><div class="wa-cookie-header">';
-      h += '<strong>' + esc(label) + '</strong>';
-      h += '<code style="font-size:11px;color:var(--wa-muted)">' + esc(source) + '</code>';
-      h += '<small style="color:var(--wa-muted)">' + (s.domain_count || 0) + ' domains</small>';
-      h += '<div style="margin-left:auto;display:flex;gap:4px">';
-      if (!enabled) h += '<span class="wa-badge wa-badge-warn">disabled</span>';
-      if (s.source && s.source.startsWith('http')) h += '<button class="btn btn-sm js-sub-fetch" data-index="' + s.index + '">' + gettext('Fetch') + '</button>';
-      h += '<button class="btn btn-sm btn-error js-sub-delete" data-index="' + s.index + '">' + gettext('Delete') + '</button>';
-      h += '</div></div></div>';
+      var version = s.version || '';
+      var lastFetch = s.last_fetch || 0;
+      var interval = s.update_interval || 86400;
+      var rowCls = 'wa-sub-item' + (enabled ? '' : ' wa-sub-disabled');
+      h += '<div class="' + rowCls + '" data-index="' + i + '" draggable="true">';
+      h += '<div class="wa-sub-drag" title="' + gettext('Drag to reorder') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-grip"></use></svg></div>';
+      h += '<label class="form-switch wa-sub-toggle">';
+      h += '<input type="checkbox" ' + (enabled ? 'checked' : '') + ' data-sub-toggle="' + i + '">';
+      h += '<i class="form-icon"></i>';
+      h += '</label>';
+      h += '<div class="wa-sub-body">';
+      h += '<div class="wa-sub-view">';
+      h += '<span class="wa-sub-name">' + esc(label) + '</span>';
+      h += '<span class="wa-sub-meta">';
+      h += '<span>' + (s.domain_count || 0) + ' ' + gettext('domains') + '</span>';
+      h += '<span class="wa-sub-sep">·</span>';
+      h += '<span>' + formatTimeAgo(lastFetch) + '</span>';
+      if (version) { h += '<span class="wa-sub-sep">·</span><span>v' + esc(version) + '</span>'; }
+      h += '</span>';
+      h += '</div>';
+      h += '</div>';
+      if (!enabled) h += '<span class="wa-badge wa-badge-warn wa-sub-disabled-badge">' + gettext('disabled') + '</span>';
+      h += '<div class="wa-sub-actions">';
+      h += '<button class="btn btn-sm js-sub-edit" data-index="' + i + '" title="' + gettext('Edit') + '" aria-label="' + gettext('Edit') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-edit"></use></svg></button>';
+      if (remote) h += '<button class="btn btn-sm js-sub-update" data-index="' + i + '" title="' + gettext('Update') + '" aria-label="' + gettext('Update') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-refresh"></use></svg></button>';
+      h += '<button class="btn btn-sm btn-error js-sub-delete" data-index="' + i + '" title="' + gettext('Delete') + '" aria-label="' + gettext('Delete') + '" ld-confirm-question="' + gettext('Delete') + ' ' + esc(label) + '?" ld-confirm-danger=""><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-delete"></use></svg></button>';
+      h += '<button class="btn btn-sm js-sub-expand" data-index="' + i + '" title="' + gettext('Details') + '" aria-label="' + gettext('Details') + '"><svg width="16" height="16" aria-hidden="true" class="wa-sub-chevron"><use href="#ld-icon-chevron-down"></use></svg></button>';
+      h += '</div>';
+      h += '<div class="wa-sub-detail" hidden>';
+      h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Source') + ':</span><code>' + esc(s.source || '-') + '</code></div>';
+      if (s.id) { h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">ID:</span><code>' + esc(s.id) + '</code></div>'; }
+      if (s.source_name) { h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Name') + ':</span><span>' + esc(s.source_name) + '</span></div>'; }
+      if (s.description) { h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Description') + ':</span><span>' + esc(s.description) + '</span></div>'; }
+      h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Interval') + ':</span><span>' + esc(String(interval)) + 's (' + formatNextFetch(lastFetch, interval) + ')</span></div>';
+      h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Last fetch') + ':</span><span>' + (lastFetch ? new Date(lastFetch * 1000).toLocaleString() : '-') + '</span></div>';
+      if (version) { h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Version') + ':</span><span>v' + esc(version) + '</span></div>'; }
+      h += '</div>';
+      h += '</div>';
     });
     list.innerHTML = h;
-    list.querySelectorAll('.js-sub-fetch').forEach(function (b) { b.addEventListener('click', function () { apiPost(urls.subscriptionManage, { action: 'update', index: this.dataset.index }).then(function (r) { if (r.error) toast(r.error, 'error'); else { toast(gettext('Fetched'), 'success'); loadSubscriptions(); } }); }); });
-    list.querySelectorAll('.js-sub-delete').forEach(function (b) { b.addEventListener('click', function () { if (confirm(gettext('Delete adapter') + '?')) apiPost(urls.subscriptionManage, { action: 'delete', index: this.dataset.index }).then(function (r) { if (r.error) toast(r.error, 'error'); else loadSubscriptions(); }); }); });
+
+    // Toggle
+    list.querySelectorAll('[data-sub-toggle]').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var idx = parseInt(this.dataset.subToggle);
+        var action = this.checked ? 'enable' : 'disable';
+        apiPost(urls.subscriptionManage, { action: action, index: idx }).then(function (r) {
+          if (r.error) { toast(r.error, 'error'); loadSubscriptions(); }
+          else { subData = r.adapters || []; renderSubscriptions(); }
+        });
+      });
+    });
+
+    // Edit
+    list.querySelectorAll('.js-sub-edit').forEach(function (btn) {
+      btn.addEventListener('click', function () { openModal('edit', parseInt(this.dataset.index)); });
+    });
+
+    // Update (single)
+    list.querySelectorAll('.js-sub-update').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idx = parseInt(this.dataset.index);
+        var btnEl = this;
+        btnEl.disabled = true;
+        var origHTML = btnEl.innerHTML;
+        btnEl.innerHTML = '<svg width="16" height="16" aria-hidden="true" class="wa-spin"><use href="#ld-icon-loader"></use></svg>';
+        apiPost(urls.subscriptionManage, { action: 'update', index: idx }).then(function (r) {
+          if (r.error) { toast(r.error, 'error'); }
+          else { subData = r.adapters || []; renderSubscriptions(); toast(gettext('Updated'), 'success'); }
+        }).catch(function () { toast(gettext('Update failed'), 'error'); })
+        .finally(function () { btnEl.disabled = false; btnEl.innerHTML = origHTML; });
+      });
+    });
+
+    // Delete — use ld-confirm-popup
+    list.querySelectorAll('.js-sub-delete').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var idx = parseInt(this.dataset.index);
+        var popup = document.createElement('ld-confirm-popup');
+        popup._button = this;
+        popup._onConfirm = function () {
+          apiPost(urls.subscriptionManage, { action: 'delete', index: idx }).then(function (r) {
+            if (r.error) { toast(r.error, 'error'); }
+            else { subData = r.adapters || []; renderSubscriptions(); }
+          });
+        };
+        document.body.appendChild(popup);
+      });
+    });
+
+    // Expand/collapse
+    list.querySelectorAll('.js-sub-expand').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var row = btn.closest('.wa-sub-item');
+        var detail = row.querySelector(".wa-sub-detail");
+        var chevron = btn.querySelector('.wa-sub-chevron use');
+        if (detail.hidden) {
+          detail.hidden = false;
+          chevron.parentElement.classList.add('wa-sub-chevron-up');
+        } else {
+          detail.hidden = true;
+          chevron.parentElement.classList.remove('wa-sub-chevron-up');
+        }
+      });
+    });
+
+    // Drag-and-drop with SortableJS
+    if (subSortable) subSortable.destroy();
+    if (typeof Sortable !== 'undefined') {
+      subSortable = new Sortable(list, {
+        handle: '.wa-sub-drag',
+        animation: 150,
+        ghostClass: 'wa-sub-ghost',
+        dragClass: 'wa-sub-dragging',
+        onEnd: function () {
+          var indices = [];
+          list.querySelectorAll('.wa-sub-item').forEach(function (el) {
+            indices.push(el.dataset.index);
+          });
+          apiPost(urls.subscriptionManage, { action: 'reorder', 'indices[]': indices }).then(function (r) {
+            if (!r.error) { subData = r.adapters || []; renderSubscriptions(); }
+            else { toast(r.error, 'error'); loadSubscriptions(); }
+          });
+        }
+      });
+    }
   }
-  document.getElementById('btn-add-subscription').addEventListener('click', function () {
-    var source = prompt(gettext('Source (URL or local path):')); if (!source) return;
-    var name = prompt(gettext('Name:')); if (!name) return;
-    var adapterId = prompt(gettext('ID (optional):'));
-    var data = { action: 'add', source: source, name: name };
-    if (adapterId) data.id = adapterId;
-    apiPost(urls.subscriptionManage, data).then(function (r) { if (r.error) toast(r.error, 'error'); else loadSubscriptions(); });
+
+  // ===== Modal =====
+  function openModal(mode, index) {
+    var overlay = document.getElementById('sub-modal-overlay');
+    var form = document.getElementById('sub-modal-form');
+    var title = document.getElementById('sub-modal-title');
+    overlay.hidden = false;
+    if (mode === 'edit' && index !== undefined && subData[index]) {
+      title.textContent = gettext('Edit Subscription');
+      form.elements['action'].value = 'save';
+      form.elements['index'].value = index;
+      form.elements['id'].value = subData[index].id || '';
+      form.elements['name'].value = subData[index].source_name || subData[index].name || '';
+      form.elements['source'].value = subData[index].source || '';
+      form.elements['update_interval'].value = subData[index].update_interval || 86400;
+    } else {
+      title.textContent = gettext('Add Subscription');
+      form.elements['action'].value = 'add';
+      form.index.value = '';
+      form.reset();
+      form.elements['update_interval'].value = 86400;
+    }
+  }
+
+  function closeModal() {
+    document.getElementById('sub-modal-overlay').hidden = true;
+  }
+
+  function saveModal() {
+    var form = document.getElementById('sub-modal-form');
+    var data = {
+      action: form.elements['action'].value,
+      source: form.elements['source'].value.trim(),
+      update_interval: form.elements['update_interval'].value
+    };
+    var idVal = form.elements['id'].value.trim();
+    if (idVal) data.id = idVal;
+    var nameVal = form.elements['name'].value.trim();
+    if (nameVal) data.name = nameVal;
+    if (form.elements['index'].value) data.index = form.elements['index'].value;
+
+    apiPost(urls.subscriptionManage, data).then(function (r) {
+      if (r.error) { toast(r.error, 'error'); return; }
+      subData = r.adapters || [];
+      renderSubscriptions();
+      closeModal();
+    });
+  }
+
+  // Auto-detect name from source on blur in add mode
+  document.getElementById('sub-source').addEventListener('blur', function () {
+    var form = document.getElementById('sub-modal-form');
+    if (form.elements['action'].value !== 'add') return;
+    var source = this.value.trim();
+    var nameField = document.getElementById('sub-name');
+    if (!source) { nameField.placeholder = ''; return; } // Don't overwrite user input
+
+    // Extract a readable name from the source path
+    var cleaned = source.replace(/\\/g, '/').replace(/\/$/, '');
+    var parts = cleaned.split('/');
+    var filename = parts[parts.length - 1] || '';
+    // Remove extension
+    var basename = filename.replace(/\.(jsonc|json)$/i, '');
+    if (!basename || basename === 'adapters') {
+      // Use the parent directory name
+      basename = parts.length > 1 ? parts[parts.length - 2] : cleaned;
+    }
+    // Make it readable: replace dashes/underscores with spaces, capitalize
+    if (basename) {
+      basename = basename.replace(/[-_]/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+      nameField.placeholder = basename;
+    } else {
+      nameField.placeholder = '';
+    }
   });
 
-  // ===== Resources =====
-  function loadResourceTree(path) {
-    path = path || '';
-    apiGet(urls.resources + (path ? '?path=' + encodeURIComponent(path) : '')).then(function (d) {
-      renderResourceTree(d.path || '', d.items || []);
-    }).catch(function (e) { console.error('loadResourceTree:', e); });
-  }
-  function renderResourceTree(currentPath, items) {
-    var tree = document.getElementById('resource-tree'); if (!tree) return;
-    if (!items.length) { tree.innerHTML = '<p style="padding:12px;color:var(--wa-muted);font-size:13px">' + gettext('No files.') + '</p>'; return; }
-    var h = '';
-    if (currentPath) {
-      var parent = currentPath.replace(/\/[^/]*\/?$/, '') || '';
-      h += '<div class="wa-domain-item js-resource-dir" data-path="' + esc(parent) + '" style="color:var(--wa-accent)">&#x1F4C1; ..</div>';
-    }
-    items.forEach(function (item) {
-      var full = currentPath ? currentPath + '/' + item.name : item.name;
-      if (item.is_dir) {
-        h += '<div class="wa-domain-item js-resource-dir" data-path="' + esc(full) + '">&#x1F4C1; <span>' + esc(item.name) + '/</span></div>';
-      } else {
-        h += '<div class="wa-domain-item js-resource-file" data-path="' + esc(full) + '">&#x1F4C4; <span>' + esc(item.name) + '</span></div>';
+  document.getElementById('btn-add-subscription').addEventListener('click', function () { openModal('add'); });
+  document.getElementById('btn-modal-close').addEventListener('click', closeModal);
+  document.getElementById('btn-modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('btn-modal-save').addEventListener('click', saveModal);
+  document.getElementById('sub-modal-overlay').addEventListener('mousedown', function (e) { if (e.target === this) closeModal(); });
+
+  // ESC to close modal
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !document.getElementById('sub-modal-overlay').hidden) closeModal(); });
+
+  // Update All
+  document.getElementById('btn-update-all').addEventListener('click', function () {
+    var remoteSubs = [];
+    subData.forEach(function (s, i) {
+      if (s.enabled !== false && s.source && (s.source.startsWith('https://') || s.source.startsWith('http://'))) {
+        remoteSubs.push(i);
       }
     });
-    tree.innerHTML = h;
-    tree.querySelectorAll('.js-resource-dir').forEach(function (el) { el.addEventListener('click', function () { loadResourceTree(this.dataset.path); }); });
-    tree.querySelectorAll('.js-resource-file').forEach(function (el) { el.addEventListener('click', function () { loadResourceContent(this.dataset.path); }); });
-  }
-  function loadResourceContent(path) {
-    document.getElementById('resource-empty').hidden = true; document.getElementById('resource-content').hidden = false;
-    document.getElementById('resource-editor-header').hidden = false; document.getElementById('resource-filename').textContent = path;
-    document.getElementById('btn-save-resource').hidden = false; document.getElementById('btn-resource-delete').hidden = false;
-    document.getElementById('btn-resource-rename').hidden = false;
-    apiGet(urls.resources + '?path=' + encodeURIComponent(path)).then(function (d) {
-      var c = document.getElementById('cm-resource-container');
-      if (d.error) { c.textContent = d.error; return; }
-      c.textContent = d.content || '';
-      c.style.cssText = 'font-family:monospace;font-size:13px;white-space:pre-wrap;padding:12px;min-height:300px;outline:none;overflow:auto;background:var(--wa-surface-alt);';
-      c.contentEditable = 'true'; c.setAttribute('spellcheck', 'false'); c.dataset.currentPath = path;
-    });
-  }
-  document.getElementById('btn-save-resource').addEventListener('click', function () {
-    var p = document.getElementById('cm-resource-container').dataset.currentPath; if (!p) return;
-    apiPost(urls.resourceSave, { path: p, content: document.getElementById('cm-resource-container').textContent || '' })
-      .then(function (r) { if (r.error) toast(r.error, 'error'); else toast(gettext('Saved'), 'success'); });
-  });
-  document.getElementById('btn-resource-delete').addEventListener('click', function () {
-    var p = document.getElementById('cm-resource-container').dataset.currentPath; if (!p || !confirm(gettext('Delete') + ' ' + p + '?')) return;
-    apiPost(urls.resourceManage, { action: 'delete', path: p }).then(function (r) {
-      if (r.error) { toast(r.error, 'error'); return; }
-      document.getElementById('resource-empty').hidden = false; document.getElementById('resource-content').hidden = true;
-      document.getElementById('resource-editor-header').hidden = true; document.getElementById('btn-save-resource').hidden = true;
-      document.getElementById('btn-resource-delete').hidden = true; document.getElementById('btn-resource-rename').hidden = true;
-      loadResourceTree('');
-    });
-  });
-  document.getElementById('btn-resource-rename').addEventListener('click', function () {
-    var o = document.getElementById('cm-resource-container').dataset.currentPath; if (!o) return;
-    var nn = prompt(gettext('New name:'), o); if (!nn || nn === o) return;
-    // Extract just the basename as 'name' parameter
-    var newName = nn.indexOf('/') >= 0 ? nn.substring(nn.lastIndexOf('/') + 1) : nn;
-    apiPost(urls.resourceManage, { action: 'rename', path: o, name: newName }).then(function (r) {
-      if (r.error) { toast(r.error, 'error'); return; }
-      var newPath = r.path || (o.substring(0, o.lastIndexOf('/') + 1) + newName);
-      document.getElementById('cm-resource-container').dataset.currentPath = newPath;
-      document.getElementById('resource-filename').textContent = newPath;
-    });
-  });
-  document.getElementById('btn-resource-new-file').addEventListener('click', function () {
-    var p = prompt(gettext('File path (e.g. scripts/hello.js):')); if (!p) return;
-    var lastSlash = p.lastIndexOf('/');
-    var dir = lastSlash >= 0 ? p.substring(0, lastSlash) : '';
-    var name = lastSlash >= 0 ? p.substring(lastSlash + 1) : p;
-    apiPost(urls.resourceManage, { action: 'create_file', path: dir, name: name }).then(function (r) { if (r.error) toast(r.error, 'error'); else { loadResourceTree(dir); loadResourceContent(p); } });
-  });
-  document.getElementById('btn-resource-new-folder').addEventListener('click', function () {
-    var p = prompt(gettext('Folder path (e.g. scripts/):')); if (!p) return;
-    p = p.replace(/\/+$/, '');
-    var lastSlash = p.lastIndexOf('/');
-    var dir = lastSlash >= 0 ? p.substring(0, lastSlash) : '';
-    var name = lastSlash >= 0 ? p.substring(lastSlash + 1) : p;
-    apiPost(urls.resourceManage, { action: 'create_dir', path: dir, name: name }).then(function (r) { if (r.error) toast(r.error, 'error'); else loadResourceTree(''); });
+    if (!remoteSubs.length) { toast(gettext('No remote adapters to update'), 'info'); return; }
+
+    var btn = document.getElementById('btn-update-all');
+    btn.disabled = true;
+    var origHTML = btn.innerHTML;
+    var completed = 0;
+    var errors = 0;
+
+    function updateNext() {
+      if (completed + errors >= remoteSubs.length) {
+        btn.disabled = false;
+        btn.innerHTML = origHTML;
+        loadSubscriptions();
+        toast(gettext('Updated') + ': ' + completed + '/' + remoteSubs.length + (errors ? ' (' + errors + ' ' + gettext('errors') + ')' : ''), errors ? 'warning' : 'success');
+        return;
+      }
+      var idx = remoteSubs[completed + errors];
+      btn.innerHTML = '<svg width="14" height="14" aria-hidden="true" class="wa-spin"><use href="#ld-icon-loader"></use></svg>';
+      apiPost(urls.subscriptionManage, { action: 'update', index: idx }).then(function (r) {
+        if (r.error) errors++; else completed++;
+        updateNext();
+      }).catch(function () { errors++; updateNext(); });
+    }
+    updateNext();
   });
 
   // ===== URL Test =====

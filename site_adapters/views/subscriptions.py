@@ -47,6 +47,60 @@ def subscription_manage(request):
     try:
         if action_name == 'add':
             item = _adapter_from_post(request)
+            source = item.get('source', '')
+
+            # Resolve id and name from the subscription source itself
+            from site_adapters.services.subscriptions import (
+                _read_subscription_file, resolve_adapter_path,
+                is_remote_source, fetch_subscription, _sub_name,
+            )
+
+            resolved_id = item.get('id', '')
+            resolved_name = item.get('name', '')
+
+            if source:
+                if is_remote_source(source):
+                    # Fetch the subscription file to get _meta.id and _meta.name
+                    try:
+                        tmp_path = fetch_subscription(source, name=item.get('name', ''))
+                        if tmp_path:
+                            data = _read_subscription_file(tmp_path)
+                            if data and isinstance(data.get('_meta'), dict):
+                                meta = data['_meta']
+                                resolved_id = resolved_id or meta.get('id', '')
+                                resolved_name = resolved_name or meta.get('name', '')
+                    except Exception:
+                        pass
+                else:
+                    # Local: read the file directly
+                    fp = resolve_adapter_path(item.get('name', ''), source)
+                    data = _read_subscription_file(fp)
+                    if data and isinstance(data.get('_meta'), dict):
+                        meta = data['_meta']
+                        resolved_id = resolved_id or meta.get('id', '')
+                        resolved_name = resolved_name or meta.get('name', '')
+
+            # Fallback: generate id from source if still empty
+            if not resolved_id:
+                if source:
+                    import re as _re, hashlib as _hl
+                    if is_remote_source(source):
+                        from urllib.parse import urlparse as _up
+                        p = _up(source).path.rstrip('/')
+                        fn = p.split('/')[-1] if p else ''
+                        resolved_id = _re.sub(r'\.(jsonc|json)$', '', fn) if fn else ''
+                    else:
+                        resolved_id = _re.sub(r'\.(jsonc|json)$', '', os.path.basename(source))
+                if not resolved_id:
+                    import hashlib as _hl
+                    resolved_id = _hl.md5((source or '').encode()).hexdigest()[:8]
+
+            if not resolved_name:
+                resolved_name = resolved_id
+
+            item['id'] = resolved_id
+            item['name'] = resolved_name
+
             if _has_adapter_conflict(adapters, item):
                 return JsonResponse({'error': 'adapter already exists'}, status=409)
             adapters.append(item)
@@ -55,6 +109,17 @@ def subscription_manage(request):
         elif action_name == 'save':
             index = _adapter_index(request, adapters)
             item = _adapter_from_post(request)
+            if not item.get('name'):
+                # Try _meta.name from cached file first
+                from site_adapters.services.subscriptions import _read_subscription_file, resolve_adapter_path, is_remote_source
+                old = adapters[index]
+                name_from_meta = None
+                if old.get('source'):
+                    fp = resolve_adapter_path(old.get('name', ''), old.get('source', ''))
+                    data = _read_subscription_file(fp)
+                    if data and isinstance(data.get('_meta'), dict):
+                        name_from_meta = data['_meta'].get('name')
+                item['name'] = name_from_meta or old.get('name') or item.get('id', '')
             if _has_adapter_conflict(adapters, item, ignore_index=index):
                 return JsonResponse({'error': 'adapter already exists'}, status=409)
             adapters[index] = item
@@ -64,16 +129,18 @@ def subscription_manage(request):
             index = _adapter_index(request, adapters)
             adapter = adapters.pop(index)
             _save_adapters_list(adapters)
-            # 清理缓存目录
-            cache_dir = _adapter_cache_dir(adapter)
-            adapters_root = _get_adapters_dir()
-            try:
-                # 只在目录是 adapters/ 的子目录时才删除
-                if os.path.commonpath([os.path.abspath(cache_dir), os.path.abspath(adapters_root)]) == os.path.abspath(adapters_root):
-                    if os.path.isdir(cache_dir):
-                        shutil.rmtree(cache_dir, ignore_errors=True)
-            except (ValueError, OSError):
-                pass
+            # 仅远程适配器删除缓存目录，本地适配器保留文件夹
+            source = adapter.get('source', '') if isinstance(adapter, dict) else ''
+            from site_adapters.services.subscriptions import is_remote_source
+            if is_remote_source(source):
+                cache_dir = _adapter_cache_dir(adapter)
+                adapters_root = _get_adapters_dir()
+                try:
+                    if os.path.commonpath([os.path.abspath(cache_dir), os.path.abspath(adapters_root)]) == os.path.abspath(adapters_root):
+                        if os.path.isdir(cache_dir):
+                            shutil.rmtree(cache_dir, ignore_errors=True)
+                except (ValueError, OSError):
+                    pass
 
         elif action_name == 'reorder':
             indices = request.POST.getlist('indices[]')
@@ -99,6 +166,25 @@ def subscription_manage(request):
             index = _adapter_index(request, adapters)
             adapters[index]['enabled'] = False
             _save_adapters_list(adapters)
+
+        elif action_name == 'update':
+            index = _adapter_index(request, adapters)
+            adapter = adapters[index]
+            name = adapter.get('name', '')
+            source = adapter.get('source', '')
+            if not source:
+                return JsonResponse({'error': 'no source for adapter'}, status=400)
+            from site_adapters.services.subscriptions import fetch_subscription, _read_subscription_file, resolve_adapter_path
+            path = fetch_subscription(source, name=name, force=request.POST.get('force') == '1')
+            if path:
+                # Sync _meta.name from fetched file to config name
+                data = _read_subscription_file(path)
+                if data and isinstance(data.get('_meta'), dict) and data['_meta'].get('name'):
+                    adapters[index]['name'] = data['_meta']['name']
+                    _save_adapters_list(adapters)
+                _invalidate_site_adapters_cache()
+                return _adapters_response()
+            return JsonResponse({'error': 'update failed, check logs'}, status=500)
 
         else:
             return JsonResponse({'error': f'unknown action: {action_name}'}, status=400)
