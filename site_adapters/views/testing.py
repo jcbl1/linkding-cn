@@ -5,7 +5,9 @@ import json
 import logging
 import os
 
+from django.conf import settings
 from django.http import JsonResponse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from bookmarks.services.website_loader import (
@@ -34,6 +36,13 @@ from site_adapters.views.helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+def _timestamp() -> str:
+    """返回当前时间戳字符串，遵循 TIME_ZONE 设置。"""
+    from zoneinfo import ZoneInfo
+    tz_name = getattr(settings, 'TIME_ZONE', 'UTC')
+    tz = ZoneInfo(tz_name)
+    return timezone.now().astimezone(tz).strftime('%Y%m%d%H%M%S')
 
 @site_adapters_required
 @require_POST
@@ -131,7 +140,7 @@ def _test_snapshot(url, base_dir, username, entries):
         return _test_response({'type': 'snapshot', 'result': None, 'error': '无匹配域名配置'}, entries=entries)
     from bookmarks.services.snapshot_processor import create_snapshot
     os.makedirs(TEST_ASSETS_DIR, exist_ok=True)
-    filename = 'snapshot_' + _sanitize_url_for_filename(url) + '.html'
+    filename = 'snapshot_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
     out_path = os.path.join(TEST_ASSETS_DIR, filename)
     create_snapshot(url, out_path, username=username)
     return _test_response({
@@ -154,14 +163,14 @@ def _test_reader(url, base_dir, username, entries):
     from bookmarks.services import reader_processor
     from bookmarks.services.snapshot_processor import create_snapshot
     os.makedirs(TEST_ASSETS_DIR, exist_ok=True)
-    snap_filename = 'snapshot_' + _sanitize_url_for_filename(url) + '.html'
+    snap_filename = 'snapshot_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
     snap_path = os.path.join(TEST_ASSETS_DIR, snap_filename)
     create_snapshot(url, snap_path, username=username)
     with open(snap_path, encoding='utf-8') as f:
         html = f.read()
     result = reader_processor.parse_html(html, url=url, username=username)
     reader_html = result.get('content', '')
-    reader_filename = 'article_' + _sanitize_url_for_filename(url) + '.html'
+    reader_filename = 'article_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
     reader_path = os.path.join(TEST_ASSETS_DIR, reader_filename)
     with open(reader_path, 'w', encoding='utf-8') as f:
         f.write(reader_html)
@@ -229,14 +238,14 @@ def _test_pipeline(url, base_dir, username, entries):
     reader_config = get_reader_config(url, username=username)
     metadata, sources, _ = load_website_metadata_for_test(url, username=username)
     os.makedirs(TEST_ASSETS_DIR, exist_ok=True)
-    snap_filename = 'snapshot_' + _sanitize_url_for_filename(url) + '.html'
+    snap_filename = 'snapshot_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
     snap_path = os.path.join(TEST_ASSETS_DIR, snap_filename)
     create_snapshot(url, snap_path, username=username)
     with open(snap_path, encoding='utf-8') as f:
         html = f.read()
     article = reader_processor.parse_html(html, url=url, username=username)
     reader_html = article.get('content', '')
-    reader_filename = 'article_' + _sanitize_url_for_filename(url) + '.html'
+    reader_filename = 'article_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
     reader_path = os.path.join(TEST_ASSETS_DIR, reader_filename)
     with open(reader_path, 'w', encoding='utf-8') as f:
         f.write(reader_html)

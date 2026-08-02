@@ -110,7 +110,7 @@
   font-size: 13px;
   border-bottom: 1px solid var(--wa-border);
 }
-.wa-url-dropdown-item:last-child {
+.wa-url-dropdown-item:last-of-type {
   border-bottom: none;
 }
 .wa-url-dropdown-item:hover {
@@ -139,7 +139,7 @@
   border: 1px solid var(--wa-border);
   border-radius: 4px;
   padding: var(--unit-3);
-  max-height: 400px;
+  max-height: 600px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
@@ -486,4 +486,305 @@
   .wa-editor-header {
     flex-wrap: wrap;
   }
+}
+
+/* ---------- 测试结果结构 ---------- */
+.wa-result-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--unit-3);
+}
+
+.wa-result-block {
+  background: var(--wa-surface);
+  border: 1px solid var(--wa-border);
+  border-radius: var(--wa-radius);
+  overflow: hidden;
+}
+
+.wa-result-heading {
+  font-size: var(--font-size-sm, 13px);
+  font-weight: 600;
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--wa-surface-alt);
+  border-bottom: 1px solid var(--wa-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wa-result-row {
+  display: flex;
+  align-items: flex-start;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--wa-border);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.wa-result-row:last-child {
+  border-bottom: none;
+}
+
+.wa-result-label {
+  flex-shrink: 0;
+  width: 140px;
+  color: var(--wa-muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  padding-top: 1px;
+}
+
+.wa-result-value {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+  color: var(--text-color);
+}
+.wa-result-value a {
+  color: var(--wa-accent);
+  word-break: break-all;
+}
+.wa-result-value a:hover {
+  text-decoration: underline;
+}
+
+.wa-result-empty {
+  color: var(--wa-muted);
+  font-style: italic;
+}
+
+.wa-result-error {
+  padding: 16px;
+  color: var(--ld-error, #dc2626);
+  font-weight: 500;
+}
+
+.wa-result-code {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 12px 14px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--wa-surface-alt);
+  border-radius: 0;
+}
+
+.wa-result-raw {
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: var(--unit-3);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+/* ---------- 折叠区 ---------- */
+.wa-result-collapse {
+  border: 1px solid var(--wa-border);
+  border-radius: var(--wa-radius);
+  overflow: hidden;
+  background: var(--wa-surface);
+}
+.wa-result-collapse summary {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--wa-muted);
+  background: var(--wa-surface-alt);
+  user-select: none;
+}
+.wa-result-collapse summary:hover {
+  color: var(--text-color);
+}
+.wa-result-collapse-body {
+  padding: 0;
+}
+
+/* ---------- 执行日志表格 ---------- */
+.wa-execution-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.wa-execution-table th {
+  text-align: left;
+  padding: 8px 14px;
+  background: var(--wa-hover);
+  border-bottom: 1px solid var(--wa-border);
+  font-weight: 600;
+  color: var(--wa-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.wa-execution-table td {
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--wa-border);
+  color: var(--text-color);
+}
+.wa-execution-table td code {
+  font-size: 11px;
+}
+.wa-execution-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* ---------- 预览图 ---------- */
+.wa-preview-img {
+  display: block;
+  max-width: 320px;
+  max-height: 200px;
+  margin-top: 8px;
+  border: 1px solid var(--wa-border);
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+/* ---------- 状态栏 ---------- */
+.wa-status-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+}
+.wa-status-tag-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+.wa-status-tag-error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.wa-status-tag-running {
+  background: var(--wa-hover);
+  color: var(--wa-muted);
+}
+.wa-status-time {
+  color: var(--wa-muted);
+  font-size: 12px;
+  margin-left: 4px;
+}
+.wa-status-extra {
+  color: var(--wa-muted);
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+/* ---------- Pipeline 步骤 ---------- */
+.wa-pipeline-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--wa-accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 768px) {
+  .wa-result-row {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .wa-result-label {
+    width: auto;
+  }
+  .wa-preview-img {
+    max-width: 100%;
+  }
+}
+
+/* ---------- 执行日志命令展开 ---------- */
+.wa-cmd-toggle {
+  cursor: pointer;
+  color: var(--wa-accent);
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  user-select: none;
+}
+.wa-cmd-toggle:hover {
+  text-decoration: underline;
+}
+.wa-cmd-arrow {
+  font-size: 10px;
+}
+.wa-cmd-detail {
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: var(--wa-surface-alt);
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.wa-cmd-detail code {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ---------- stdin 展示 ---------- */
+.wa-stdin-pre {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ---------- URL 历史删除按钮 ---------- */
+.wa-url-dropdown-item {
+  display: flex;
+  align-items: center;
+}
+.wa-url-dropdown-item span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wa-url-dropdown-del {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: var(--wa-muted);
+  padding: 0 4px;
+  line-height: 1;
+  border-radius: 3px;
+  margin-left: 6px;
+}
+.wa-url-dropdown-del:hover {
+  color: var(--ld-error, #dc2626);
+  background: var(--wa-hover);
+}
+.wa-url-dropdown-clear {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--wa-muted);
+  text-align: center;
+  border-top: 1px solid var(--wa-border);
+}
+.wa-url-dropdown-clear:hover {
+  color: var(--ld-error, #dc2626);
+  background: var(--wa-hover);
 }

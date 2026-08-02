@@ -261,42 +261,504 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
   var testStatus = document.getElementById('test-status');
 
   function restoreResult() {
-    try { var s = JSON.parse(localStorage.getItem(RESULT_KEY)); if (s && s.output) { resultsSection.hidden = false; document.getElementById('test-bar').hidden = false; testStatus.textContent = s.status || ''; testStatus.style.color = s.isError ? 'var(--ld-error,#dc2626)' : 'var(--ld-success,#16a34a)'; testOutput.textContent = s.output; } } catch (e) {}
+    try { var s = JSON.parse(localStorage.getItem(RESULT_KEY)); if (s && s.data) { resultsSection.hidden = false; document.getElementById('test-bar').hidden = false; renderTestResult(s.data, s.elapsed || 0, s.testType || ''); } } catch (e) {}
   }
-  function saveResult(status, output, isError) { try { localStorage.setItem(RESULT_KEY, JSON.stringify({ status: status, output: output, isError: !!isError })); } catch (e) {} }
+  function saveResult(data, elapsed, testType) { try { localStorage.setItem(RESULT_KEY, JSON.stringify({ data: data, elapsed: elapsed, testType: testType })); } catch (e) {} }
+  var blurTimer = null;
   function updateDropdown(filter) {
     testDropdown.innerHTML = ''; var q = (filter || '').toLowerCase();
     var matches = testHistory.filter(function (u) { return u.toLowerCase().indexOf(q) >= 0; });
     if (!matches.length) { testDropdown.classList.remove('open'); return; }
-    matches.slice(0, 8).forEach(function (url) { var div = document.createElement('div'); div.className = 'wa-url-dropdown-item'; div.innerHTML = '<span>' + esc(url) + '</span>'; div.addEventListener('mousedown', function (e) { e.preventDefault(); testUrlInput.value = url; testDropdown.classList.remove('open'); }); testDropdown.appendChild(div); });
+    matches.slice(0, 8).forEach(function (url) { var div = document.createElement('div'); div.className = 'wa-url-dropdown-item'; div.innerHTML = '<span>' + esc(url) + '</span><button type="button" class="wa-url-dropdown-del" title="' + gettext('Delete') + '" aria-label="' + gettext('Delete') + '">&times;</button>'; div.querySelector('span').addEventListener('mousedown', function (e) { e.preventDefault(); testUrlInput.value = url; testDropdown.classList.remove('open'); }); div.querySelector('.wa-url-dropdown-del').addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); removeHistoryItem(url); updateDropdown(testUrlInput.value); }); testDropdown.appendChild(div); });
+    if (testHistory.length > 0) { var clearDiv = document.createElement('div'); clearDiv.className = 'wa-url-dropdown-clear'; clearDiv.textContent = gettext('Clear all history'); clearDiv.addEventListener('mousedown', function (e) { e.preventDefault(); testHistory = []; try { localStorage.removeItem(URL_HISTORY_KEY); } catch (ex) {} testDropdown.innerHTML = ''; testDropdown.classList.remove('open'); }); testDropdown.appendChild(clearDiv); }
     testDropdown.classList.add('open');
   }
+  function removeHistoryItem(url) { testHistory = testHistory.filter(function (u) { return u !== url; }); try { localStorage.setItem(URL_HISTORY_KEY, JSON.stringify(testHistory)); } catch (e) {} }
   testUrlInput.addEventListener('input', function () { updateDropdown(this.value); });
-  testUrlInput.addEventListener('focus', function () { updateDropdown(this.value); });
-  testUrlInput.addEventListener('blur', function () { setTimeout(function () { testDropdown.classList.remove('open'); }, 200); });
-  document.querySelector('[data-action="clear-url"]').addEventListener('click', function () { testUrlInput.value = ''; testUrlInput.focus(); });
+  testUrlInput.addEventListener('focus', function () { if (blurTimer) { clearTimeout(blurTimer); blurTimer = null; } updateDropdown(this.value); });
+  testUrlInput.addEventListener('blur', function () { blurTimer = setTimeout(function () { testDropdown.classList.remove('open'); }, 200); });
+  document.querySelector('[data-action="clear-url"]').addEventListener('click', function () { testUrlInput.value = ''; if (blurTimer) { clearTimeout(blurTimer); blurTimer = null; } testUrlInput.focus(); });
   document.getElementById('test-form').addEventListener('submit', function (e) {
     e.preventDefault(); var url = testUrlInput.value.trim(); if (!url) return;
     testHistory = testHistory.filter(function (u) { return u !== url; }); testHistory.unshift(url); if (testHistory.length > 50) testHistory.length = 50;
     try { localStorage.setItem(URL_HISTORY_KEY, JSON.stringify(testHistory)); } catch (ex) {}
     var type = this.test_type.value, username = this.test_username.value.trim();
-    resultsSection.hidden = false; document.getElementById('test-bar').hidden = false; testStatus.textContent = gettext('Running\u2026'); testStatus.style.color = ''; testOutput.textContent = '';
+    var startTime = Date.now();
+    resultsSection.hidden = false; document.getElementById('test-bar').hidden = false; testStatus.innerHTML = '<span class="wa-status-tag wa-status-tag-running">' + esc(type) + '</span> ' + gettext('Running\u2026'); testStatus.style.color = ''; testOutput.innerHTML = '';
     apiPost(urls.action, { action: 'test', url: url, test_type: type, test_username: username || '' })
-      .then(function (r) { var isErr = !!r.error; var out = typeof r === 'string' ? r : JSON.stringify(r, null, 2); testStatus.textContent = isErr ? gettext('Error') : gettext('Completed'); testStatus.style.color = isErr ? 'var(--ld-error,#dc2626)' : 'var(--ld-success,#16a34a)'; testOutput.textContent = out; saveResult(isErr ? gettext('Error') : gettext('Completed'), out, isErr); })
-      .catch(function (err) { var msg = String(err); testStatus.textContent = gettext('Request failed'); testStatus.style.color = 'var(--ld-error,#dc2626)'; testOutput.textContent = msg; saveResult(gettext('Request failed'), msg, true); });
+      .then(function (r) {
+        var elapsed = Date.now() - startTime;
+        renderTestResult(r, elapsed, type);
+        saveResult(r, elapsed, type);
+      })
+      .catch(function (err) {
+        var elapsed = Date.now() - startTime;
+        var msg = String(err);
+        testStatus.innerHTML = '<span class="wa-status-tag wa-status-tag-error">Error</span> ' + gettext('Request failed');
+        testStatus.style.color = 'var(--ld-error,#dc2626)';
+        testOutput.innerHTML = '<div class="wa-result-section"><pre class="wa-result-raw">' + esc(msg) + '</pre></div>';
+      });
   });
   document.getElementById('btn-show-details').addEventListener('click', function () {
     var raw = document.getElementById('test-raw');
     var showingRaw = !raw.hidden;
-    if (showingRaw) { raw.hidden = true; testOutput.hidden = false; this.textContent = gettext('Show raw'); }
+    if (showingRaw) { raw.hidden = true; testOutput.hidden = false; this.textContent = gettext('Raw JSON'); }
     else { raw.hidden = false; testOutput.hidden = true; this.textContent = gettext('Show output'); }
   });
   document.getElementById('btn-clear-test').addEventListener('click', function () {
-    testOutput.textContent = ''; document.getElementById('test-raw').textContent = '';
-    testStatus.textContent = ''; document.getElementById('test-bar').hidden = true;
+    testOutput.innerHTML = ''; document.getElementById('test-raw').textContent = '';
+    testStatus.innerHTML = ''; document.getElementById('test-bar').hidden = true;
     resultsSection.hidden = true; try { localStorage.removeItem(RESULT_KEY); } catch (e) {}
   });
   document.getElementById('btn-clean-test-files').addEventListener('click', function () { apiPost(urls.action, { action: 'clean_test_files' }).then(function (r) { if (r.error) toast(r.error, 'error'); else toast(gettext('Test files cleaned'), 'success'); }); });
+
+  // ===== Test Result Renderers =====
+  function formatBytes(bytes) {
+    if (bytes == null || bytes === '') return '-';
+    var n = Number(bytes);
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1048576).toFixed(1) + ' MB';
+  }
+
+  function formatDuration(ms) {
+    if (ms == null) return '-';
+    if (ms < 1000) return ms + 'ms';
+    if (ms < 10000) return (ms / 1000).toFixed(2) + 's';
+    return (ms / 1000).toFixed(1) + 's';
+  }
+
+  function urlLink(url) {
+    if (!url) return '-';
+    return '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a>';
+  }
+
+  function renderValue(key, value) {
+    if (value == null || value === '') return '<span class="wa-result-empty">-</span>';
+    var s = String(value);
+    if (key === 'preview_image' || key === 'image') {
+      return '<div><a href="' + esc(s) + '" target="_blank" rel="noopener" class="wa-result-link">' + esc(s) + '</a></div>' +
+             '<img src="' + esc(s) + '" class="wa-preview-img" loading="lazy" onerror="this.style.display=\'none\'" alt="">';
+    }
+    if (/^https?:\/\//.test(s)) return urlLink(s);
+    if (key === 'size' || key === 'html_size' || key === 'snapshot_size') return formatBytes(value);
+    if (key === 'word_count') return Number(value).toLocaleString();
+    if (key === 'has_cookie') return value ? gettext('Yes') : gettext('No');
+    if (key === 'refreshed') return value ? gettext('Yes') : gettext('No');
+    return esc(s);
+  }
+
+  function renderSummaryRows(items) {
+    var h = '';
+    items.forEach(function (item) {
+      if (item.value == null || item.value === '') return;
+      h += '<div class="wa-result-row">';
+      h += '<span class="wa-result-label">' + esc(item.label) + '</span>';
+      h += '<span class="wa-result-value">' + (item.link ? urlLink(item.value) : renderValue(item.label, item.value)) + '</span>';
+      h += '</div>';
+    });
+    return h;
+  }
+
+  function renderResultRows(fields, handlers) {
+    handlers = handlers || {};
+    var h = '';
+    var keys = Object.keys(fields);
+    keys.forEach(function (key) {
+      var val = fields[key];
+      if (val == null || val === '') return;
+      h += '<div class="wa-result-row">';
+      h += '<span class="wa-result-label">' + esc(key) + '</span>';
+      h += '<span class="wa-result-value">';
+      if (handlers[key]) { h += handlers[key](val); }
+      else { h += renderValue(key, val); }
+      h += '</span>';
+      h += '</div>';
+    });
+    return h;
+  }
+
+  function renderCollapsible(title, contentHTML, open) {
+    return '<details class="wa-result-collapse"' + (open ? ' open' : '') + '>' +
+      '<summary>' + esc(title) + '</summary>' +
+      '<div class="wa-result-collapse-body">' + contentHTML + '</div>' +
+      '</details>';
+  }
+
+  function renderConfigJSON(config) {
+    if (!config || !Object.keys(config).length) return '';
+    return '<pre class="wa-result-code">' + esc(JSON.stringify(config, null, 2)) + '</pre>';
+  }
+
+  function extractViewFilename(viewUrl) {
+    if (!viewUrl) return '';
+    var m = viewUrl.match(/[?&]file=([^&]+)/);
+    return m ? decodeURIComponent(m[1]) : viewUrl.split('/').pop();
+  }
+  function filterExecutions(executions, steps) {
+    if (!executions || !executions.length) return [];
+    if (typeof steps === 'string') steps = [steps];
+    return executions.filter(function (e) { return steps.indexOf(e.step) >= 0; });
+  }
+
+  function renderCommandInfo(executions) {
+    if (!executions || !executions.length) return '';
+    var items = [];
+    executions.forEach(function (e) {
+      if (e.cmd && e.cmd.length) {
+        items.push({type: 'cmd', cmd: e.cmd});
+      }
+      if (e.stdin) {
+        items.push({type: 'stdin', text: e.stdin});
+      }
+    });
+    if (!items.length) return '';
+    var firstLabel = true;
+    var h = '';
+    items.forEach(function (item, i) {
+      var detailId = 'wa-summary-detail-' + i;
+      if (item.type === 'cmd') {
+        var cmd = item.cmd;
+        var fullCmd;
+        if (cmd.length > 1) {
+          var last = cmd.length - 1;
+          fullCmd = cmd.map(function(a, j) {
+            var arg;
+            if (a.indexOf(' ') < 0) {
+              arg = a;
+            } else {
+              var eq = a.indexOf('=');
+              arg = eq >= 0 ? a.substring(0, eq + 1) + '"' + a.substring(eq + 1) + '"' : '"' + a + '"';
+            }
+            return j < last ? arg + ' \\' : arg;
+          }).join('\n  ');
+        } else {
+          fullCmd = cmd[0];
+        }
+        h += '<div class="wa-result-row">';
+        h += '<span class="wa-result-label">' + (firstLabel ? gettext('command') : '') + '</span>';
+        h += '<span class="wa-result-value">';
+        h += '<span class="wa-cmd-toggle" onclick="var d=document.getElementById(\'' + detailId + '\');var s=this.querySelector(\'.wa-cmd-arrow\');if(d.hidden){d.hidden=false;s.textContent=\'\\u25BC\';}else{d.hidden=true;s.textContent=\'\\u25B6\';}">';
+        h += '<span class="wa-cmd-arrow">\u25B6</span> ' + esc(cmd[0]) + '</span>';
+        h += '<div id="' + detailId + '" class="wa-cmd-detail" hidden>';
+        h += '<code>' + esc(fullCmd) + '</code>';
+        h += '</div>';
+        h += '</span>';
+        h += '</div>';
+      } else {
+        var stdinText = item.text;
+        try { stdinText = JSON.stringify(JSON.parse(stdinText), null, 2); } catch (e) {}
+        h += '<div class="wa-result-row">';
+        h += '<span class="wa-result-label">' + gettext('stdin') + '</span>';
+        h += '<span class="wa-result-value">';
+        h += '<span class="wa-cmd-toggle" onclick="var d=document.getElementById(\'' + detailId + '\');var s=this.querySelector(\'.wa-cmd-arrow\');if(d.hidden){d.hidden=false;s.textContent=\'\\u25BC\';}else{d.hidden=true;s.textContent=\'\\u25B6\';}">';
+        h += '<span class="wa-cmd-arrow">\u25B6</span> ' + esc(stdinText.substring(0, 80)) + (stdinText.length > 80 ? '...' : '') + '</span>';
+        h += '<div id="' + detailId + '" class="wa-cmd-detail" hidden>';
+        h += '<pre class="wa-stdin-pre">' + esc(stdinText) + '</pre>';
+        h += '</div>';
+        h += '</span>';
+        h += '</div>';
+      }
+      firstLabel = false;
+    });
+    return h;
+  }
+
+  function renderExecutionLog(executions) {
+    if (!executions || !executions.length) return '';
+    var h = '<table class="wa-execution-table"><thead><tr>' +
+      '<th>' + gettext('Step') + '</th>' +
+      '<th>' + gettext('Domain') + '</th>' +
+      '<th>' + gettext('Return') + '</th>' +
+      '<th>' + gettext('Duration') + '</th>' +
+      '</tr></thead><tbody>';
+    executions.forEach(function (e) {
+      h += '<tr>';
+      h += '<td>' + esc(e.step || '-') + '</td>';
+      h += '<td><code>' + esc(e.domain_key || '-') + '</code></td>';
+      h += '<td>' + (e.returncode === 0 ? '<span class="wa-badge wa-badge-ok">0</span>' : '<span class="wa-badge wa-badge-warn">' + esc(String(e.returncode)) + '</span>') + '</td>';
+      h += '<td>' + formatDuration(e.duration_ms) + '</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+    return h;
+  }
+
+  function renderStatusBar(type, isError, elapsed, extra) {
+    var tagClass = isError ? 'wa-status-tag-error' : 'wa-status-tag-ok';
+    var tagText = isError ? gettext('Error') : gettext('Completed');
+    var h = '<span class="wa-status-tag ' + tagClass + '">' + esc(type) + '</span> ';
+    h += tagText;
+    if (extra) h += ' <span class="wa-status-extra">' + esc(extra) + '</span>';
+    if (elapsed) h += ' <span class="wa-status-time">' + formatDuration(elapsed) + '</span>';
+    return h;
+  }
+
+  function renderTestResult(r, elapsed, testType) {
+    var isError = !!r.error;
+    testStatus.innerHTML = renderStatusBar(testType || r.type, isError, elapsed);
+    testStatus.style.color = '';
+
+    document.getElementById('test-raw').textContent = JSON.stringify(r, null, 2);
+
+    if (isError) {
+      testOutput.innerHTML = '<div class="wa-result-section"><div class="wa-result-error">' + esc(r.error) + '</div></div>';
+      return;
+    }
+
+    var handlers = {
+      'config': renderConfigResult,
+      'metadata': renderMetadataResult,
+      'snapshot': renderSnapshotResult,
+      'reader': renderReaderResult,
+      'cookie': renderCookieResult,
+      'pipeline': renderPipelineResult
+    };
+    var fn = handlers[r.type];
+    if (fn) {
+      testOutput.innerHTML = fn(r);
+    } else {
+      testOutput.innerHTML = '<div class="wa-result-section"><pre class="wa-result-raw">' + esc(JSON.stringify(r, null, 2)) + '</pre></div>';
+    }
+  }
+
+  function renderConfigResult(r) {
+    var result = r.result || {};
+    var h = '<div class="wa-result-section">';
+    h += '<div class="wa-result-block">';
+    h += '<h3 class="wa-result-heading">' + gettext('Summary') + '</h3>';
+    h += renderSummaryRows([
+      {label: 'url', value: result.url, link: true},
+      {label: 'domain', value: result.domain},
+      {label: 'domain_key', value: result.domain_key}
+    ]);
+    h += renderCommandInfo(r.executions);
+    h += '</div>';
+    if (result.merged && Object.keys(result.merged).length) {
+      h += '<div class="wa-result-block">';
+      h += '<h3 class="wa-result-heading">' + gettext('Merged Config') + '</h3>';
+      h += renderConfigJSON(result.merged);
+      h += '</div>';
+    }
+    if (r.executions && r.executions.length) {
+      h += renderCollapsible(gettext('Execution Log'), renderExecutionLog(r.executions), false);
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function renderMetadataResult(r) {
+    var h = '<div class="wa-result-section">';
+    h += '<div class="wa-result-block">';
+    h += '<h3 class="wa-result-heading">' + gettext('Summary') + '</h3>';
+    h += renderSummaryRows([
+      {label: 'original_url', value: r.original_url, link: true},
+      {label: 'request_url', value: r.request_url, link: true}
+    ]);
+    h += renderCommandInfo(filterExecutions(r.executions, ['metadata', 'metadata_script']));
+    h += '</div>';
+    if (r.result) {
+      var fields = r.result;
+      if (fields && Object.keys(fields).length) {
+        h += '<div class="wa-result-block">';
+        h += '<h3 class="wa-result-heading">' + gettext('Result') + '</h3>';
+        var orderedKeys = ['title', 'description', 'preview_image'];
+        var restKeys = Object.keys(fields).filter(function (k) { return orderedKeys.indexOf(k) < 0 && k !== 'url'; });
+        var allKeys = orderedKeys.concat(restKeys);
+        var orderedFields = {};
+        allKeys.forEach(function (k) { if (k in fields) orderedFields[k] = fields[k]; });
+        h += renderResultRows(orderedFields);
+        h += '</div>';
+      }
+    }
+    if (r.config && Object.keys(r.config).length) {
+      h += renderCollapsible(gettext('Config'), renderConfigJSON(r.config), false);
+    }
+    if (r.executions && r.executions.length) {
+      h += renderCollapsible(gettext('Execution Log'), renderExecutionLog(r.executions), false);
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function renderSnapshotResult(r) {
+    var h = '<div class="wa-result-section">';
+    h += '<div class="wa-result-block">';
+    h += '<h3 class="wa-result-heading">' + gettext('Summary') + '</h3>';
+    h += renderSummaryRows([
+      {label: 'original_url', value: r.original_url, link: true},
+      {label: 'request_url', value: r.request_url, link: true}
+    ]);
+    h += renderCommandInfo(filterExecutions(r.executions, ['snapshot', 'snapshot_script']));
+    h += '</div>';
+    if (r.result) {
+      var fields = r.result;
+      h += '<div class="wa-result-block">';
+      h += '<h3 class="wa-result-heading">' + gettext('Result') + '</h3>';
+      var snapFields = {};
+      Object.keys(fields).forEach(function (k) {
+        if (k !== 'view_url' && k !== 'size') snapFields[k] = fields[k];
+      });
+      h += renderResultRows(snapFields, {
+        'file': function (val) { return '<a href="' + esc(fields.view_url) + '" target="_blank">' + esc(val) + '</a> (' + formatBytes(fields.size) + ')'; }
+      });
+      h += '</div>';
+    }
+    if (r.config && Object.keys(r.config).length) {
+      h += renderCollapsible(gettext('Config'), renderConfigJSON(r.config), false);
+    }
+    if (r.executions && r.executions.length) {
+      h += renderCollapsible(gettext('Execution Log'), renderExecutionLog(r.executions), false);
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function renderReaderResult(r) {
+    var h = '<div class="wa-result-section">';
+    h += '<div class="wa-result-block">';
+    h += '<h3 class="wa-result-heading">' + gettext('Summary') + '</h3>';
+    h += renderSummaryRows([
+      {label: 'original_url', value: r.original_url, link: true},
+      {label: 'request_url', value: r.request_url, link: true}
+    ]);
+    h += renderCommandInfo(filterExecutions(r.executions, ['reader']));
+    h += '</div>';
+    if (r.result) {
+      var fields = r.result;
+      h += '<div class="wa-result-block">';
+      h += '<h3 class="wa-result-heading">' + gettext('Result') + '</h3>';
+      h += renderResultRows({
+        'title': fields.title,
+        'word_count': fields.word_count,
+        'reader_file': fields.view_url ? extractViewFilename(fields.view_url) : null,
+        'snapshot_file': fields.snapshot_view_url ? extractViewFilename(fields.snapshot_view_url) : null
+      }, {
+        'title': function (val) { return esc(val); },
+        'word_count': function (val) { return Number(val).toLocaleString(); },
+        'reader_file': function (val) { return '<a href="' + esc(fields.view_url) + '" target="_blank">' + esc(val) + '</a> (' + formatBytes(fields.html_size) + ')'; },
+        'snapshot_file': function (val) { return '<a href="' + esc(fields.snapshot_view_url) + '" target="_blank">' + esc(val) + '</a> (' + formatBytes(fields.snapshot_size) + ')'; }
+      });
+      h += '</div>';
+    }
+    if (r.config && Object.keys(r.config).length) {
+      h += renderCollapsible(gettext('Config'), renderConfigJSON(r.config), false);
+    }
+    if (r.executions && r.executions.length) {
+      h += renderCollapsible(gettext('Execution Log'), renderExecutionLog(r.executions), false);
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function renderCookieResult(r) {
+    var h = '<div class="wa-result-section">';
+    h += '<div class="wa-result-block">';
+    h += '<h3 class="wa-result-heading">' + gettext('Summary') + '</h3>';
+    h += renderSummaryRows([
+      {label: 'domain_key', value: r.domain_key}
+    ]);
+    h += renderCommandInfo(filterExecutions(r.executions, ['cookie_refresh', 'cookie_verify']));
+    h += '</div>';
+    h += '<div class="wa-result-block">';
+    h += '<h3 class="wa-result-heading">' + gettext('Result') + '</h3>';
+    h += renderResultRows({
+      'has_cookie': r.has_cookie,
+      'cookie_preview': r.cookie_preview,
+      'refreshed': r.refreshed
+    });
+    h += '</div>';
+    if (r.executions && r.executions.length) {
+      h += renderCollapsible(gettext('Execution Log'), renderExecutionLog(r.executions), false);
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function renderPipelineResult(r) {
+    var h = '<div class="wa-result-section">';
+    if (r.config) {
+      var cfg = r.config;
+      h += '<div class="wa-result-block wa-pipeline-step">';
+      h += '<h3 class="wa-result-heading"><span class="wa-pipeline-step-num">1</span> ' + gettext('Config') + '</h3>';
+      h += renderSummaryRows([
+        {label: 'url', value: cfg.url, link: true},
+        {label: 'domain', value: cfg.domain},
+        {label: 'domain_key', value: cfg.domain_key}
+      ]);
+      h += '</div>';
+    }
+    if (r.metadata) {
+      var m = r.metadata;
+      h += '<div class="wa-result-block wa-pipeline-step">';
+      h += '<h3 class="wa-result-heading"><span class="wa-pipeline-step-num">2</span> ' + gettext('Metadata') + '</h3>';
+      h += renderSummaryRows([
+        {label: 'original_url', value: m.original_url, link: true},
+        {label: 'request_url', value: m.request_url, link: true}
+      ]);
+      if (m.result) {
+        var orderedKeys = ['title', 'description', 'preview_image'];
+        var restKeys = Object.keys(m.result).filter(function (k) { return orderedKeys.indexOf(k) < 0 && k !== 'url'; });
+        var allKeys = orderedKeys.concat(restKeys);
+        var orderedFields = {};
+        allKeys.forEach(function (k) { if (k in m.result) orderedFields[k] = m.result[k]; });
+        h += renderResultRows(orderedFields);
+      }
+      h += renderCommandInfo(filterExecutions(r.executions, ['metadata', 'metadata_script']));
+      h += '</div>';
+    }
+    if (r.snapshot) {
+      var s = r.snapshot;
+      h += '<div class="wa-result-block wa-pipeline-step">';
+      h += '<h3 class="wa-result-heading"><span class="wa-pipeline-step-num">3</span> ' + gettext('Snapshot') + '</h3>';
+      h += renderSummaryRows([
+        {label: 'original_url', value: s.original_url, link: true},
+        {label: 'request_url', value: s.request_url, link: true}
+      ]);
+      if (s.result) {
+        var pipeSnapFields = {};
+        Object.keys(s.result).forEach(function (k) {
+          if (k !== 'view_url' && k !== 'size') pipeSnapFields[k] = s.result[k];
+        });
+        h += renderResultRows(pipeSnapFields, {
+          'file': function (val) { return '<a href="' + esc(s.result.view_url) + '" target="_blank">' + esc(val) + '</a> (' + formatBytes(s.result.size) + ')'; }
+        });
+      }
+      h += renderCommandInfo(filterExecutions(r.executions, ['snapshot', 'snapshot_script']));
+      h += '</div>';
+    }
+    if (r.reader) {
+      var rd = r.reader;
+      h += '<div class="wa-result-block wa-pipeline-step">';
+      h += '<h3 class="wa-result-heading"><span class="wa-pipeline-step-num">4</span> ' + gettext('Reader') + '</h3>';
+      h += renderSummaryRows([
+        {label: 'original_url', value: rd.original_url, link: true},
+        {label: 'request_url', value: rd.request_url, link: true}
+      ]);
+      if (rd.result) {
+        h += renderResultRows({
+          'title': rd.result.title,
+          'word_count': rd.result.word_count,
+          'reader_file': rd.result.view_url ? extractViewFilename(rd.result.view_url) : null,
+          'snapshot_file': rd.result.snapshot_view_url ? extractViewFilename(rd.result.snapshot_view_url) : null
+        }, {
+          'title': function (val) { return esc(val); },
+          'word_count': function (val) { return Number(val).toLocaleString(); },
+          'reader_file': function (val) { return '<a href="' + esc(rd.result.view_url) + '" target="_blank">' + esc(val) + '</a> (' + formatBytes(rd.result.html_size) + ')'; },
+          'snapshot_file': function (val) { return '<a href="' + esc(rd.result.snapshot_view_url) + '" target="_blank">' + esc(val) + '</a> (' + formatBytes(rd.result.snapshot_size) + ')'; }
+        });
+      }
+      h += '</div>';
+    }
+    if (r.config && r.config.merged && Object.keys(r.config.merged).length) {
+      h += renderCollapsible(gettext('Merged Config'), renderConfigJSON(r.config.merged), false);
+    }
+    if (r.executions && r.executions.length) {
+      h += renderCollapsible(gettext('Execution Log'), renderExecutionLog(r.executions), false);
+    }
+    h += '</div>';
+    return h;
+  }
 
   restoreResult();
   switchMode(MODE);

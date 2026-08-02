@@ -127,6 +127,7 @@ def log_execution(
     domain_key: str,
     step: str,
     cmd: list = None,
+    stdin: str = None,
     returncode: int = 0,
     stdout: str = '',
     stderr: str = '',
@@ -147,6 +148,8 @@ def log_execution(
     }
     if cmd:
         entry['cmd'] = _redact_cmd_args(cmd)
+    if stdin:
+        entry['stdin'] = stdin[:2000]
     if stdout and not step.startswith('cookie_'):
         entry['stdout'] = _redact(stdout)[:1000]
     if stderr:
@@ -157,7 +160,7 @@ def log_execution(
     # Append to collector if active
     collector = _collector_var.get()
     if collector is not None:
-        collector.append({k: v for k, v in entry.items() if k != 'stdout'})
+        collector.append({k: v for k, v in entry.items() if k not in ('stdout', 'stderr')})
 
     # Write to JSONL file (serialized to prevent line tearing)
     try:

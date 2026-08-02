@@ -191,17 +191,19 @@ def _run_defuddle(input_data: dict, options: dict = None, timeout: int = 60) -> 
             env=env,
         )
         duration_ms = int((time.monotonic() - start) * 1000)
+        stdin_payload = json.dumps(input_data, ensure_ascii=False)
         log_execution(
             url=url, domain_key="", step="reader",
-            cmd=cmd, returncode=result.returncode,
+            cmd=cmd, stdin=stdin_payload, returncode=result.returncode,
             stdout=result.stdout.decode("utf-8", errors="replace")[:500],
             stderr=result.stderr.decode("utf-8", errors="replace")[:500],
             duration_ms=duration_ms,
         )
     except subprocess.TimeoutExpired as e:
         duration_ms = int((time.monotonic() - start) * 1000)
+        stdin_payload = json.dumps(input_data, ensure_ascii=False)
         log_execution(url=url, domain_key="", step="reader", cmd=cmd,
-                      returncode=-1, stderr="Timeout", duration_ms=duration_ms)
+                      stdin=stdin_payload, returncode=-1, stderr="Timeout", duration_ms=duration_ms)
         raise DefuddleError(f"defuddle timed out after {timeout}s") from e
 
     if result.returncode != 0:
