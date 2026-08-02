@@ -1,7 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from unittest import mock
 
-import requests
 import waybackpy
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
@@ -10,7 +9,7 @@ from huey.contrib.djhuey import HUEY as huey
 from waybackpy.exceptions import WaybackError
 
 from bookmarks.models import BookmarkAsset, UserProfile
-from bookmarks.services import favicon_loader, tasks, website_loader
+from bookmarks.services import tasks, website_loader
 from bookmarks.services.articles import (
     create_article_asset_pending,
     save_article_content,
@@ -52,7 +51,7 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         self.mock_fetch_favicon.return_value = "https_example_com.png"
 
         self.mock_find_cached_patcher = mock.patch(
-            "bookmarks.services.favicon_loader._find_cached_favicon_file"
+            "bookmarks.services.favicon_loader.find_cached_favicon_file"
         )
         self.mock_find_cached = self.mock_find_cached_patcher.start()
         self.mock_find_cached.return_value = None
@@ -284,8 +283,9 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         之后每次重试: retry_count++, delay = MISSING_RETRY_DELAYS[min(count, 10)]
         有效序列: 1(transition) → 1 → 1 → 2 → 2 → 3 → 3 → 4 → 5 → 6 → 7 → 7 → ...
         """
-        from bookmarks.models import FaviconCache
         from datetime import timedelta
+
+        from bookmarks.models import FaviconCache
         self.mock_fetch_favicon.return_value = ""
 
         # 先到达 MISSING 状态（transition 时 retry_count=0, next_retry_at=1天）
@@ -834,6 +834,41 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
 
         self.mock_assets_create_snapshot.assert_not_called()
 
+    @override_settings(LD_ENABLE_SNAPSHOTS=True)
+    def test_create_html_snapshot_task_should_not_update_bookmark_metadata(self):
+        self.setup_temp_assets_dir()
+        bookmark = self.setup_bookmark(
+            url="https://example.com",
+            title="Original title",
+            description="Original description",
+        )
+        asset = self.setup_asset(
+            bookmark=bookmark,
+            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
+            status=BookmarkAsset.STATUS_PENDING,
+            content_type=BookmarkAsset.CONTENT_TYPE_HTML,
+        )
+
+        def create_snapshot(asset):
+            self.setup_asset_file(
+                asset,
+                "<html><head><title>Snapshot title</title>"
+                '<meta name="description" content="Snapshot description">'
+                "</head></html>",
+            )
+            BookmarkAsset.objects.filter(id=asset.id).update(
+                status=BookmarkAsset.STATUS_COMPLETE,
+                content_type=BookmarkAsset.CONTENT_TYPE_HTML,
+            )
+
+        self.mock_assets_create_snapshot.side_effect = create_snapshot
+
+        tasks._create_html_snapshot_task(asset.id)
+
+        bookmark.refresh_from_db()
+        self.assertEqual(bookmark.title, "Original title")
+        self.assertEqual(bookmark.description, "Original description")
+
     @override_settings(LD_ENABLE_SNAPSHOTS=True, LD_SNAPSHOT_RETRY_DELAYS=[60, 300, 1500])
     def test_create_html_snapshot_task_should_retry_on_failure(self):
         bookmark = self.setup_bookmark(url="https://example.com")
@@ -845,7 +880,7 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         )
 
         # 模拟快照失败（设置 STATUS_FAILURE 并抛出异常，模拟真实行为）
-        def create_snapshot_failure(asset):
+        def create_snapshot_failure(asset, username=""):
             BookmarkAsset.objects.filter(id=asset.id).update(
                 status=BookmarkAsset.STATUS_FAILURE
             )
@@ -875,7 +910,7 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         )
 
         # 模拟快照失败（设置 STATUS_FAILURE 并抛出异常，模拟真实行为）
-        def create_snapshot_failure(asset):
+        def create_snapshot_failure(asset, username=""):
             BookmarkAsset.objects.filter(id=asset.id).update(
                 status=BookmarkAsset.STATUS_FAILURE
             )
@@ -905,7 +940,7 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         )
 
         # 模拟快照失败（设置 STATUS_FAILURE 并抛出异常，模拟真实行为）
-        def create_snapshot_failure(asset):
+        def create_snapshot_failure(asset, username=""):
             BookmarkAsset.objects.filter(id=asset.id).update(
                 status=BookmarkAsset.STATUS_FAILURE
             )
@@ -932,7 +967,7 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         )
 
         # 模拟快照失败（设置 STATUS_FAILURE 并抛出异常，模拟真实行为）
-        def create_snapshot_failure(asset):
+        def create_snapshot_failure(asset, username=""):
             BookmarkAsset.objects.filter(id=asset.id).update(
                 status=BookmarkAsset.STATUS_FAILURE
             )
@@ -962,7 +997,7 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         )
 
         # 模拟快照失败（设置 STATUS_FAILURE 并抛出异常，模拟真实行为）
-        def create_snapshot_failure(asset):
+        def create_snapshot_failure(asset, username=""):
             BookmarkAsset.objects.filter(id=asset.id).update(
                 status=BookmarkAsset.STATUS_FAILURE
             )
@@ -1280,7 +1315,7 @@ class ArticleTasksTestCase(TestCase, BookmarkFactoryMixin):
             "wordCount": 2,
         }
 
-    def _write_html_snapshot(self, _url, filepath):
+    def _write_html_snapshot(self, _url, filepath, **kwargs):
         with open(filepath, "w", encoding="utf-8") as snapshot_file:
             snapshot_file.write(self.snapshot_html)
 
@@ -1325,8 +1360,8 @@ class ArticleTasksTestCase(TestCase, BookmarkFactoryMixin):
         snapshot = BookmarkAsset.objects.get(asset_type=BookmarkAsset.TYPE_SNAPSHOT)
         self.assertEqual(snapshot.status, BookmarkAsset.STATUS_COMPLETE)
         self.assertTrue(self.has_asset_file(snapshot))
-        mock_parse_url.assert_called_once_with(bookmark.url)
-        mock_parse_html.assert_called_once_with(self.snapshot_html, url=bookmark.url)
+        mock_parse_url.assert_called_once_with(bookmark.url, username="testuser")
+        mock_parse_html.assert_called_once_with(self.snapshot_html, url=bookmark.url, username="testuser")
 
     def test_create_article_task_cleans_generated_snapshot_when_fallback_fails(self):
         bookmark = self.setup_bookmark(url="https://example.com/article")
@@ -1363,7 +1398,7 @@ class ArticleTasksTestCase(TestCase, BookmarkFactoryMixin):
         bookmark.refresh_from_db()
         self.assertIsNone(bookmark.latest_article)
         self.assertIsNone(bookmark.latest_snapshot)
-        mock_parse_html.assert_called_once_with(self.snapshot_html, url=bookmark.url)
+        mock_parse_html.assert_called_once_with(self.snapshot_html, url=bookmark.url, username="testuser")
 
     def test_save_article_content_uses_html_article_default_name_with_iso_date(self):
         bookmark = self.setup_bookmark(url="https://example.com/article")

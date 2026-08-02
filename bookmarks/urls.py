@@ -109,6 +109,28 @@ urlpatterns = [
     ),
     path("settings/import", views.settings.bookmark_import, name="settings.import"),
     path("settings/export", views.settings.bookmark_export, name="settings.export"),
+
+    # Site Adapters
+    path("admin/site-adapters", views.site_adapters, name="settings.site_adapters"),
+    path("admin/site-adapters/action", views.site_adapters_action, name="settings.site_adapters.action"),
+    path("admin/site-adapters/save-cookie", views.save_cookie, name="settings.site_adapters.save_cookie"),
+    path("admin/site-adapters/domain/read", views.domain_read, name="settings.site_adapters.domain_read"),
+    path("admin/site-adapters/domain/save", views.domain_save, name="settings.site_adapters.domain_save"),
+    path("admin/site-adapters/domain/create", views.domain_create, name="settings.site_adapters.domain_create"),
+    path("admin/site-adapters/domain/rename", views.domain_rename, name="settings.site_adapters.domain_rename"),
+    path("admin/site-adapters/domain/delete", views.domain_delete, name="settings.site_adapters.domain_delete"),
+    path("admin/site-adapters/domains/all", views.all_domains, name="settings.site_adapters.all_domains"),
+    path("admin/site-adapters/local-domain-toggle", views.local_domain_toggle, name="settings.site_adapters.local_domain_toggle"),
+    path("admin/site-adapters/subscription/domain-read", views.subscription_domain_read, name="settings.site_adapters.subscription_domain_read"),
+    path("admin/site-adapters/subscription/domain-toggle", views.subscription_domain_toggle, name="settings.site_adapters.subscription_domain_toggle"),
+    path("admin/site-adapters/subscription/manage", views.subscription_manage, name="settings.site_adapters.subscription_manage"),
+    path("admin/site-adapters/view-snapshot", views.view_snapshot, name="settings.site_adapters.view_snapshot"),
+    path("admin/site-adapters/resources", views.resources, name="settings.site_adapters.resources"),
+    path("admin/site-adapters/resources/save", views.resource_save, name="settings.site_adapters.resource_save"),
+    path("admin/site-adapters/resources/manage", views.resource_manage, name="settings.site_adapters.resource_manage"),
+    path("settings/site-adapters", views.cookies_page, name="settings.site_adapters_user"),
+    path("settings/site-adapters/api", views.user_cookies, name="settings.site_adapters.api"),
+    path("settings/toggles", views.user_toggles, name="settings.user_toggles"),
     # Toasts
     path("toasts/acknowledge", views.toasts.acknowledge, name="toasts.acknowledge"),
     # API

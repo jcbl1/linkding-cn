@@ -1,0 +1,489 @@
+/* ============================================================
+   Site Adapters — Admin Panel Styles
+   ============================================================ */
+
+/* ---------- 作用域变量 ---------- */
+.settings-page[ld-site-adapters] {
+  --wa-border: var(--secondary-border-color, #d1d5db);
+  --wa-surface: var(--body-color, #fff);
+  --wa-surface-alt: color-mix(in srgb, var(--body-color) 97%, var(--body-color-contrast));
+  --wa-hover: color-mix(in srgb, var(--body-color) 93%, var(--body-color-contrast));
+  --wa-active: color-mix(in srgb, var(--primary-color) 10%, var(--body-color));
+  --wa-accent: var(--primary-color, #6366f1);
+  --wa-muted: var(--secondary-text-color, #9ca3af);
+  --wa-radius: 6px;
+  --wa-panel-min-h: 420px;
+}
+
+/* ---------- 修复 settings-page 的 section grid 覆盖 ---------- */
+.settings-page[ld-site-adapters] > section,
+.settings-page[ld-site-adapters] .settings-section {
+  display: block;
+}
+
+/* hidden 属性优先级修复 */
+.settings-page[ld-site-adapters] [hidden] {
+  display: none !important;
+}
+
+/* ---------- 区域标题 ---------- */
+.wa-section-heading {
+  margin-bottom: var(--unit-3);
+}
+.wa-section-heading h2 {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  margin: 0;
+}
+/* 确保 h1/h2 与 settings-help 垂直对齐 */
+.settings-page-header .settings-label-row h1,
+.wa-section-heading .settings-label-row h2 {
+  margin-block: 0;
+}
+
+/* ---------- 测试区域 ---------- */
+.wa-test-grid {
+  margin-bottom: var(--unit-6);
+}
+
+.wa-test-row {
+  display: flex;
+  gap: var(--unit-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.wa-test-actions {
+  display: flex;
+  gap: var(--unit-2);
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* URL 输入 */
+.wa-url-history {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 200px;
+}
+.wa-url-history .form-input {
+  width: 100%;
+  padding-right: 32px;
+}
+.wa-url-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--wa-muted);
+  padding: 2px 6px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.wa-url-clear:hover {
+  color: var(--text-color);
+  background: var(--wa-hover);
+}
+.wa-url-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--wa-surface);
+  border: 1px solid var(--wa-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 100;
+  display: none;
+}
+.wa-url-dropdown.open {
+  display: block;
+}
+.wa-url-dropdown-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid var(--wa-border);
+}
+.wa-url-dropdown-item:last-child {
+  border-bottom: none;
+}
+.wa-url-dropdown-item:hover {
+  background: var(--wa-hover);
+}
+
+/* 测试结果（独立区域） */
+#test-results {
+  margin-bottom: var(--unit-8);
+}
+#test-results .wa-test-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--unit-2);
+  margin-bottom: var(--unit-3);
+}
+#test-status {
+  font-size: var(--font-size-base);
+  margin-bottom: var(--unit-2);
+}
+.wa-test-output {
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  line-height: 1.5;
+  background: var(--wa-surface);
+  border: 1px solid var(--wa-border);
+  border-radius: 4px;
+  padding: var(--unit-3);
+  max-height: 400px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+/* ---------- 工作区 ---------- */
+.wa-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--unit-4);
+}
+
+.wa-workspace-header {
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+/* 模式切换 — 紧贴内容 */
+.wa-editor-mode-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0;
+}
+
+/* 模式切换下方的面板 — 紧贴 segmented control */
+.wa-editor-mode-row + .wa-editor-section {
+  margin-top: var(--unit-2);
+}
+
+/* 订阅卡片 */
+.wa-sub-card {
+  border: 1px solid var(--wa-border);
+  border-radius: var(--wa-radius);
+  overflow: hidden;
+  background: var(--wa-surface);
+}
+.wa-sub-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--wa-border);
+}
+.wa-sub-toolbar-spacer {
+  flex: 1;
+}
+.wa-sub-list {
+  min-height: 120px;
+}
+.wa-sub-list > .wa-cookie-row {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--wa-border);
+}
+.wa-sub-list > .wa-cookie-row:last-child {
+  border-bottom: none;
+}
+.wa-sub-list > .wa-cookie-row .wa-cookie-header {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.wa-sub-help-left {
+  left: auto !important;
+  right: 0;
+}
+
+/* ---------- 分割面板 ---------- */
+.wa-split-layout {
+  display: flex;
+  border: 1px solid var(--wa-border);
+  border-radius: var(--wa-radius);
+  overflow: hidden;
+  min-height: var(--wa-panel-min-h);
+  background: var(--wa-surface);
+}
+.wa-editor-section {
+  padding: 0;
+}
+
+.wa-domain-panel,
+.wa-resource-panel {
+  width: 260px;
+  min-width: 200px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--wa-border);
+  background: var(--wa-surface-alt);
+}
+.wa-domain-toolbar,
+.wa-resource-toolbar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--wa-border);
+  align-items: center;
+}
+.wa-domain-toolbar .form-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  font-size: 13px;
+}
+.wa-domain-list,
+.wa-resource-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.wa-domain-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  border-left: 3px solid transparent;
+  transition: background 0.12s;
+  user-select: none;
+}
+.wa-domain-item:hover {
+  background: var(--wa-hover);
+}
+.wa-domain-item.active {
+  background: var(--wa-active);
+  border-left-color: var(--wa-accent);
+}
+.wa-domain-item code {
+  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-color);
+}
+.wa-domain-global {
+  font-weight: 600;
+  border-bottom: 1px solid var(--wa-border);
+  background: color-mix(in srgb, var(--wa-accent) 4%, var(--wa-surface-alt));
+}
+.wa-domain-note {
+  color: var(--wa-muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.wa-domain-sub-disabled {
+  opacity: 0.45;
+}
+.wa-domain-local-switch {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.wa-editor-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wa-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--wa-border);
+  flex-wrap: wrap;
+  min-height: 40px;
+}
+.wa-editor-title {
+  font-weight: 600;
+  font-size: 13px;
+  flex-shrink: 0;
+  color: var(--text-color);
+}
+.wa-editor-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.wa-editor-cm {
+  flex: 1;
+  min-height: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 12px;
+  background: var(--wa-surface-alt);
+  outline: none;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  tab-size: 2;
+}
+.wa-editor-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--wa-muted);
+  font-size: 14px;
+  padding: 40px;
+}
+.wa-editor-alias-target {
+  color: var(--wa-accent);
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+}
+.wa-domain-title-input {
+  width: 200px;
+}
+.wa-domain-type-select {
+  width: 110px;
+}
+.wa-toolbar-spacer {
+  flex: 1;
+}
+
+.wa-domain-validate-results {
+  border-top: 1px solid var(--wa-border);
+  padding: 12px;
+  background: var(--wa-surface-alt);
+}
+.wa-domain-validate-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+/* ---------- Cookie ---------- */
+.wa-cookie-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fef9c3;
+  border-bottom: 1px solid #facc15;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.wa-cookie-info {
+  color: #16a34a;
+  font-weight: 600;
+  font-size: 13px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.wa-cookie-warn {
+  color: #ea580c;
+  font-weight: 600;
+  font-size: 13px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ---------- 图标按钮 ---------- */
+.settings-page[ld-site-adapters] .btn.wa-icon-btn {
+  width: 30px;
+  height: 30px;
+  padding: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.settings-page[ld-site-adapters] .btn.wa-icon-btn svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+/* ---------- Badges ---------- */
+.wa-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--wa-hover);
+  color: var(--wa-muted);
+}
+.wa-badge-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+.wa-badge-warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+.wa-alias-target {
+  color: var(--wa-accent);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* ---------- 凭据列表 ---------- */
+.wa-credential-list {
+  display: flex;
+  flex-direction: column;
+}
+.wa-credential-list .wa-cookie-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--wa-border);
+}
+.wa-credential-list .wa-cookie-row:last-child {
+  border-bottom: none;
+}
+.wa-credential-list .wa-cookie-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 768px) {
+  .wa-split-layout {
+    flex-direction: column;
+    min-height: auto;
+  }
+  .wa-domain-panel,
+  .wa-resource-panel {
+    width: 100%;
+    max-height: 240px;
+    border-right: none;
+    border-bottom: 1px solid var(--wa-border);
+  }
+  .wa-test-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .wa-test-actions {
+    flex-wrap: wrap;
+  }
+  .wa-editor-header {
+    flex-wrap: wrap;
+  }
+}

@@ -10,4 +10,26 @@ from .opensearch import opensearch
 from .reader import *
 from .root import root
 from .settings import *
+from site_adapters.views import (
+    action as site_adapters_action,
+    all_domains,
+    local_domain_toggle,
+    subscription_domain_read,
+    subscription_domain_toggle,
+    domain_create,
+    domain_delete,
+    domain_read,
+    domain_rename,
+    domain_save,
+    resource_manage,
+    resource_save,
+    resources,
+    save_cookie,
+    site_adapters_page as site_adapters,
+    subscription_manage,
+    cookies_page,
+    user_cookies,
+    user_toggles,
+    view_snapshot,
+)
 from .toasts import *

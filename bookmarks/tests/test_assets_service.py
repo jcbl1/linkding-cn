@@ -33,7 +33,7 @@ class AssetServiceTestCase(TestCase, BookmarkFactoryMixin):
         )
         self.mock_detect_content_type = self.mock_detect_content_type_patcher.start()
 
-    def _write_html_snapshot(self, _url, filepath):
+    def _write_html_snapshot(self, _url, filepath, **kwargs):
         with open(filepath, "w") as snapshot_file:
             snapshot_file.write(self.html_content)
 
@@ -85,6 +85,7 @@ class AssetServiceTestCase(TestCase, BookmarkFactoryMixin):
         self.mock_singlefile_create_snapshot.assert_called_once_with(
             "https://example.com",
             expected_temp_filepath,
+            username="testuser",
         )
 
         # should create gzip file in asset folder

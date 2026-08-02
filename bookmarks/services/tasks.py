@@ -33,7 +33,10 @@ from waybackpy.exceptions import TooManyRequestsError, WaybackError
 from bookmarks.models import Bookmark, BookmarkAsset, UserProfile
 from bookmarks.services import assets, favicon_loader, preview_image_loader
 from bookmarks.services.website_loader import load_website_metadata
-from bookmarks.utils import get_matching_domain_roots, get_registrable_domain, parse_domain_roots
+from bookmarks.utils import (
+    get_registrable_domain,
+    parse_domain_roots,
+)
 
 logger = logging.getLogger(__name__)
 HTML_SNAPSHOT_DISPATCHER_LOCK = huey.lock_task("html-snapshot-dispatcher-lock")
@@ -71,6 +74,10 @@ def task(retries=5, retry_delay=15, retry_backoff=4):
     return deco
 
 
+def _bookmark_username(bookmark: Bookmark) -> str:
+    return bookmark.owner.username if bookmark and bookmark.owner else ""
+
+
 # ---------------------------------------------------------------------------
 # Web Archive（Wayback Machine）快照
 # ---------------------------------------------------------------------------
@@ -92,14 +99,14 @@ def create_web_archive_snapshot(user: User, bookmark: Bookmark, force_update: bo
 
 
 def _create_wayback_snapshot(bookmark: Bookmark):
-    logger.info(f"Create new snapshot for bookmark. url={bookmark.url}...")
+    logger.info("Create new snapshot for bookmark. url=%s...", bookmark.url)
     archive = waybackpy.WaybackMachineSaveAPI(
         bookmark.url, settings.LD_DEFAULT_USER_AGENT, max_tries=1
     )
     archive.save()
     bookmark.web_archive_snapshot_url = archive.archive_url
     bookmark.save(update_fields=["web_archive_snapshot_url"])
-    logger.info(f"Successfully created new snapshot for bookmark:. url={bookmark.url}")
+    logger.info("Successfully created new snapshot for bookmark:. url=%s", bookmark.url)
 
 
 @task()
@@ -171,12 +178,12 @@ def ensure_favicon(user: User, url: str):
 
     if cache and cache.status == FaviconCache.STATUS_SUCCESS and cache.favicon_file:
         # DB 有记录 → 验证磁盘文件（isfile 比 os.listdir 快得多）
-        if favicon_loader._get_favicon_path(cache.favicon_file).is_file():
+        if favicon_loader.get_favicon_path(cache.favicon_file).is_file():
             return
         # 磁盘文件丢失 → 继续到步骤 2 重新获取
 
     # 2. 磁盘扫描（仅在 DB 无有效记录时执行，支持旧命名迁移和损坏文件清理）
-    cached_file = favicon_loader._find_cached_favicon_file(domain)
+    cached_file = favicon_loader.find_cached_favicon_file(domain)
     if cached_file:
         if cache:
             cache.favicon_file = cached_file
@@ -270,7 +277,7 @@ def _fetch_domain_favicon_task(user_id: int, domain: str):
     # 分布式锁：任务执行时才加锁（180s 超时覆盖所有 provider 尝试）
     lock_key = f"favicon_task_lock:{domain}"
     if not django_cache.add(lock_key, "1", timeout=180):
-        logger.debug(f"Skipping favicon fetch for domain={domain}, another task is running")
+        logger.debug("Skipping favicon fetch for domain=%s, another task is running", domain)
         return
 
     try:
@@ -282,7 +289,7 @@ def _fetch_domain_favicon_task(user_id: int, domain: str):
         # MISSING 状态的重试间隔序列（天），之后以最后值（7天）为间隔无限重试
         MISSING_RETRY_DELAYS = [1, 1, 1, 2, 2, 3, 3, 4, 5, 6, 7]
 
-        logger.info(f"Fetching favicon for domain={domain}")
+        logger.info("Fetching favicon for domain=%s", domain)
 
         favicon_file = favicon_loader.fetch_and_save_favicon(domain)
 
@@ -305,7 +312,7 @@ def _fetch_domain_favicon_task(user_id: int, domain: str):
                 idx = min(cache.retry_count, len(MISSING_RETRY_DELAYS) - 1)
                 delay_days = MISSING_RETRY_DELAYS[idx]
                 cache.next_retry_at = timezone.now() + timedelta(days=delay_days)
-                logger.info(f"Favicon still missing for domain={domain}, will retry in {delay_days} day(s) (attempt {cache.retry_count})")
+                logger.info("Favicon still missing for domain=%s, will retry in %s day(s) (attempt %s)", domain, delay_days, cache.retry_count)
                 cache.save()
                 return
             cache.retry_count += 1
@@ -314,12 +321,12 @@ def _fetch_domain_favicon_task(user_id: int, domain: str):
                 # 保留旧的 favicon_file，不清空（过期图标仍可使用）
                 cache.retry_count = 0
                 cache.next_retry_at = timezone.now() + timedelta(days=MISSING_RETRY_DELAYS[0])
-                logger.info(f"Favicon not found for domain={domain} after {MAX_RETRIES} retries, marking as missing (will retry in {MISSING_RETRY_DELAYS[0]} day(s))")
+                logger.info("Favicon not found for domain=%s after %s retries, marking as missing (will retry in %s day(s))", domain, MAX_RETRIES, MISSING_RETRY_DELAYS[0])
             else:
                 cache.status = FaviconCache.STATUS_FAILED
                 delay_seconds = RETRY_DELAYS[cache.retry_count - 1]
                 cache.next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
-                logger.info(f"Favicon fetch failed for domain={domain}, retry #{cache.retry_count} in {delay_seconds}s")
+                logger.info("Favicon fetch failed for domain=%s, retry #%s in %ss", domain, cache.retry_count, delay_seconds)
             cache.save()
     finally:
         django_cache.delete(lock_key)
@@ -377,7 +384,7 @@ def _batch_load_favicons_task(user_id: int):
     for domain in domains_to_fetch:
         _enqueue_favicon_task(user.id, domain)
 
-    logger.info(f"Queued favicon tasks for {len(domains_to_fetch)} unique domains")
+    logger.info("Queued favicon tasks for %s unique domains", len(domains_to_fetch))
 
 
 def schedule_refresh_favicons(user: User):
@@ -400,7 +407,7 @@ def _batch_refresh_favicons_task(user_id: int):
             domains_seen.add(domain)
             _enqueue_favicon_task(user.id, domain)
 
-    logger.info(f"Refreshed favicons for {len(domains_seen)} unique domains")
+    logger.info("Refreshed favicons for %s unique domains", len(domains_seen))
 
 
 def rename_favicon_for_domain_config(user, old_config_str: str, new_config_str: str):
@@ -541,7 +548,7 @@ def delete_preview_image_temp_file(filepath: str):
     )
     if os.path.exists(filepath):
         os.remove(filepath)
-        logger.info(f"Deleted temporary preview image file: {filepath}")
+        logger.info("Deleted temporary preview image file: %s", filepath)
 
 
 @task()
@@ -551,7 +558,7 @@ def _load_preview_image_task(bookmark_id: int):
     except Bookmark.DoesNotExist:
         return
 
-    logger.info(f"Load preview image for bookmark. url={bookmark.url}")
+    logger.info("Load preview image for bookmark. url=%s", bookmark.url)
 
     new_preview_image_file = preview_image_loader.load_preview_image(
         bookmark.url, bookmark
@@ -620,9 +627,13 @@ def _enrich_metadata_task(
     except Bookmark.DoesNotExist:
         return
 
-    logger.info(f"Enrich metadata for bookmark. url={bookmark.url}")
+    logger.info("Enrich metadata for bookmark. url=%s", bookmark.url)
 
-    metadata = load_website_metadata(bookmark.url, ignore_cache=ignore_cache)
+    metadata = load_website_metadata(
+        bookmark.url,
+        ignore_cache=ignore_cache,
+        username=_bookmark_username(bookmark),
+    )
     update_fields = []
 
     if (
@@ -653,7 +664,7 @@ def _enrich_metadata_task(
         bookmark.date_modified = timezone.now()
         update_fields.append("date_modified")
         bookmark.save(update_fields=update_fields)
-        logger.info(f"Successfully enriched metadata for bookmark. url={bookmark.url}")
+        logger.info("Successfully enriched metadata for bookmark. url=%s", bookmark.url)
 
 
 @task()
@@ -663,9 +674,13 @@ def _refresh_metadata_task(bookmark_id: int):
     except Bookmark.DoesNotExist:
         return
 
-    logger.info(f"Refresh metadata for bookmark. url={bookmark.url}")
+    logger.info("Refresh metadata for bookmark. url=%s", bookmark.url)
 
-    metadata = load_website_metadata(bookmark.url, ignore_cache=True)
+    metadata = load_website_metadata(
+        bookmark.url,
+        ignore_cache=True,
+        username=_bookmark_username(bookmark),
+    )
     update_fields = []
 
     if metadata.title is not None:
@@ -683,7 +698,7 @@ def _refresh_metadata_task(bookmark_id: int):
     bookmark.date_modified = timezone.now()
 
     bookmark.save(update_fields=update_fields)
-    logger.info(f"Successfully refreshed metadata for bookmark. url={bookmark.url}")
+    logger.info("Successfully refreshed metadata for bookmark. url=%s", bookmark.url)
 
     # 若url变动，则按需更新html快照
     if bookmark.owner.profile.enable_automatic_html_snapshots:
@@ -868,7 +883,7 @@ def _create_html_snapshot_task(asset_id: int):
     except BookmarkAsset.DoesNotExist:
         return
 
-    logger.info(f"Create HTML snapshot for bookmark. url={asset.bookmark.url}")
+    logger.info("Create HTML snapshot for bookmark. url=%s", asset.bookmark.url)
 
     try:
         assets.create_snapshot(asset)
@@ -1043,7 +1058,7 @@ def _create_article_task(asset_id: int):
         return
 
     bookmark = asset.bookmark
-    logger.info(f"Create article for bookmark. url={bookmark.url}")
+    logger.info("Create article for bookmark. url=%s", bookmark.url)
 
     fallback_snapshot = None
     try:
@@ -1052,21 +1067,27 @@ def _create_article_task(asset_id: int):
         # 1. Try existing snapshot
         raw_html = _load_snapshot_html(bookmark)
         if raw_html:
-            logger.info(f"Using existing snapshot. url={bookmark.url}")
-            result = reader_processor.parse_html(raw_html, url=bookmark.url)
+            logger.info("Using existing snapshot. url=%s", bookmark.url)
+            result = reader_processor.parse_html(
+                raw_html, url=bookmark.url, username=_bookmark_username(bookmark)
+            )
         elif _has_custom_snapshot_processor(bookmark.url):
             # 2. Custom snapshot_processor → create snapshot first, then parse
-            logger.info(f"Creating snapshot via custom processor. url={bookmark.url}")
+            logger.info("Creating snapshot via custom processor. url=%s", bookmark.url)
             _snapshot, raw_html = _create_snapshot_for_article(bookmark)
             if not raw_html:
                 raise Exception("Failed to create snapshot via custom processor")
-            result = reader_processor.parse_html(raw_html, url=bookmark.url)
+            result = reader_processor.parse_html(
+                raw_html, url=bookmark.url, username=_bookmark_username(bookmark)
+            )
         else:
             # 3. No snapshot, no custom processor → let defuddle fetch URL directly.
             # If that fails, retry once from a freshly generated snapshot.
-            logger.info(f"Parsing URL directly with defuddle. url={bookmark.url}")
+            logger.info("Parsing URL directly with defuddle. url=%s", bookmark.url)
             try:
-                result = reader_processor.parse_url(bookmark.url)
+                result = reader_processor.parse_url(
+                    bookmark.url, username=_bookmark_username(bookmark)
+                )
             except Exception as direct_error:
                 logger.info(
                     f"Direct article parsing failed; retrying via generated snapshot. url={bookmark.url}",
@@ -1077,7 +1098,9 @@ def _create_article_task(asset_id: int):
                     raise Exception(
                         "Failed to create fallback snapshot for article"
                     ) from direct_error
-                result = reader_processor.parse_html(raw_html, url=bookmark.url)
+                result = reader_processor.parse_html(
+                    raw_html, url=bookmark.url, username=_bookmark_username(bookmark)
+                )
 
         # 生成标准 HTML 文档：元数据放 head，正文放 body
         from django.utils.html import escape
@@ -1094,7 +1117,7 @@ def _create_article_task(asset_id: int):
         # Save parsed content
         save_article_content(asset, content, title=result["title"])
 
-        logger.info(f"Successfully created article for bookmark. url={bookmark.url}")
+        logger.info("Successfully created article for bookmark. url=%s", bookmark.url)
     except Exception as error:
         if fallback_snapshot:
             try:

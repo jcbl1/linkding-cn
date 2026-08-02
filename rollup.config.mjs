@@ -36,4 +36,18 @@ export default [{
     }),
     production && terser(),
   ],
+}, {
+  input: 'site_adapters/frontend/site-adapters.js',
+  output: {
+    sourcemap: true,
+    format: 'iife',
+    name: 'linkdingSiteAdapters',
+    file: 'site_adapters/static/site-adapters.js',
+  },
+  plugins: [
+    resolve({
+      browser: true,
+    }),
+    production && terser(),
+  ],
 }];

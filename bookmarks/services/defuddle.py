@@ -4,6 +4,9 @@ import os
 import re
 import subprocess
 import tempfile
+import time
+
+from site_adapters.services.execution_log import log_execution
 
 logger = logging.getLogger(__name__)
 
@@ -160,12 +163,13 @@ def _inject_base_tag(html_content: str, url: str) -> str:
 
 
 def _run_defuddle(input_data: dict, options: dict = None, timeout: int = 60) -> dict:
-    """通过 vendor/defuddle_parse.js wrapper 脚本调用 defuddle。
+    """通过 site_adapters/services/engine/scripts/defuddle_parse.js wrapper 脚本调用 defuddle。
 
     所有 subprocess 调用、错误处理和输出解析均在此函数内完成，
     调用方只需处理 DefuddleError。
     """
-    script_path = os.path.join(os.path.dirname(__file__), "vendor", "defuddle_parse.js")
+    import site_adapters.services as _sa_services
+    script_path = os.path.join(os.path.dirname(_sa_services.__file__), "engine", "scripts", "defuddle_parse.js")
     if not os.path.exists(script_path):
         raise DefuddleError(f"defuddle wrapper script not found at {script_path}")
 
@@ -175,15 +179,29 @@ def _run_defuddle(input_data: dict, options: dict = None, timeout: int = 60) -> 
     env = os.environ.copy()
     env["LANG"] = "en_US.UTF-8"
 
+    url = input_data.get("url", "")
+    cmd = ["node", script_path]
+    start = time.monotonic()
     try:
         result = subprocess.run(
-            ["node", script_path],
+            cmd,
             input=json.dumps(input_data).encode("utf-8"),
             capture_output=True,
             timeout=timeout,
             env=env,
         )
+        duration_ms = int((time.monotonic() - start) * 1000)
+        log_execution(
+            url=url, domain_key="", step="reader",
+            cmd=cmd, returncode=result.returncode,
+            stdout=result.stdout.decode("utf-8", errors="replace")[:500],
+            stderr=result.stderr.decode("utf-8", errors="replace")[:500],
+            duration_ms=duration_ms,
+        )
     except subprocess.TimeoutExpired as e:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        log_execution(url=url, domain_key="", step="reader", cmd=cmd,
+                      returncode=-1, stderr="Timeout", duration_ms=duration_ms)
         raise DefuddleError(f"defuddle timed out after {timeout}s") from e
 
     if result.returncode != 0:

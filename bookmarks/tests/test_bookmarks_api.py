@@ -1220,7 +1220,7 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
             )
 
             mock_load_website_metadata.assert_called_once_with(
-                "https://example.com", ignore_cache=False
+                "https://example.com", ignore_cache=False, username="testuser"
             )
             mock_load_website_metadata.reset_mock()
 
@@ -1231,7 +1231,7 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
             )
 
             mock_load_website_metadata.assert_called_once_with(
-                "https://example.com", ignore_cache=True
+                "https://example.com", ignore_cache=True, username="testuser"
             )
 
     def test_check_returns_empty_metadata_on_retryable_failure(self):

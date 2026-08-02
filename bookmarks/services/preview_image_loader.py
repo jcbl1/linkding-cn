@@ -57,7 +57,7 @@ def _download_and_save_image(image_url: str, referer_url: str = None) -> str | N
             transfer_encoding = response.headers.get("Transfer-Encoding")
             is_chunked = bool(transfer_encoding and transfer_encoding == "chunked")
             if "Content-Length" not in response.headers and not is_chunked:
-                logger.debug(f"Empty Content-Length for preview image: {image_url}")
+                logger.debug("Empty Content-Length for preview image: %s", image_url)
                 return None
 
             if not is_chunked:
@@ -69,12 +69,12 @@ def _download_and_save_image(image_url: str, referer_url: str = None) -> str | N
                     return None
 
             if "Content-Type" not in response.headers:
-                logger.debug(f"Empty Content-Type for preview image: {image_url}")
+                logger.debug("Empty Content-Type for preview image: %s", image_url)
                 return None
 
             content_type = response.headers["Content-Type"].split(";", 1)[0]
             file_extension = mimetypes.guess_extension(content_type)
-            logger.debug(f"File extension for preview image: {file_extension}")
+            logger.debug("File extension for preview image: %s", file_extension)
 
             if file_extension not in settings.LD_PREVIEW_ALLOWED_EXTENSIONS:
                 logger.debug(
@@ -86,7 +86,7 @@ def _download_and_save_image(image_url: str, referer_url: str = None) -> str | N
             _ensure_temp_preview_folder()
             image_file_path = _get_temporary_image_path(image_file_name)
 
-            logger.debug(f"Downloading image: {image_url}")
+            logger.debug("Downloading image: %s", image_url)
 
             with open(image_file_path, "wb") as file:
                 downloaded = 0
@@ -119,7 +119,7 @@ def _download_and_save_image(image_url: str, referer_url: str = None) -> str | N
             )
             return image_file_name
     except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to download preview image: {image_url}", exc_info=e)
+        logger.error("Failed to download preview image: %s", image_url, exc_info=e)
         return None
 
 
@@ -137,7 +137,7 @@ def load_temporary_preview_image(image_url: str) -> str | None:
             break
 
     if existing_file_path:
-        logger.debug(f"Reusing existing temporary preview image: {existing_file_path}")
+        logger.debug("Reusing existing temporary preview image: %s", existing_file_path)
         return existing_file_path
 
     # 没有则重新下载
@@ -145,7 +145,7 @@ def load_temporary_preview_image(image_url: str) -> str | None:
 
     if image_file_name:
         image_file_path = _get_temporary_image_path(image_file_name)
-        logger.debug(f"Saved new temporary preview image as: {image_file_path}")
+        logger.debug("Saved new temporary preview image as: %s", image_file_path)
         return image_file_name
     return None
 
@@ -162,9 +162,10 @@ def load_preview_image(url: str, bookmark: Bookmark | None = None) -> str | None
     # 如无预览图链接，尝试获取
     if not image_url:
         logger.debug("No remote preview image URL, trying to load website metadata.")
-        metadata = website_loader.load_website_metadata(url)
+        username = bookmark.owner.username if bookmark else ''
+        metadata = website_loader.load_website_metadata(url, username=username)
         if not metadata or not metadata.preview_image:
-            logger.debug(f"Could not find preview image in metadata: {url}")
+            logger.debug("Could not find preview image in metadata: %s", url)
             return None
         image_url = metadata.preview_image
 
@@ -191,7 +192,7 @@ def load_preview_image(url: str, bookmark: Bookmark | None = None) -> str | None
         permanent_file_name = Path(temporary_file_path).name
         permanent_file_path = _get_permanent_image_path(permanent_file_name)
         shutil.move(temporary_file_path, permanent_file_path)
-        logger.info(f"Saved new permanent preview image as: {permanent_file_path}")
+        logger.info("Saved new permanent preview image as: %s", permanent_file_path)
         return permanent_file_name
 
     return None

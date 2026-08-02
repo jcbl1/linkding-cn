@@ -1,0 +1,577 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "linkding Site Adapters Configuration",
+  "type": "object",
+  "definitions": {
+    "cookie_config": {
+      "type": "object",
+      "description": "Cookie 生命周期配置。",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "anon",
+            "login"
+          ],
+          "description": "anon: 用时检查失效再刷; login: 需要用户提供"
+        },
+        "verify": {
+          "type": "object",
+          "description": "声明式验证配置。",
+          "properties": {
+            "check": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "title",
+                  "body"
+                ]
+              },
+              "description": "检查哪些内容，默认 [\"title\", \"body\"]"
+            },
+            "invalid_patterns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "出现则判定 cookie 失效，默认 []（不检测）"
+            },
+            "valid_selector": {
+              "type": "string",
+              "description": "CSS 选择器存在则判定有效"
+            }
+          },
+          "additionalProperties": false
+        },
+        "refresh": {
+          "type": "object",
+          "description": "刷新配置。",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "刷新时访问的 URL，默认用 bookmark URL"
+            },
+            "wait_cookie": {
+              "type": "string",
+              "description": "刷新时等待的 cookie 名"
+            },
+            "timeout": {
+              "type": "integer",
+              "description": "刷新超时（毫秒），默认 30000"
+            }
+          },
+          "additionalProperties": false
+        },
+        "refresh_interval": {
+          "type": "integer",
+          "description": "auth 类型的定时刷新间隔（秒），默认 14400"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "http_config": {
+      "type": "object",
+      "description": "HTTP 配置。timeout、proxy 为框架字段，其余字段作为 HTTP headers 透传。",
+      "properties": {
+        "timeout": {
+          "type": "integer",
+          "description": "请求超时（秒）"
+        },
+        "proxy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "代理 URL"
+        },
+        "User-Agent": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "浏览器标识"
+        },
+        "Cookie": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Cookie 字符串；cookie.file 存在时忽略"
+        }
+      },
+      "additionalProperties": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "rewrite_rule": {
+      "oneOf": [
+        {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "default_config": {
+      "type": "object",
+      "description": "默认配置块，可被各 section 覆盖。",
+      "properties": {
+        "timeout": {
+          "type": "integer"
+        },
+        "proxy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_url": {
+          "$ref": "#/definitions/rewrite_rule"
+        },
+        "rewrite_url": {
+          "$ref": "#/definitions/rewrite_rule"
+        },
+        "http": {
+          "$ref": "#/definitions/http_config"
+        },
+        "auth": {
+          "$ref": "#/definitions/auth_config"
+        }
+      },
+      "additionalProperties": false
+    },
+    "metadata_config": {
+      "type": "object",
+      "description": "元数据获取配置。",
+      "properties": {
+        "script": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "完全接管脚本"
+        },
+        "select_title": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "标题选择器"
+        },
+        "select_description": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "描述选择器"
+        },
+        "select_image": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "预览图选择器"
+        },
+        "rewrite_url": {
+          "$ref": "#/definitions/rewrite_rule"
+        },
+        "request_url": {
+          "$ref": "#/definitions/rewrite_rule"
+        },
+        "http": {
+          "$ref": "#/definitions/http_config"
+        },
+        "auth": {
+          "$ref": "#/definitions/auth_config"
+        }
+      },
+      "additionalProperties": false
+    },
+    "snapshot_config": {
+      "type": "object",
+      "description": "快照生成配置。",
+      "properties": {
+        "script": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "完全接管脚本"
+        },
+        "keep_elements": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "只保留匹配元素"
+        },
+        "remove_elements": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "删除匹配元素"
+        },
+        "process_lazy_images": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "修复懒加载图片。true 使用默认属性列表，数组指定自定义属性名如 [\"data-actualsrc\"]"
+        },
+        "remove_classes": {
+          "type": "object",
+          "description": "移除指定元素的 CSS class。格式: {\"selector\": [\"class1\", \"class2\"]}",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        },
+        "set_styles": {
+          "type": "object",
+          "description": "设置指定元素的内联样式。格式: {\"selector\": {\"prop\": \"value\"}}",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "request_url": {
+          "$ref": "#/definitions/rewrite_rule"
+        },
+        "http": {
+          "$ref": "#/definitions/http_config"
+        },
+        "singlefile_args": {
+          "type": "object",
+          "description": "SingleFile CLI 参数透传",
+          "additionalProperties": true
+        },
+        "auth": {
+          "$ref": "#/definitions/auth_config"
+        },
+        "toggles": {
+          "type": "object",
+          "description": "用户可切换的元素去除选项。key 为唯一标识，selector 为 CSS 选择器。",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "selector": {
+                "type": "string",
+                "description": "CSS 选择器"
+              },
+              "label": {
+                "type": "string",
+                "description": "UI 显示标签"
+              },
+              "default": {
+                "type": "boolean",
+                "description": "默认是否去除",
+                "default": false
+              }
+            },
+            "required": [
+              "selector"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "reader_config": {
+      "type": "object",
+      "description": "文章提取配置。",
+      "properties": {
+        "defuddle_args": {
+          "type": "object",
+          "description": "defuddle 参数透传",
+          "additionalProperties": true
+        },
+        "auth": {
+          "$ref": "#/definitions/auth_config"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "请求超时（秒）"
+        },
+        "proxy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "代理 URL"
+        },
+        "http": {
+          "$ref": "#/definitions/http_config"
+        }
+      },
+      "additionalProperties": false
+    },
+    "domain_config": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "alias"
+        },
+        "target": {
+          "type": "string"
+        },
+        "default": {
+          "$ref": "#/definitions/default_config"
+        },
+        "http": {
+          "$ref": "#/definitions/http_config"
+        },
+        "metadata": {
+          "$ref": "#/definitions/metadata_config"
+        },
+        "snapshot": {
+          "$ref": "#/definitions/snapshot_config"
+        },
+        "reader": {
+          "$ref": "#/definitions/reader_config"
+        },
+        "auth": {
+          "$ref": "#/definitions/auth_config"
+        }
+      },
+      "additionalProperties": false
+    },
+    "auth_config": {
+      "type": "object",
+      "description": "认证配置。声明站点所需的认证方式。",
+      "properties": {
+        "cookie": {
+          "$ref": "#/definitions/cookie_config"
+        },
+        "headers": {
+          "type": "object",
+          "description": "所需的 HTTP 头。key 为 header name，value 为配置对象（当前可为空）。",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "token": {
+          "$ref": "#/definitions/token_config"
+        }
+      },
+      "additionalProperties": false
+    },
+    "token_config": {
+      "type": "object",
+      "description": "OAuth2 Token 自动刷新配置。",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "anon",
+            "login"
+          ],
+          "description": "anon: 反爬; login: 需要用户凭据"
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "Token 端点 URL"
+        },
+        "client_id": {
+          "type": "string",
+          "description": "OAuth2 client_id"
+        },
+        "client_secret": {
+          "type": "string",
+          "description": "OAuth2 client_secret"
+        },
+        "grant_type": {
+          "type": "string",
+          "description": "授权类型，默认 refresh_token"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "form",
+            "json"
+          ],
+          "description": "请求体格式，默认 form"
+        },
+        "access_path": {
+          "type": "string",
+          "description": "响应中 access_token 的 JSON path，默认 access_token"
+        },
+        "refresh_path": {
+          "type": "string",
+          "description": "响应中 refresh_token 的 JSON path，默认 refresh_token"
+        },
+        "expires_path": {
+          "type": "string",
+          "description": "响应中 expires_in 的 JSON path，默认 expires_in"
+        },
+        "header": {
+          "type": "string",
+          "description": "注入的 header 名，默认 Authorization"
+        },
+        "header_format": {
+          "type": "string",
+          "description": "header 值格式，默认 Bearer {token}"
+        },
+        "extra_params": {
+          "type": "object",
+          "description": "额外的请求参数",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "verify": {
+          "type": "object",
+          "description": "验证配置，与 cookie.verify 相同结构",
+          "properties": {
+            "check": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "title",
+                  "body"
+                ]
+              },
+              "description": "检查哪些内容"
+            },
+            "invalid_patterns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "出现则判定 token 失效"
+            },
+            "valid_selector": {
+              "type": "string",
+              "description": "CSS 选择器存在则判定有效"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "endpoint"
+      ],
+      "additionalProperties": false
+    },
+    "subscription_meta": {
+      "type": "object",
+      "description": "订阅源元数据（gkd 风格）",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "订阅唯一标识（建议使用时间戳）"
+        },
+        "name": {
+          "type": "string",
+          "description": "订阅名称"
+        },
+        "version": {
+          "type": "integer",
+          "description": "单调递增版本号，用于检测更新"
+        },
+        "updateUrl": {
+          "type": "string",
+          "description": "完整订阅下载 URL"
+        },
+        "checkUpdateUrl": {
+          "type": "string",
+          "description": "轻量版本检测 URL（只返回 {id, version}）"
+        }
+      },
+      "required": [
+        "version"
+      ]
+    }
+  },
+  "properties": {
+    "_subscriptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "update_interval": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "*": {
+      "$ref": "#/definitions/domain_config"
+    },
+    "_meta": {
+      "$ref": "#/definitions/subscription_meta"
+    }
+  },
+  "patternProperties": {
+    "^([*][.])?[A-Za-z0-9_.-]+$": {
+      "$ref": "#/definitions/domain_config"
+    }
+  },
+  "additionalProperties": false
+}

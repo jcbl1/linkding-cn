@@ -15,7 +15,6 @@ from bookmarks.services.website_loader import (
     build_request_cookies,
     build_request_headers,
     detect_content_type,
-    get_request_config,
     is_pdf_content_type,
 )
 
@@ -48,27 +47,26 @@ def create_snapshot_asset(bookmark: Bookmark) -> BookmarkAsset:
     return asset
 
 
-def create_snapshot(asset: BookmarkAsset):
+def create_snapshot(asset: BookmarkAsset, username: str = ''):
     try:
         url = asset.bookmark.url
-        request_config = get_request_config(url)
-        content_type = detect_content_type(url, config=request_config)
+        username = username or (asset.bookmark.owner.username if asset.bookmark.owner else '')
+        content_type = detect_content_type(url)
 
         if is_pdf_content_type(content_type):
-            _create_pdf_snapshot(asset, request_config)
+            _create_pdf_snapshot(asset)
         else:
-            _create_html_snapshot(asset)
-    except Exception as error:
+            _create_html_snapshot(asset, username=username)
+    except Exception:
         asset.status = BookmarkAsset.STATUS_FAILURE
         asset.save()
-        raise error
+        raise
 
-
-def _create_html_snapshot(asset: BookmarkAsset):
+def _create_html_snapshot(asset: BookmarkAsset, username: str = ''):
     # Create snapshot into temporary file
     temp_filename = _generate_asset_filename(asset, asset.bookmark.url, "tmp")
     temp_filepath = os.path.join(settings.LD_ASSET_FOLDER, temp_filename)
-    snapshot_processor.create_snapshot(asset.bookmark.url, temp_filepath)
+    snapshot_processor.create_snapshot(asset.bookmark.url, temp_filepath, username=username)
 
     # Store as gzip in asset folder
     filename = _generate_asset_filename(asset, asset.bookmark.url, "html.gz")
@@ -95,8 +93,11 @@ def _create_html_snapshot(asset: BookmarkAsset):
     _save_bookmark_updates(asset.bookmark, ["latest_snapshot", "date_modified"])
 
 
-def _create_pdf_snapshot(asset: BookmarkAsset, request_config: dict | None = None):
+def _create_pdf_snapshot(asset: BookmarkAsset):
+    from site_adapters.services.config.resolver import get_snapshot_config
+
     url = asset.bookmark.url
+    request_config = get_snapshot_config(url)
     max_size = settings.LD_SNAPSHOT_PDF_MAX_SIZE
 
     temp_filename = _generate_asset_filename(asset, url, "tmp")
@@ -230,15 +231,17 @@ def upload_asset(bookmark: Bookmark, upload_file: UploadedFile):
         _save_bookmark_updates(asset.bookmark, ["date_modified"])
 
         logger.info(
-            f"Successfully uploaded asset file. bookmark={bookmark} file={upload_file.name}"
+            "Successfully uploaded asset file. bookmark=%s file=%s",
+            bookmark, upload_file.name,
         )
         return asset
     except Exception as e:
         logger.error(
-            f"Failed to upload asset file. bookmark={bookmark} file={upload_file.name}",
+            "Failed to upload asset file. bookmark=%s file=%s",
+            bookmark, upload_file.name,
             exc_info=e,
         )
-        raise e
+        raise
 
 
 def remove_asset(asset: BookmarkAsset):
@@ -275,7 +278,8 @@ def rename_asset(asset: BookmarkAsset, new_display_name: str):
     _save_bookmark_updates(asset.bookmark, ["date_modified"])
 
     logger.info(
-        f"Successfully renamed asset. asset_id={asset.id} new_name={new_display_name}"
+        "Successfully renamed asset. asset_id=%s new_name=%s",
+        asset.id, new_display_name,
     )
 
 

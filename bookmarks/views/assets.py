@@ -1,4 +1,5 @@
 import gzip
+import re
 from pathlib import Path
 
 from django.conf import settings
@@ -8,6 +9,13 @@ from django.http import (
 )
 
 from bookmarks.views import access
+
+
+def _safe_content_disposition_filename(name: str) -> str:
+    """Sanitize filename for Content-Disposition header to prevent injection."""
+    name = name.replace('"', '_').replace('\n', '_').replace('\r', '_')
+    return re.sub(r'[^\w\s.\-()\u4e00-\u9fff]', '_', name)
+
 
 
 def _resolve_asset_file_path(asset):

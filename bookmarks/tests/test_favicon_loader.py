@@ -234,28 +234,28 @@ class FaviconLoaderTestCase(TestCase):
             favicon_loader.fetch_and_save_favicon("example.com")
             self.assertTrue(self.icon_exists("example_com.ico"))
 
-    # --- _find_cached_favicon_file ---
+    # --- find_cached_favicon_file ---
 
-    def test_find_cached_favicon_file(self):
+    def testfind_cached_favicon_file(self):
         with mock.patch("requests.get") as mock_get:
             mock_get.return_value = self.create_mock_response()
             favicon_loader.fetch_and_save_favicon("example.com")
 
-        result = favicon_loader._find_cached_favicon_file("example.com")
+        result = favicon_loader.find_cached_favicon_file("example.com")
         self.assertEqual(result, "example_com.png")
 
-    def test_find_cached_favicon_file_missing(self):
-        result = favicon_loader._find_cached_favicon_file("nonexistent.com")
+    def testfind_cached_favicon_file_missing(self):
+        result = favicon_loader.find_cached_favicon_file("nonexistent.com")
         self.assertIsNone(result)
 
-    def test_find_cached_favicon_file_prefers_svg(self):
+    def testfind_cached_favicon_file_prefers_svg(self):
         """当同一域名有多个扩展名时，优先返回 SVG。"""
         name = favicon_loader.domain_to_filename("example.com")
         for ext in [".png", ".ico", ".svg"]:
             path = Path(os.path.join(settings.LD_FAVICON_FOLDER, f"{name}{ext}"))
             path.write_bytes(mock_icon_data)
 
-        result = favicon_loader._find_cached_favicon_file("example.com")
+        result = favicon_loader.find_cached_favicon_file("example.com")
         self.assertEqual(result, f"{name}.svg")
 
     # --- domain_to_filename ---

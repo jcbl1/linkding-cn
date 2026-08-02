@@ -14,6 +14,8 @@
 !/pyproject.toml
 !/rollup.config.mjs
 !/esbuild.config.mjs
+!/scripts
+!/scripts/generate-site-adapters-etc.sh
 !/supervisord.conf
 !/uv.lock
 !/uwsgi.ini

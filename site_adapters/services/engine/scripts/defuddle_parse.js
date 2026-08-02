@@ -1,3 +1,10 @@
+// Node.js v23 TextDecoder.decode() may return Buffer instead of string.
+// Patch to ensure it always returns a string (matching the spec).
+const _origDecode = TextDecoder.prototype.decode;
+TextDecoder.prototype.decode = function(...args) {
+  const result = _origDecode.apply(this, args);
+  return typeof result === "string" ? result : String(result);
+};
 /**
  * defuddle Node.js 包装脚本
  *
@@ -23,7 +30,7 @@ const {
   extractRawMarkdown,
   cleanMarkdownContent,
   countWords,
-} = require("./defuddle.js");
+} = require("../../vendor/defuddle.js");
 
 const input = JSON.parse(readFileSync(0, "utf-8"));
 
@@ -41,6 +48,23 @@ if (options.contentSelector && url) {
   });
 }
 
+// contentSelector: defuddle expects a string; if user passed an array,
+// resolve it to the first selector that matches an element in the HTML.
+function resolveContentSelector(sel, htmlStr) {
+  if (!Array.isArray(sel)) return sel;
+  if (!htmlStr) return sel[0]; // no HTML yet, just use first
+  const doc = parseLinkedomHTML(htmlStr, url);
+  for (const s of sel) {
+    try { if (doc.querySelector(s)) return s; } catch {}
+  }
+  return sel[0]; // fallback
+}
+
+if (options.contentSelector && Array.isArray(options.contentSelector)) {
+  // html may already be loaded; if so resolve now, otherwise defer
+  // (for htmlPath case, we can resolve immediately after reading)
+}
+
 const defuddleOpts = {
   ...options,
   url: url,
@@ -55,7 +79,12 @@ async function main() {
   let html;
   if (htmlPath) {
     html = readFileSync(htmlPath, "utf-8");
-  } else {
+  }
+  // Resolve contentSelector array → string now that we have HTML
+  if (defuddleOpts.contentSelector) {
+    defuddleOpts.contentSelector = resolveContentSelector(defuddleOpts.contentSelector, html);
+  }
+  if (!htmlPath) {
     // 直接解析 URL：复现 CLI 的抓取 + bot UA 重试逻辑
     const initialUA = getInitialUA(url);
     html = await fetchPage(url, initialUA, options.language);

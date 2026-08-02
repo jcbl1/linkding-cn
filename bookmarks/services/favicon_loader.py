@@ -8,11 +8,11 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from time import monotonic
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
 from django.conf import settings
-from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -198,9 +198,9 @@ class _ProviderHealthChecker:
             self._probing = False
 
         for p in healthy:
-            logger.info(f"Favicon provider healthy: {p}")
+            logger.info("Favicon provider healthy: %s", p)
         for p in unhealthy:
-            logger.info(f"Favicon provider unhealthy (excluded): {p}")
+            logger.info("Favicon provider unhealthy (excluded): %s", p)
 
 
 # 全局单例
@@ -219,11 +219,11 @@ def domain_to_filename(domain: str) -> str:
     return re.sub(r"\W+", "_", domain)
 
 
-def _get_favicon_path(favicon_file: str) -> Path:
+def get_favicon_path(favicon_file: str) -> Path:
     return Path(os.path.join(settings.LD_FAVICON_FOLDER, favicon_file))
 
 
-def _find_cached_favicon_file(domain: str) -> str | None:
+def find_cached_favicon_file(domain: str) -> str | None:
     """在磁盘上查找指定域名的 favicon 文件，返回文件名或 None。
 
     兼容两种命名约定：
@@ -248,7 +248,7 @@ def _find_cached_favicon_file(domain: str) -> str | None:
         base, ext = os.path.splitext(filename)
         if base != name and base not in legacy_names:
             continue
-        path = _get_favicon_path(filename)
+        path = get_favicon_path(filename)
         if path.exists():
             # 校验文件内容是否为有效图片（防止残留损坏文件）
             # 使用渐进式读取：先 32 字节，只有可能是 SVG 时才读 1024 字节
@@ -268,7 +268,7 @@ def _find_cached_favicon_file(domain: str) -> str | None:
     # 新命名优先；找到新命名文件时清理旧命名文件
     if new_candidates:
         for _, legacy_file in legacy_candidates:
-            _get_favicon_path(legacy_file).unlink(missing_ok=True)
+            get_favicon_path(legacy_file).unlink(missing_ok=True)
         new_candidates.sort(key=lambda c: c[0])
         return new_candidates[0][1]
 
@@ -278,15 +278,15 @@ def _find_cached_favicon_file(domain: str) -> str | None:
         best_legacy = legacy_candidates[0][1]
         _, ext = os.path.splitext(best_legacy)
         new_filename = f"{name}{ext}"
-        new_path = _get_favicon_path(new_filename)
-        legacy_path = _get_favicon_path(best_legacy)
+        new_path = get_favicon_path(new_filename)
+        legacy_path = get_favicon_path(best_legacy)
         try:
             legacy_path.rename(new_path)
-            logger.info(f"Migrated favicon: {best_legacy} -> {new_filename}")
+            logger.info("Migrated favicon: %s -> %s", best_legacy, new_filename)
             # 清理其余旧文件
             for _, lf in legacy_candidates:
                 if lf != best_legacy:
-                    _get_favicon_path(lf).unlink(missing_ok=True)
+                    get_favicon_path(lf).unlink(missing_ok=True)
             return new_filename
         except OSError:
             return best_legacy
@@ -321,7 +321,7 @@ def _scan_favicon_folder() -> dict[str, str]:
         if ext_lower not in ext_priority:
             continue
 
-        path = _get_favicon_path(filename)
+        path = get_favicon_path(filename)
         if not path.exists():
             continue
 
@@ -382,7 +382,7 @@ def _remove_existing_variants(domain: str, keep_filename: str | None = None):
             filename = f"{base}{ext}"
             if filename == keep_filename:
                 continue
-            path = _get_favicon_path(filename)
+            path = get_favicon_path(filename)
             if path.exists():
                 path.unlink()
 
@@ -648,7 +648,7 @@ def _fetch_favicon_from_site(domain: str, scheme: str = "https", timeout: int = 
     for url, _score in unique_candidates:
         result = _download_favicon_candidate(url, resource_timeout)
         if result:
-            logger.debug(f"Self-resolved favicon for {domain}: {url}")
+            logger.debug("Self-resolved favicon for %s: %s", domain, url)
             return result
 
     return None
@@ -669,23 +669,23 @@ def _try_fetch_from_providers(domain: str, scheme: str = "https", timeout: int =
     for provider_url in _provider_health.get_active_providers():
         favicon_url = provider_url.format(**url_parameters)
         try:
-            logger.debug(f"Trying favicon provider: {favicon_url}")
+            logger.debug("Trying favicon provider: %s", favicon_url)
             with requests.get(favicon_url, timeout=timeout) as response:
                 response.raise_for_status()
                 body = response.content
                 if _is_data_uri(body):
-                    logger.debug(f"Provider returned data URI, trying next: {favicon_url}")
+                    logger.debug("Provider returned data URI, trying next: %s", favicon_url)
                     continue
                 content_type = response.headers.get("Content-Type", "image/png")
                 if _is_svg_placeholder(body, content_type):
-                    logger.debug(f"Provider returned SVG placeholder, trying next: {favicon_url}")
+                    logger.debug("Provider returned SVG placeholder, trying next: %s", favicon_url)
                     continue
                 return content_type, body
         except requests.exceptions.HTTPError as e:
             status_code = e.response.status_code if e.response is not None else 0
-            logger.debug(f"Favicon provider returned {status_code}, skipping: {favicon_url}")
+            logger.debug("Favicon provider returned %s, skipping: %s", status_code, favicon_url)
         except requests.exceptions.RequestException as e:
-            logger.warning(f"Favicon provider failed: {favicon_url}: {e}")
+            logger.warning("Favicon provider failed: %s: %s", favicon_url, e)
 
     # 所有第三方 provider 均失败 → 尝试自建解析（兜底，自动尝试 https 和 http）
     for try_scheme in (scheme, "http" if scheme == "https" else scheme):
@@ -694,7 +694,7 @@ def _try_fetch_from_providers(domain: str, scheme: str = "https", timeout: int =
             if result:
                 return result
         except Exception as e:
-            logger.warning(f"Self-built favicon resolver failed for {domain} ({try_scheme}): {e}")
+            logger.warning("Self-built favicon resolver failed for %s (%s): %s", domain, try_scheme, e)
 
     return None
 
@@ -776,7 +776,7 @@ def fetch_and_save_favicon(domain: str, scheme: str = "https", timeout: int = 10
 
     # 校验下载内容是否为有效图片
     if not _is_valid_image(body):
-        logger.warning(f"Favicon provider returned invalid image data for {domain} (content_type={content_type}, size={len(body)})")
+        logger.warning("Favicon provider returned invalid image data for %s (content_type=%s, size=%s)", domain, content_type, len(body))
         return ""
 
     # ICO 文件：提取最接近 32×32 的 PNG 帧，避免存储多分辨率 bundle
@@ -789,7 +789,7 @@ def fetch_and_save_favicon(domain: str, scheme: str = "https", timeout: int = 10
     file_extension = mimetypes.guess_extension(content_type.split(";")[0].strip()) or ".png"
     name = domain_to_filename(domain)
     favicon_file = f"{name}{file_extension}"
-    favicon_path = _get_favicon_path(favicon_file)
+    favicon_path = get_favicon_path(favicon_file)
 
     # 原子写入：先写临时文件再 rename，防止并发写入导致文件损坏
     tmp_path = favicon_path.with_suffix(".tmp")

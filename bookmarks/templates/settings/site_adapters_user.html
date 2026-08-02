@@ -1,0 +1,68 @@
+{% extends "bookmarks/layout.html" %}
+{% load i18n static %}
+
+{% block head %}
+  {% translate "Site Adapters - Linkding" as page_title %}
+  {% with page_title=page_title %}
+    {{ block.super }}
+  {% endwith %}
+  <link href="{% static 'site-adapters.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
+{% endblock %}
+
+{% block content %}
+  <main class="settings-page" aria-labelledby="main-heading" ld-settings-page>
+    <div class="settings-page-header">
+      <div>
+        <h1 id="main-heading">{% translate "Site Adapters" %}</h1>
+      </div>
+    </div>
+
+    <div class="settings-layout">
+      <div class="settings-content">
+        <section class="settings-section" aria-labelledby="credentials-heading">
+          <div class="settings-section-heading">
+            <h2 id="credentials-heading">{% translate "Credentials" %}</h2>
+          </div>
+          <div class="settings-card settings-card-stack">
+            <div class="settings-row">
+              <div class="settings-copy">
+                <label class="settings-label">{% translate "Manage Credentials" %}</label>
+                <div class="form-input-hint">
+                  {% translate "Manage cookies, headers, and tokens for site adapters." %}
+                </div>
+              </div>
+              <div class="settings-control">
+                <button type="button" class="btn btn-primary" id="btn-add-credential">
+                  {% translate "Add Credential" %}
+                </button>
+              </div>
+            </div>
+            <div id="credential-list" class="wa-credential-list"></div>
+          </div>
+        </section>
+
+        <section class="settings-section" aria-labelledby="toggles-heading">
+          <div class="settings-section-heading">
+            <h2 id="toggles-heading">{% translate "Site Toggles" %}</h2>
+          </div>
+          <div class="settings-card settings-card-stack">
+            <div id="toggle-prefs-list"></div>
+            <div id="toggle-prefs-empty" style="display:none">
+              <p class="text-gray">{% translate "No customizable sites available yet." %}</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="modals"></div>
+  </main>
+
+  <script>
+    window.__ld_csrf_token = "{{ csrf_token }}";
+    window.__ld_urls = window.__ld_urls || {};
+    window.__ld_urls.site_adapters_api = "{% url 'linkding:settings.site_adapters.api' %}";
+    window.__ld_toggles_url = "/settings/site-adapters/toggles";
+  </script>
+  <script src="{% static 'credentials.js' %}?v={{ app_version }}"></script>
+{% endblock %}
