@@ -30,12 +30,14 @@ from site_adapters.services.config.validator import (
 logger = logging.getLogger(__name__)
 
 TEST_ASSETS_DIR = os.path.join(os.path.dirname(django_settings.LD_ASSET_FOLDER), 'site_adapters', 'test_assets')
-from site_adapters.services.base import _get_base_dir
+from site_adapters.services.base import _get_adapters_dir, _get_base_dir
 
 
 def _ensure_base_dirs():
     base_dir = _get_base_dir()
-    for name in ('domains', 'cookies', 'scripts', 'logs', 'test_assets'):
+    adapters_dir = _get_adapters_dir()
+    os.makedirs(adapters_dir, exist_ok=True)
+    for name in ('cookies', 'logs', 'test_assets'):
         os.makedirs(os.path.join(base_dir, name), exist_ok=True)
 
 
@@ -57,14 +59,17 @@ def _resolve_site_adapter_path(path: str) -> str:
     return full_path
 
 
+def _resolve_adapter_path(path: str) -> str:
+    adapters_dir = os.path.abspath(_get_adapters_dir())
+    full_path = os.path.abspath(os.path.normpath(os.path.join(adapters_dir, path)))
+    if os.path.commonpath([adapters_dir, full_path]) != adapters_dir:
+        raise ValueError('invalid path')
+    return full_path
+
+
 def _resolve_domain_path(filename: str) -> str:
-    if (
-        not filename
-        or filename != os.path.basename(filename)
-        or not (filename.endswith('.jsonc') or filename.endswith('.json'))
-    ):
-        raise ValueError('invalid filename')
-    return _resolve_site_adapter_path(os.path.join('domains', filename))
+    """解析域名文件路径。已废弃：域名现在存储在适配器文件内部。"""
+    raise NotImplementedError("Domains are now stored inside adapter files, not as separate files")
 
 
 def _invalidate_site_adapters_cache():
@@ -73,7 +78,6 @@ def _invalidate_site_adapters_cache():
 
 
 def _is_safe_subscription_name(name: str) -> bool:
-    """Validate subscription name. Empty is allowed (falls back to hash)."""
     if not name:
         return True
     if name.startswith('.'):
@@ -99,15 +103,15 @@ def _is_readonly_resource_path(rel_path: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Global config (global.jsonc) management
+# Config (config.jsonc) management
 # ---------------------------------------------------------------------------
 
-def _global_config_path() -> str:
-    return os.path.join(_get_base_dir(), 'global.jsonc')
+def _config_path() -> str:
+    return os.path.join(_get_adapters_dir(), 'config.jsonc')
 
 
-def _load_global_config() -> tuple[dict, str]:
-    path = _global_config_path()
+def _load_config() -> tuple[dict, str]:
+    path = _config_path()
     if not os.path.exists(path):
         return {}, ''
     with open(path, encoding='utf-8') as f:
@@ -116,53 +120,47 @@ def _load_global_config() -> tuple[dict, str]:
         return {}, text
     data = parse_jsonc(text)
     if not isinstance(data, dict):
-        raise ValueError('global.jsonc must be an object')
+        raise ValueError('config.jsonc must be an object')
     return data, text
 
 
-
-
-def _save_global_subscriptions(subscriptions: list[dict]):
-    # Read once, update, write — avoids TOCTOU race with concurrent requests.
-    path = _global_config_path()
+def _save_adapters_list(adapters: list[dict]):
+    path = _config_path()
     text = ''
     if os.path.exists(path):
         with open(path, encoding='utf-8') as f:
             text = f.read()
-    if text.strip():
-        data = parse_jsonc(text)
-        if not isinstance(data, dict):
-            raise ValueError('global.jsonc must be an object')
-    new_text = _replace_top_level_jsonc_value(text, '_subscriptions', subscriptions)
+    new_text = _replace_top_level_jsonc_value(text, '_adapters', adapters)
     atomic_write(path, new_text)
     _invalidate_site_adapters_cache()
 
 
-def _save_global_scope(scope: str, content: str) -> str:
+def _save_defaults_scope(content: str) -> str:
+    """保存 defaults 适配器的 '*' 配置。"""
     value = parse_jsonc(content)
     if not isinstance(value, dict):
-        raise ValueError('global scope must be an object')
-    path = _global_config_path()
-    # Single read to avoid TOCTOU race: use the same text for both
-    # validation and update.
+        raise ValueError('defaults scope must be an object')
+
+    defaults_dir = os.path.join(_get_adapters_dir(), 'defaults')
+    os.makedirs(defaults_dir, exist_ok=True)
+    defaults_path = os.path.join(defaults_dir, 'defaults.jsonc')
+
+    # 读取现有文件
     text = ''
-    if os.path.exists(path):
-        with open(path, encoding='utf-8') as f:
+    if os.path.exists(defaults_path):
+        with open(defaults_path, encoding='utf-8') as f:
             text = f.read()
-    if text.strip():
-        existing = parse_jsonc(text)
-        if not isinstance(existing, dict):
-            raise ValueError('global.jsonc must be an object')
-    new_text = _replace_top_level_jsonc_value(text, scope, value)
-    atomic_write(path, new_text)
+    new_text = _replace_top_level_jsonc_value(text, '*', value)
+    atomic_write(defaults_path, new_text)
     _invalidate_site_adapters_cache()
     return new_text
 
 
-def _get_global_subscriptions() -> list:
-    data, _ = _load_global_config()
-    subscriptions = data.get("_subscriptions", [])
-    return subscriptions if isinstance(subscriptions, list) else []
+def _get_adapters_list() -> list:
+    data, _ = _load_config()
+    adapters = data.get("_adapters", [])
+    return adapters if isinstance(adapters, list) else []
+
 
 # Test helpers
 def _sanitize_url_for_filename(url: str) -> str:
@@ -179,7 +177,6 @@ def _extract_cleanup_stats(html_path: str) -> dict:
     idx = head.find(marker)
     if idx < 0:
         return {}
-    # Support both single and double quotes
     for quote in ['"', "'"]:
         content_marker = f'content={quote}'
         content_idx = head.find(content_marker, idx)
@@ -192,6 +189,7 @@ def _extract_cleanup_stats(html_path: str) -> dict:
                 except json.JSONDecodeError:
                     pass
     return {}
+
 
 # Schema helpers
 def _schema_type(prop: dict) -> str:
@@ -231,49 +229,72 @@ def _schema_section_fields() -> dict:
     return result
 
 
-# Subscription helpers
-def _subscription_from_post(request) -> dict:
-    url = request.POST.get('url', '').strip()
+# Adapter helpers
+def _adapter_from_post(request) -> dict:
+    source = request.POST.get('source', '').strip()
     name = request.POST.get('name', '').strip()
+    adapter_id = request.POST.get('id', '').strip()
     interval_raw = request.POST.get('update_interval', '').strip()
-    from site_adapters.services.subscriptions import validate_subscription_url
-    validate_subscription_url(url)
+
+    from site_adapters.services.subscriptions import is_remote_source, validate_subscription_url
+
+    if is_remote_source(source):
+        validate_subscription_url(source)
+    elif source and not os.path.exists(source):
+        raise ValueError(f'local adapter file not found: {source}')
+
     if not _is_safe_subscription_name(name):
-        raise ValueError('invalid subscription name')
+        raise ValueError('invalid adapter name')
+    if adapter_id and not _is_safe_subscription_name(adapter_id):
+        raise ValueError('invalid adapter id')
+
     try:
         update_interval = int(interval_raw or 86400)
     except ValueError as exc:
         raise ValueError('update_interval must be an integer') from exc
     if update_interval <= 0:
         raise ValueError('update_interval must be positive')
-    item = {'url': url, 'update_interval': update_interval, 'name': name}
+
+    item = {'name': name, 'update_interval': update_interval}
+    if adapter_id:
+        item['id'] = adapter_id
+    if source:
+        item['source'] = source
     return item
 
 
-def _subscription_cache_info(sub: dict) -> dict:
-    if not isinstance(sub, dict):
+def _adapter_cache_info(adapter: dict) -> dict:
+    if not isinstance(adapter, dict):
         return {'cached': False, 'domain_count': 0}
+
     from site_adapters.services.subscriptions import (
-        _sub_name,
+        _read_subscription_file,
         list_cached_domains_from_file,
     )
-
-    url = sub.get('url', '')
-    name = sub.get('name', '')
-    cache_name = _sub_name(url, name)
-    sub_file = os.path.join(_get_base_dir(), 'subscriptions', cache_name, 'subscription.jsonc')
-    cached = os.path.exists(sub_file)
-    cached_domains = list_cached_domains_from_file(sub_file) if cached else []
+    from site_adapters.services.base import _adapter_dir
+    from site_adapters.services.base import _get_adapters_dir
+    
+    name = adapter.get('name', '')
+    source = adapter.get('source')
+    dir_name = _adapter_dir(adapter)
+    adapters_root = _get_adapters_dir()
+    file_path = os.path.join(adapters_root, dir_name, 'adapters.jsonc')
+    if source and not source.startswith('http'):
+        # Local path source
+        resolved = os.path.normpath(os.path.join(adapters_root, source)) if not os.path.isabs(source) else source
+        if os.path.exists(resolved):
+            file_path = resolved
+    cached = os.path.exists(file_path)
+    cached_domains = list_cached_domains_from_file(file_path) if cached else []
     info = {
-        'cache_name': cache_name,
+        'name': name,
         'cached': cached,
         'domain_count': len(cached_domains),
         'domains': cached_domains,
     }
     if cached:
         try:
-            from site_adapters.services.subscriptions import _read_subscription_file
-            sub_data = _read_subscription_file(sub_file)
+            sub_data = _read_subscription_file(file_path)
             if sub_data and isinstance(sub_data.get('_meta'), dict):
                 meta = sub_data['_meta']
                 info.update({
@@ -287,56 +308,60 @@ def _subscription_cache_info(sub: dict) -> dict:
     return info
 
 
-def _subscription_payload(index: int, sub) -> dict:
-    item = dict(sub) if isinstance(sub, dict) else {'url': str(sub)}
+def _adapter_payload(index: int, adapter) -> dict:
+    item = dict(adapter) if isinstance(adapter, dict) else {'name': str(adapter)}
+    item.setdefault('id', '')
+    item.setdefault('source', '')
     item.setdefault('name', '')
     item.setdefault('update_interval', 86400)
     item.setdefault('enabled', True)
     item['index'] = index
-    info = _subscription_cache_info(item)
+    from site_adapters.services.base import _adapter_dir
+    item['dir'] = _adapter_dir(item)
+    info = _adapter_cache_info(item)
     item.update(info)
-    item.setdefault('source_name', '')
-    if not item['source_name']:
-        from urllib.parse import urlparse
-        path = urlparse(item.get('url', '')).path
-        fname = os.path.basename(path)
-        for ext in ('.jsonc', '.json'):
-            if fname.endswith(ext):
-                item['source_name'] = fname[:-len(ext)]
-                break
     return item
 
-def _subscription_response() -> JsonResponse:
-    subscriptions = _get_global_subscriptions()
-    payload = [_subscription_payload(i, sub) for i, sub in enumerate(subscriptions)]
-    return JsonResponse({'subscriptions': payload})
+
+def _adapters_response() -> JsonResponse:
+    adapters = _get_adapters_list()
+    # 过滤掉 defaults（它是内部适配器，不在 UI 显示）
+    visible = [a for a in adapters if isinstance(a, dict) and a.get('name') != 'defaults']
+    payload = [_adapter_payload(i, a) for i, a in enumerate(visible)]
+    return JsonResponse({'adapters': payload})
 
 
-def _subscription_index(request, subscriptions: list) -> int:
+def _adapter_index(request, adapters: list) -> int:
     try:
         index = int(request.POST.get('index', ''))
     except ValueError as exc:
-        raise ValueError('invalid subscription index') from exc
-    if index < 0 or index >= len(subscriptions):
-        raise ValueError('invalid subscription index')
+        raise ValueError('invalid adapter index') from exc
+    if index < 0 or index >= len(adapters):
+        raise ValueError('invalid adapter index')
     return index
 
 
-def _subscription_cache_name(sub: dict) -> str:
+def _adapter_cache_name(adapter: dict) -> str:
     from site_adapters.services.subscriptions import _sub_name
-    return _sub_name(sub.get('url', ''), sub.get('name', '')) if isinstance(sub, dict) else ''
+    source = adapter.get('source', '') if isinstance(adapter, dict) else ''
+    name = adapter.get('name', '') if isinstance(adapter, dict) else ''
+    return _sub_name(source or name, name) if isinstance(adapter, dict) else ''
 
 
-def _subscription_cache_dir(sub: dict) -> str:
-    return os.path.join(_get_base_dir(), 'subscriptions', _subscription_cache_name(sub))
+def _adapter_cache_dir(adapter: dict) -> str:
+    from site_adapters.services.base import _adapter_dir, _get_adapters_dir
+    if not isinstance(adapter, dict):
+        return ''
+    dir_name = _adapter_dir(adapter)
+    return os.path.join(_get_adapters_dir(), dir_name)
 
 
-def _has_subscription_conflict(subscriptions: list, item: dict, ignore_index: int | None = None) -> bool:
-    new_cache_name = _subscription_cache_name(item)
-    for i, sub in enumerate(subscriptions):
-        if i == ignore_index or not isinstance(sub, dict):
+def _has_adapter_conflict(adapters: list, item: dict, ignore_index: int | None = None) -> bool:
+    new_id = item.get('id', '')
+    new_name = item.get('name', '')
+    for i, a in enumerate(adapters):
+        if i == ignore_index or not isinstance(a, dict):
             continue
-        if sub.get('url') == item.get('url') or _subscription_cache_name(sub) == new_cache_name:
+        if a.get('id') == new_id and a.get('name') == new_name:
             return True
     return False
-

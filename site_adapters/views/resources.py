@@ -19,7 +19,7 @@ from site_adapters.views.helpers import (
     _is_safe_resource_name,
     _resolve_site_adapter_path,
     _resource_full_path_and_rel,
-    _save_global_scope,
+    _save_defaults_scope,
     site_adapters_required,
 )
 
@@ -50,7 +50,6 @@ def resources(request):
                 'is_dir': os.path.isdir(item_path),
                 'size': os.path.getsize(item_path) if os.path.isfile(item_path) else 0,
         })
-        # 文件夹在前，文件在后，各自按名称排序
         items.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
         return JsonResponse({'path': rel_path, 'items': items})
 
@@ -96,7 +95,6 @@ def resource_manage(request):
         if action == 'create_dir':
             os.makedirs(new_path)
         else:
-            # Read template content if specified
             content = ''
             if template:
                 template_path = os.path.join(_get_base_dir(), 'etc', 'templates', template)
@@ -175,7 +173,7 @@ def resource_manage(request):
 @site_adapters_required
 @require_POST
 def resource_save(request):
-    """保存资源模式中的文本文件。"""
+    """保存资源文件。支持特殊的 scope 保存（defaults 适配器的 "*" 块）。"""
     path = request.POST.get('path', '')
     content = request.POST.get('content', '')
     scope = request.POST.get('scope', '')
@@ -183,10 +181,10 @@ def resource_save(request):
         return JsonResponse({'error': 'path required'}, status=400)
 
     if scope:
-        if path != 'global.jsonc' or scope != '*':
+        if scope != '*':
             return JsonResponse({'error': 'invalid scope'}, status=400)
         try:
-            new_content = _save_global_scope(scope, content)
+            new_content = _save_defaults_scope(content)
         except (ValueError, json.JSONDecodeError) as e:
             return JsonResponse({'error': str(e)}, status=400)
         return JsonResponse({'success': True, 'path': path, 'content': new_content})
@@ -211,17 +209,15 @@ def resource_save(request):
             parsed = parse_jsonc(content)
         except json.JSONDecodeError as e:
             return JsonResponse({'error': f'JSON 解析失败: {e}'}, status=400)
-        # Structural validation for global.jsonc
-        if path == 'global.jsonc' or path.endswith('/global.jsonc'):
+        # Structural validation for config.jsonc
+        if path == 'config.jsonc' or path.endswith('/config.jsonc'):
             if not isinstance(parsed, dict):
-                return JsonResponse({'error': 'global.jsonc 顶层必须是对象'}, status=400)
-            subs = parsed.get('_subscriptions')
-            if subs is not None and not isinstance(subs, list):
-                return JsonResponse({'error': '_subscriptions 必须是数组'}, status=400)
+                return JsonResponse({'error': 'config.jsonc 顶层必须是对象'}, status=400)
+            adapters = parsed.get('_adapters')
+            if adapters is not None and not isinstance(adapters, list):
+                return JsonResponse({'error': '_adapters 必须是数组'}, status=400)
 
     atomic_write(full_path, content)
 
     _invalidate_site_adapters_cache()
     return JsonResponse({'success': True, 'path': path})
-
-

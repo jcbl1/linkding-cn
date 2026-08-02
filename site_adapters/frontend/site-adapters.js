@@ -44,30 +44,33 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
   // ===== Domain list =====
   var domainEntries = [];
   function loadDomainList() {
-    apiGet(urls.domainsAll).then(function (data) {
-      domainEntries = [];
-      (data.local || []).forEach(function (key) {
-        domainEntries.push({ domain_key: key, filename: key + '.jsonc', source: 'local', is_alias: false, target: '', requires_cookie: false, has_cookie: false, disabled: false });
-      });
-      (data.subscriptions || []).forEach(function (sub) {
-        (sub.domains || []).forEach(function (d) {
-          domainEntries.push({ domain_key: d.domain, filename: d.domain + '.jsonc', source: 'subscription', sub_name: sub.name, is_alias: false, target: '', requires_cookie: false, has_cookie: false, disabled: !d.enabled || d.overridden });
-        });
-      });
-      renderDomainList();
-    }).catch(function (e) { console.error('loadDomainList:', e); });
+    // 从模板提供的 domain_files_json 读取
+    var data = window.__ld_domain_files || [];
+    domainEntries = data.map(function (d) {
+      return {
+        domain_key: d.domain_key || '',
+        adapter: d.adapter || '',
+        source: d.adapter === 'defaults' ? 'local' : 'subscription',
+        is_alias: d.is_alias || false,
+        target: d.target || '',
+        requires_cookie: d.requires_cookie || false,
+        has_cookie: d.has_cookie || false,
+        disabled: d.disabled || false
+      };
+    });
+    renderDomainList();
   }
 
   var domainSortAsc = true, activeDomainFile = null;
   function renderDomainList(filter) {
     var list = document.getElementById('domain-list'); if (!list) return;
-    var h = '<div class="wa-domain-item wa-domain-global" data-filename="global.jsonc" data-domain="*" data-is-global="1"><code>*</code><small class="wa-domain-note">' + gettext('global defaults') + '</small></div>';
+    var h = '<div class="wa-domain-item wa-domain-global" data-domain_key="*" data-is-global="1" data-domain="*" data-is-global="1"><code>*</code><small class="wa-domain-note">' + gettext('global defaults') + '</small></div>';
     var items = domainEntries.slice();
     if (filter) { var q = filter.toLowerCase(); items = items.filter(function (x) { return x.domain_key.toLowerCase().indexOf(q) >= 0; }); }
     if (!domainSortAsc) items.reverse();
     items.forEach(function (d) {
-      var cls = 'wa-domain-item' + (d.disabled ? ' wa-domain-sub-disabled' : '') + (activeDomainFile && activeDomainFile.filename === d.filename ? ' active' : '');
-      h += '<div class="' + cls + '" data-filename="' + esc(d.filename) + '" data-domain="' + esc(d.domain_key) + '">';
+      var cls = 'wa-domain-item' + (d.disabled ? ' wa-domain-sub-disabled' : '') + (activeDomainFile && activeDomainFile.domain_key === d.filename ? ' active' : '');
+      h += '<div class="' + cls + '" data-domain_key="' + esc(d.filename) + '" data-domain="' + esc(d.domain_key) + '">';
       h += '<code>' + esc(d.domain_key) + '</code>';
       if (d.is_alias && d.target) h += '<small class="wa-alias-target">&rarr; ' + esc(d.target) + '</small>';
       h += '<label class="form-switch wa-domain-local-switch"><input type="checkbox" ' + (d.disabled ? '' : 'checked') + ' data-local-domain="' + esc(d.domain_key) + '"><i class="form-icon"></i></label>';
@@ -82,15 +85,15 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     });
   }
   function selectDomain(fn) {
-    activeDomainFile = domainEntries.find(function (d) { return d.filename === fn; }) || { filename: fn, domain_key: fn.replace(/\.(jsonc|json)$/, '') };
+    activeDomainFile = domainEntries.find(function (d) { return d.domain_key === fn; }) || { domain_key: fn, source: 'local' };
     renderDomainList(document.getElementById('domain-search').value);
     document.getElementById('domain-editor-header').hidden = false;
     document.getElementById('editor-empty').hidden = true;
     document.getElementById('editor-content').hidden = false;
     document.getElementById('editor-filename').textContent = fn;
-    document.getElementById('btn-delete-domain').hidden = (fn === 'global.jsonc');
+    document.getElementById('btn-delete-domain').hidden = (fn === '*');
     document.getElementById('cookie-banner').hidden = true;
-    apiGet(urls.domainRead + '?filename=' + encodeURIComponent(fn)).then(function (d) {
+    apiGet(urls.domainRead + '?domain_key=' + encodeURIComponent(fn)).then(function (d) {
       var c = document.getElementById('cm-domain-container'); c.textContent = d.content || '';
       c.style.cssText = 'font-family:monospace;font-size:13px;white-space:pre-wrap;padding:12px;min-height:300px;outline:none;overflow:auto;background:var(--wa-surface-alt);';
       c.contentEditable = 'true'; c.setAttribute('spellcheck', 'false');
@@ -100,13 +103,13 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
   document.getElementById('btn-sort-domains').addEventListener('click', function () { domainSortAsc = !domainSortAsc; renderDomainList(document.getElementById('domain-search').value); });
   document.getElementById('btn-save-domain').addEventListener('click', function () {
     if (!activeDomainFile) return;
-    apiPost(urls.domainSave, { filename: activeDomainFile.filename, content: document.getElementById('cm-domain-container').textContent || '' })
+    apiPost(urls.domainSave, { filename: activeDomainFile.domain_key, content: document.getElementById('cm-domain-container').textContent || '' })
       .then(function (r) { if (r.error) toast(r.error, 'error'); else { toast(gettext('Saved'), 'success'); loadDomainList(); } });
   });
   document.getElementById('btn-delete-domain').addEventListener('click', function () {
-    if (!activeDomainFile || activeDomainFile.filename === 'global.jsonc') return;
+    if (!activeDomainFile || activeDomainFile.domain_key === 'global.jsonc') return;
     if (!confirm(gettext('Delete') + ' ' + activeDomainFile.domain_key + '?')) return;
-    apiPost(urls.domainDelete, { filename: activeDomainFile.filename }).then(function (r) {
+    apiPost(urls.domainDelete, { filename: activeDomainFile.domain_key }).then(function (r) {
       if (r.error) { toast(r.error, 'error'); return; }
       activeDomainFile = null; document.getElementById('domain-editor-header').hidden = true;
       document.getElementById('editor-empty').hidden = false; document.getElementById('editor-content').hidden = true;
@@ -118,21 +121,21 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     apiPost(urls.domainCreate, { domain_key: n }).then(function (r) { if (r.error) toast(r.error, 'error'); else loadDomainList(); });
   });
   document.getElementById('btn-rename-domain').addEventListener('click', function () {
-    if (!activeDomainFile || activeDomainFile.filename === 'global.jsonc') return;
+    if (!activeDomainFile || activeDomainFile.domain_key === 'global.jsonc') return;
     var nn = prompt(gettext('New domain name:'), activeDomainFile.domain_key);
     if (!nn || nn === activeDomainFile.domain_key) return;
-    apiPost(urls.domainRename, { old_filename: activeDomainFile.filename, new_domain: nn }).then(function (r) {
+    apiPost(urls.domainRename, { old_filename: activeDomainFile.domain_key, new_domain: nn }).then(function (r) {
       if (r.error) toast(r.error, 'error'); else { activeDomainFile = null; loadDomainList(); }
     });
   });
   document.getElementById('btn-copy-to-local').addEventListener('click', function () {
     if (!activeDomainFile) return;
-    apiPost(urls.domainSave, { filename: activeDomainFile.filename, action: 'copy_to_local' })
+    apiPost(urls.domainSave, { filename: activeDomainFile.domain_key, action: 'copy_to_local' })
       .then(function (r) { if (r.error) toast(r.error, 'error'); else toast(gettext('Copied to local'), 'success'); });
   });
   document.getElementById('btn-validate').addEventListener('click', function () {
     if (!activeDomainFile) return;
-    apiPost(urls.action, { action: 'validate', filename: activeDomainFile.filename, content: document.getElementById('cm-domain-container').textContent || '' })
+    apiPost(urls.action, { action: 'validate', filename: activeDomainFile.domain_key, content: document.getElementById('cm-domain-container').textContent || '' })
       .then(function (r) {
         document.getElementById('domain-validate-results').hidden = false;
         document.getElementById('domain-validate-status').textContent = r.error ? gettext('Invalid') : gettext('Valid');
@@ -144,26 +147,40 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
   document.getElementById('btn-paste-cookie').addEventListener('click', function () {
     if (!activeDomainFile) return;
     var c = prompt(gettext('Paste cookie string:')); if (!c) return;
-    apiPost(urls.saveCookie, { domain: activeDomainFile.domain_key, cookie: c })
+    apiPost(urls.saveCookie, { domain_key: activeDomainFile.domain_key, cookie: c })
       .then(function (r) { if (r.error) toast(r.error, 'error'); else { toast(gettext('Cookie saved'), 'success'); loadDomainList(); } });
   });
 
   // ===== Subscriptions =====
-  function loadSubscriptions() { apiGet(urls.subscriptionManage).then(function (d) { renderSubscriptions(d.subscriptions || []); }).catch(function (e) { console.error('loadSubscriptions:', e); }); }
+  function loadSubscriptions() { apiGet(urls.subscriptionManage).then(function (d) { renderSubscriptions(d.adapters || []); }).catch(function (e) { console.error('loadSubscriptions:', e); }); }
   function renderSubscriptions(subs) {
     var list = document.getElementById('subscription-list'); if (!list) return;
-    if (!subs.length) { list.innerHTML = '<p class="text-gray" style="padding:16px">' + gettext('No subscriptions.') + '</p>'; return; }
+    if (!subs.length) { list.innerHTML = '<p class="text-gray" style="padding:16px">' + gettext('No adapters.') + '</p>'; return; }
     var h = '';
     subs.forEach(function (s) {
-      h += '<div class="wa-cookie-row" style="padding:10px 12px"><div class="wa-cookie-header"><strong>' + esc(s.name || s.url) + '</strong><code style="font-size:11px;color:var(--wa-muted)">' + esc(s.url) + '</code><div style="margin-left:auto;display:flex;gap:4px"><button class="btn btn-sm js-sub-fetch" data-url="' + esc(s.url) + '">' + gettext('Fetch') + '</button><button class="btn btn-sm btn-error js-sub-delete" data-url="' + esc(s.url) + '">' + gettext('Delete') + '</button></div></div></div>';
+      var label = (s.id ? s.id + '.' : '') + s.name;
+      var source = s.source || '(local)';
+      var enabled = s.enabled !== false;
+      h += '<div class="wa-cookie-row" style="padding:10px 12px"><div class="wa-cookie-header">';
+      h += '<strong>' + esc(label) + '</strong>';
+      h += '<code style="font-size:11px;color:var(--wa-muted)">' + esc(source) + '</code>';
+      h += '<small style="color:var(--wa-muted)">' + (s.domain_count || 0) + ' domains</small>';
+      h += '<div style="margin-left:auto;display:flex;gap:4px">';
+      if (!enabled) h += '<span class="wa-badge wa-badge-warn">disabled</span>';
+      if (s.source && s.source.startsWith('http')) h += '<button class="btn btn-sm js-sub-fetch" data-index="' + s.index + '">' + gettext('Fetch') + '</button>';
+      h += '<button class="btn btn-sm btn-error js-sub-delete" data-index="' + s.index + '">' + gettext('Delete') + '</button>';
+      h += '</div></div></div>';
     });
     list.innerHTML = h;
-    list.querySelectorAll('.js-sub-fetch').forEach(function (b) { b.addEventListener('click', function () { apiPost(urls.subscriptionManage, { action: 'update', url: this.dataset.url }).then(function (r) { if (r.error) toast(r.error, 'error'); else toast(gettext('Fetched'), 'success'); }); }); });
-    list.querySelectorAll('.js-sub-delete').forEach(function (b) { b.addEventListener('click', function () { if (confirm(gettext('Delete subscription') + '?')) apiPost(urls.subscriptionManage, { action: 'delete', url: this.dataset.url }).then(function (r) { if (r.error) toast(r.error, 'error'); else loadSubscriptions(); }); }); });
+    list.querySelectorAll('.js-sub-fetch').forEach(function (b) { b.addEventListener('click', function () { apiPost(urls.subscriptionManage, { action: 'update', index: this.dataset.index }).then(function (r) { if (r.error) toast(r.error, 'error'); else { toast(gettext('Fetched'), 'success'); loadSubscriptions(); } }); }); });
+    list.querySelectorAll('.js-sub-delete').forEach(function (b) { b.addEventListener('click', function () { if (confirm(gettext('Delete adapter') + '?')) apiPost(urls.subscriptionManage, { action: 'delete', index: this.dataset.index }).then(function (r) { if (r.error) toast(r.error, 'error'); else loadSubscriptions(); }); }); });
   }
   document.getElementById('btn-add-subscription').addEventListener('click', function () {
-    var url = prompt(gettext('Subscription URL:')); if (!url) return; var name = prompt(gettext('Name (optional):'));
-    var data = { action: 'add', url: url }; if (name) data.name = name;
+    var source = prompt(gettext('Source (URL or local path):')); if (!source) return;
+    var name = prompt(gettext('Name:')); if (!name) return;
+    var adapterId = prompt(gettext('ID (optional):'));
+    var data = { action: 'add', source: source, name: name };
+    if (adapterId) data.id = adapterId;
     apiPost(urls.subscriptionManage, data).then(function (r) { if (r.error) toast(r.error, 'error'); else loadSubscriptions(); });
   });
 

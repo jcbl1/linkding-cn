@@ -514,8 +514,8 @@
       "description": "订阅源元数据（gkd 风格）",
       "properties": {
         "id": {
-          "type": "integer",
-          "description": "订阅唯一标识（建议使用时间戳）"
+          "type": "string",
+          "description": "命名空间标识，如 com.rsshub。与 name 组合为目录名 {id}.{name}"
         },
         "name": {
           "type": "string",
@@ -535,7 +535,8 @@
         }
       },
       "required": [
-        "version"
+        "version",
+        "id"
       ]
     }
   },

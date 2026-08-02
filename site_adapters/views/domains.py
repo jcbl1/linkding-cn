@@ -1,161 +1,225 @@
 """
-Domain CRUD + rename.
+Domain CRUD — 操作适配器文件中的 domains 块。
+
+域名现在存储在适配器文件中（如 defaults/defaults.jsonc 的 "domains" 键下），
+不再作为独立文件存在。
 """
 import json
+import logging
 import os
+import re
 
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 
 from bookmarks.utils import atomic_write, is_safe_domain_key
-from site_adapters.services.config import parse_jsonc
+from site_adapters.services.config import parse_jsonc, load_jsonc_file
+from site_adapters.services.base import _get_adapters_dir
+from site_adapters.services.subscriptions import resolve_adapter_path, _read_subscription_file
 from site_adapters.views.helpers import (
     _invalidate_site_adapters_cache,
-    _resolve_domain_path,
+    _get_adapters_list,
     site_adapters_required,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _defaults_file_path() -> str:
+    """获取默认适配器文件路径。"""
+    adapters_list = _get_adapters_list()
+    if adapters_list:
+        first = adapters_list[0]
+        if isinstance(first, dict):
+            return resolve_adapter_path(
+                first.get('name', 'defaults'),
+                first.get('source'),
+            )
+    return os.path.join(_get_adapters_dir(), 'defaults', 'defaults.jsonc')
+
+
+def _ensure_defaults_file():
+    """确保 defaults 适配器文件存在。"""
+    file_path = _defaults_file_path()
+    if not os.path.exists(file_path):
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        content = '{\n  "domains": {}\n}\n'
+        atomic_write(file_path, content)
+    return file_path
+
+
+def _read_domain_from_adapter(domain_key: str) -> tuple[str | None, str | None, dict | None]:
+    """在所有适配器中查找域名，返回 (file_path, domain_key, config)。"""
+    adapters_list = _get_adapters_list()
+    for adapter in adapters_list:
+        if not isinstance(adapter, dict) or adapter.get('enabled') is False:
+            continue
+        name = adapter.get('name', '')
+        source = adapter.get('source')
+        file_path = resolve_adapter_path(name, source)
+        if not os.path.exists(file_path):
+            continue
+
+        data = _read_subscription_file(file_path)
+        if not data or not isinstance(data.get('domains'), dict):
+            continue
+
+        if domain_key in data['domains']:
+            return file_path, domain_key, data['domains'][domain_key]
+
+    return None, None, None
+
+
+def _write_domain_to_file(file_path: str, domain_key: str, config: dict) -> str:
+    """向适配器文件的 domains 块写入一个域名配置。"""
+    # 读取现有文件
+    text = ''
+    if os.path.exists(file_path):
+        with open(file_path, encoding='utf-8') as f:
+            text = f.read()
+    data = parse_jsonc(text) if text.strip() else {}
+
+    if not isinstance(data, dict):
+        data = {}
+    if not isinstance(data.get('domains'), dict):
+        data['domains'] = {}
+
+    data['domains'][domain_key] = config
+
+    # 重建 JSONC（保持 domains 在前）
+    new_text = json.dumps(data, indent=2, ensure_ascii=False)
+    atomic_write(file_path, new_text)
+    _invalidate_site_adapters_cache()
+    return new_text
+
+
+def _delete_domain_from_file(file_path: str, domain_key: str):
+    """从适配器文件的 domains 块中删除一个域名。"""
+    text = ''
+    if os.path.exists(file_path):
+        with open(file_path, encoding='utf-8') as f:
+            text = f.read()
+    data = parse_jsonc(text) if text.strip() else {}
+
+    if isinstance(data, dict) and isinstance(data.get('domains'), dict):
+        data['domains'].pop(domain_key, None)
+        new_text = json.dumps(data, indent=2, ensure_ascii=False)
+        atomic_write(file_path, new_text)
+
+    _invalidate_site_adapters_cache()
 
 
 @site_adapters_required
 def domain_read(request):
-    """读取域名文件内容。"""
-    fname = request.GET.get('filename', '')
-    if not fname:
-        return JsonResponse({'error': 'filename required'}, status=400)
+    """读取域名配置。"""
+    domain_key = request.GET.get('domain_key', '')
+    if not domain_key:
+        return JsonResponse({'error': 'domain_key required'}, status=400)
 
-    try:
-        fpath = _resolve_domain_path(fname)
-    except ValueError as e:
-        return JsonResponse({'error': str(e)}, status=400)
-    if not os.path.exists(fpath):
-        return JsonResponse({'error': 'file not found'}, status=404)
+    file_path, found_key, config = _read_domain_from_adapter(domain_key)
+    if found_key is None:
+        return JsonResponse({'error': 'domain not found'}, status=404)
 
-    try:
-        with open(fpath, encoding='utf-8') as f:
-            content = f.read()
-        return JsonResponse({'filename': fname, 'content': content})
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+    return JsonResponse({
+        'domain_key': found_key,
+        'file_path': file_path,
+        'config': config,
+    })
 
 
 @site_adapters_required
 @require_POST
 def domain_save(request):
-    """保存域名文件。"""
-    fname = request.POST.get('filename', '')
+    """保存域名配置。覆盖现有域或创建/更新在 defaults 适配器中。"""
+    domain_key = request.POST.get('domain_key', '')
     content = request.POST.get('content', '')
-    if not fname:
-        return JsonResponse({'error': 'filename required'}, status=400)
+    if not domain_key:
+        return JsonResponse({'error': 'domain_key required'}, status=400)
 
     # 验证 JSON / JSONC
     try:
-        if fname.endswith('.json'):
-            json.loads(content)
-        else:
-            parse_jsonc(content)
+        config = parse_jsonc(content)
     except json.JSONDecodeError as e:
         return JsonResponse({'error': f'JSON 解析失败: {e}'}, status=400)
 
-    try:
-        fpath = _resolve_domain_path(fname)
-    except ValueError as e:
-        return JsonResponse({'error': str(e)}, status=400)
-    atomic_write(fpath, content)
+    if not isinstance(config, dict):
+        return JsonResponse({'error': 'domain config must be an object'}, status=400)
 
-    _invalidate_site_adapters_cache()
-    return JsonResponse({'success': True, 'filename': fname})
+    # 查找现有位置或使用 defaults
+    file_path, _, _ = _read_domain_from_adapter(domain_key)
+    if file_path is None:
+        file_path = _ensure_defaults_file()
+
+    _write_domain_to_file(file_path, domain_key, config)
+    return JsonResponse({'success': True, 'domain_key': domain_key})
 
 
 @site_adapters_required
 @require_POST
 def domain_delete(request):
-    """删除域名文件。"""
-    fname = request.POST.get('filename', '')
-    if not fname:
-        return JsonResponse({'error': 'filename required'}, status=400)
+    """删除域名配置。"""
+    domain_key = request.POST.get('domain_key', '')
+    if not domain_key:
+        return JsonResponse({'error': 'domain_key required'}, status=400)
 
-    try:
-        fpath = _resolve_domain_path(fname)
-    except ValueError as e:
-        return JsonResponse({'error': str(e)}, status=400)
-    if os.path.exists(fpath):
-        os.remove(fpath)
+    file_path, found_key, _ = _read_domain_from_adapter(domain_key)
+    if found_key is None:
+        return JsonResponse({'error': 'domain not found'}, status=404)
 
-    _invalidate_site_adapters_cache()
+    _delete_domain_from_file(file_path, found_key)
     return JsonResponse({'success': True})
 
 
 @site_adapters_required
 @require_POST
 def domain_create(request):
-    """创建新域名文件。"""
+    """创建新域名配置（写入 defaults 适配器）。"""
     domain_key = request.POST.get('domain_key', '')
     if not domain_key:
         return JsonResponse({'error': 'domain_key required'}, status=400)
 
-    # 安全检查
     if not is_safe_domain_key(domain_key):
         return JsonResponse({'error': 'invalid domain key'}, status=400)
 
-    fname = f'{domain_key}.jsonc'
-    try:
-        fpath = _resolve_domain_path(fname)
-    except ValueError as e:
-        return JsonResponse({'error': str(e)}, status=400)
-    if os.path.exists(fpath):
-        return JsonResponse({'error': 'file already exists'}, status=409)
+    # 检查是否已存在
+    _, found, _ = _read_domain_from_adapter(domain_key)
+    if found:
+        return JsonResponse({'error': 'domain already exists'}, status=409)
 
-    # 创建默认配置（JSONC 格式）
-    default_config = """{
-  "default": {
-    "http": {}
-  },
-  "metadata": {},
-  "snapshot": {},
-  "reader": {}
-}"""
+    file_path = _ensure_defaults_file()
 
-    atomic_write(fpath, default_config)
-
-    _invalidate_site_adapters_cache()
-    return JsonResponse({'success': True, 'filename': fname})
-
+    default_config = {
+        "default": {"http": {}},
+        "metadata": {},
+        "snapshot": {},
+        "reader": {},
+    }
+    _write_domain_to_file(file_path, domain_key, default_config)
+    return JsonResponse({'success': True, 'domain_key': domain_key})
 
 
 @site_adapters_required
 @require_POST
 def domain_rename(request):
-    """重命名域名文件。"""
-    old_filename = request.POST.get('old_filename', '')
-    new_domain = request.POST.get('new_domain', '')
-    if not old_filename or not new_domain:
-        return JsonResponse({'error': 'old_filename and new_domain required'}, status=400)
+    """重命名域名（在同一适配器文件内移动）。"""
+    old_domain = request.POST.get('old_domain_key', '')
+    new_domain = request.POST.get('new_domain_key', '')
+    if not old_domain or not new_domain:
+        return JsonResponse({'error': 'old_domain_key and new_domain_key required'}, status=400)
 
-    # 安全检查
     if not is_safe_domain_key(new_domain):
-        return JsonResponse({'error': 'invalid domain'}, status=400)
+        return JsonResponse({'error': 'invalid new domain key'}, status=400)
 
-    try:
-        old_path = _resolve_domain_path(old_filename)
-    except ValueError as e:
-        return JsonResponse({'error': str(e)}, status=400)
-    if not os.path.exists(old_path):
-        return JsonResponse({'error': 'old file not found'}, status=404)
+    file_path, found_key, config = _read_domain_from_adapter(old_domain)
+    if found_key is None:
+        return JsonResponse({'error': 'domain not found'}, status=404)
 
-    # 新文件名
-    if old_filename.endswith('.jsonc'):
-        new_filename = new_domain + '.jsonc'
-    else:
-        new_filename = new_domain + '.json'
+    # 检查新名称是否已存在
+    _, new_found, _ = _read_domain_from_adapter(new_domain)
+    if new_found:
+        return JsonResponse({'error': 'target domain already exists'}, status=409)
 
-    try:
-        new_path = _resolve_domain_path(new_filename)
-    except ValueError as e:
-        return JsonResponse({'error': str(e)}, status=400)
-    if os.path.exists(new_path):
-        return JsonResponse({'error': 'target already exists'}, status=409)
-
-    os.rename(old_path, new_path)
-    _invalidate_site_adapters_cache()
-    return JsonResponse({'success': True, 'old_filename': old_filename, 'new_filename': new_filename})
-
+    # 删除旧域名，添加新域名
+    _delete_domain_from_file(file_path, found_key)
+    _write_domain_to_file(file_path, new_domain, config)
+    return JsonResponse({'success': True, 'old_domain_key': old_domain, 'new_domain_key': new_domain})

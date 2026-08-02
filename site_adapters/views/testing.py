@@ -30,7 +30,6 @@ from site_adapters.services.execution_log import collect_executions
 from site_adapters.views.helpers import (
     TEST_ASSETS_DIR,
     _get_base_dir,
-    _resolve_domain_path,
     _sanitize_url_for_filename,
     site_adapters_required,
 )

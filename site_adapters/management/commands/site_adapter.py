@@ -177,18 +177,24 @@ class Command(BaseCommand):
 
     def _load_subscription_dir(self, path: str):
         root = os.path.abspath(path)
-        # 尝试读取单文件格式
-        sub_file = os.path.join(root, "subscription.jsonc")
+        # 尝试读取 adapters.jsonc
+        sub_file = os.path.join(root, "adapters.jsonc")
         if os.path.exists(sub_file):
             with open(sub_file, encoding="utf-8") as f:
                 data = parse_jsonc(f.read())
             if isinstance(data, dict) and isinstance(data.get("domains"), dict):
-                # 记录 scripts 目录中的文件
                 scripts_dir = os.path.join(root, "scripts")
                 if os.path.isdir(scripts_dir):
                     data["_available_scripts"] = os.listdir(scripts_dir)
                 return data, root
-        # 回退：尝试目录格式（兼容旧格式）
+        # 回退：旧 subscription.jsonc
+        old_sub = os.path.join(root, "subscription.jsonc")
+        if os.path.exists(old_sub):
+            with open(old_sub, encoding="utf-8") as f:
+                data = parse_jsonc(f.read())
+            if isinstance(data, dict) and isinstance(data.get("domains"), dict):
+                return data, root
+        # 回退：旧目录格式
         data = {"domains": {}}
         global_path = os.path.join(root, "global.jsonc")
         if os.path.exists(global_path):

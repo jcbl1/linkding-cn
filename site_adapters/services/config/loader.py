@@ -1,17 +1,35 @@
 """
-Loader — 域名文件加载 + 合并 + 分源缓存
+Loader — 适配器配置加载 + 合并 + 分源缓存
 
 目录结构：
   data/site_adapters/
-  ├── global.jsonc          # 全局默认 + _subscriptions
-  └── domains/              # 每个域名一个文件
-      ├── *.zhihu.com.jsonc
-      └── xhslink.com.jsonc
+    adapters/
+      config.jsonc            # _adapters 列表：声明所有适配器及优先级
+      defaults/
+        defaults.jsonc         # 最高优先级适配器
+        scripts/
+      fivefilters/
+        adapters.jsonc
+        scripts/
+      ...
+
+config.jsonc 格式：
+{
+  "_adapters": [
+    {"name": "defaults"},
+    {"name": "rsshub", "source": "https://...", "interval": 86400, "enabled": true},
+    {"name": "my-local", "source": "./path/to/adapters.jsonc"}
+  ]
+}
+
+- name: 适配器目录名（相对于 adapters/）
+- source: 文件来源（https:// 远程 / 本地路径 / 省略 = adapters/<name>/adapters.jsonc）
+- interval: 远程源更新间隔（秒），默认 86400
+- enabled: 是否启用，默认 true
 
 合并优先级：
-  本地 global.jsonc 的 * 默认值（最高）
-    > 本地 domains/
-      > 订阅源 domains/ > 订阅源 global.jsonc
+  _adapters 数组顺序 = 优先级（第一个最高）
+  → 第一个适配器的 "*" 作为全局覆盖（最高优先级）
 """
 
 import copy
@@ -24,6 +42,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+from site_adapters.services.base import _get_adapters_dir
 from site_adapters.services.config import (
     _resolve_all_paths,
     deep_merge,
@@ -37,45 +56,27 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# 适配器文件名
+# ---------------------------------------------------------------------------
+
+_ADAPTER_FILE = 'adapters.jsonc'
+_CONFIG_FILE = 'config.jsonc'
+
+
+# ---------------------------------------------------------------------------
 # 分源缓存
 # ---------------------------------------------------------------------------
 
 class SourceCache:
-    """按源缓存域名配置，通过 mtime 检测变化。
-
-    Thread-safe: all reads and writes to shared state are protected by a lock.
-    """
+    """按源缓存域名配置，通过 mtime 检测变化。"""
 
     def __init__(self):
         self._lock = threading.Lock()
         self._sources: dict[str, tuple[tuple, dict]] = {}
         self._merged: dict | None = None
-        self._sub_order: list[str] = []
-        self._last_check: float = 0  # monotonic timestamp of last signature check
-
-    def _load_domains_dir(self, dir_path: str) -> dict:
-        """扫描 domains/ 目录，返回 {domain_key: config}。"""
-        abs_dir = os.path.abspath(dir_path)
-        if not os.path.isdir(abs_dir):
-            return {}
-        domains = {}
-        for fname in os.listdir(abs_dir):
-            if not (fname.endswith('.jsonc') or fname.endswith('.json')):
-                continue
-            fpath = os.path.join(abs_dir, fname)
-            try:
-                data = load_jsonc_file(fpath)
-                if fname.endswith('.jsonc'):
-                    domain_key = fname[:-6]
-                elif fname.endswith('.json'):
-                    domain_key = fname[:-5]
-                # 解析相对路径
-                file_dir = str(Path(fpath).resolve().parent)
-                data = _resolve_all_paths(data, file_dir)
-                domains[domain_key] = data
-            except (json.JSONDecodeError, OSError) as e:
-                logger.error("Failed to parse domain file: %s: %s", fpath, e)
-        return domains
+        self._adapter_order: list[str] = []
+        self._first_adapter_name: str | None = None
+        self._last_check: float = 0
 
     def _path_signature(self, path: str) -> tuple:
         if os.path.isfile(path):
@@ -86,7 +87,6 @@ class SourceCache:
                 return (path, 0, 0)
         if not os.path.isdir(path):
             return (path, 0)
-        # Full walk
         sig = []
         for root, dirs, files in os.walk(path):
             dirs[:] = [d for d in dirs if not d.startswith('.')]
@@ -101,92 +101,159 @@ class SourceCache:
                     pass
         return tuple(sig)
 
-    def _subscription_dir_name(self, sub: dict) -> str:
-        from site_adapters.services.subscriptions import _sub_name
-        return _sub_name(sub.get('url', ''), sub.get('name', ''))
+    def _resolve_adapter_path(self, entry: dict, adapters_dir: str) -> str:
+        """解析适配器文件路径。
 
+        entry: {"id": "...", "name": "...", "source": "..."}
+        
+        - 有 source 且是远程 URL → adapters/{id}.{name}/adapters.jsonc
+        - 有 source 且是本地路径 → 直接用该路径
+        - 无 source → adapters/{id}.{name}/adapters.jsonc（有id）
+                        adapters/{name}/adapters.jsonc（无id）
+        """
+        from site_adapters.services.base import _adapter_dir
+        name = entry.get('name', '') if isinstance(entry, dict) else ''
+        source = entry.get('source') if isinstance(entry, dict) else None
+        dir_name = _adapter_dir(entry) if isinstance(entry, dict) else name
+        
+        if source:
+            if source.startswith('https://') or source.startswith('http://'):
+                return os.path.join(adapters_dir, dir_name, _ADAPTER_FILE)
+            if os.path.isabs(source):
+                return source
+            return os.path.normpath(os.path.join(adapters_dir, source))
+        return os.path.join(adapters_dir, dir_name, _ADAPTER_FILE)
 
-    # ponytail: 5s throttle on signature checks; upgrade to per-source invalidation if needed
-    _CHECK_INTERVAL = 5.0  # seconds
+    def _load_adapter_file(self, file_path: str) -> dict:
+        """加载单个适配器文件，返回 {"*": ..., "domains": {...}}。
+
+        查找逻辑：
+        1. 如果传入路径直接存在 → 使用它
+        2. 如果目录存在，尝试 adapters.jsonc → <dirname>.jsonc
+        """
+        if os.path.exists(file_path):
+            pass  # 文件存在，直接使用
+        elif os.path.isdir(os.path.dirname(file_path)) or os.path.isdir(file_path):
+            # 尝试同目录下的 adapters.jsonc
+            dir_path = file_path if os.path.isdir(file_path) else os.path.dirname(file_path)
+            candidates = [
+                os.path.join(dir_path, 'adapters.jsonc'),
+                os.path.join(dir_path, os.path.basename(dir_path) + '.jsonc'),
+            ]
+            file_path = None
+            for c in candidates:
+                if os.path.exists(c):
+                    file_path = c
+                    break
+            if file_path is None:
+                logger.warning("Adapter file not found in: %s", dir_path)
+                return {'*': {}, 'domains': {}}
+        try:
+            data = load_jsonc_file(file_path)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error("Failed to parse adapter file: %s: %s", file_path, e)
+            return {'*': {}, 'domains': {}}
+        if not isinstance(data, dict):
+            logger.error("Adapter file top-level must be an object: %s", file_path)
+            return {'*': {}, 'domains': {}}
+
+        # 提取 "*" 和 domains
+        glob_defaults = data.get('*', {})
+        if not isinstance(glob_defaults, dict):
+            glob_defaults = {}
+
+        domains_raw = data.get('domains', {})
+        if isinstance(domains_raw, dict):
+            domains = dict(domains_raw)
+        else:
+            # 兼容：没有 "domains" 键时，所有非元数据键视为域名
+            domains = {
+                k: v for k, v in data.items()
+                if k not in ('*', 'domains', '_meta') and not k.startswith('_')
+            }
+
+        # 解析脚本相对路径
+        file_dir = str(Path(file_path).resolve().parent)
+        domains = {
+            k: _resolve_all_paths(v, file_dir) if isinstance(v, dict) else v
+            for k, v in domains.items()
+        }
+
+        return {'*': glob_defaults, 'domains': domains}
+
+    _CHECK_INTERVAL = 5.0
 
     def load(self, base_dir: str) -> dict:
-        """加载并合并所有源，返回完整配置。"""
+        """加载并合并所有适配器，返回完整配置。"""
         now = time.monotonic()
-        # Fast path: return cached result if within check interval
         with self._lock:
             if self._merged is not None and (now - self._last_check) < self._CHECK_INTERVAL:
                 return self._merged
             self._last_check = now
+
+        adapters_dir = _get_adapters_dir()
+        config_path = os.path.join(adapters_dir, _CONFIG_FILE)
         changed = False
 
-        # 1. 本地 global.jsonc
-        global_path = os.path.join(base_dir, 'global.jsonc')
-        global_sig = self._path_signature(global_path)
-        if self._sources.get('__global__', ((), {}))[0] != global_sig:
+        # 1. 读取 config.jsonc
+        config_sig = self._path_signature(config_path)
+        if self._sources.get('__config__', ((), {}))[0] != config_sig:
             try:
-                global_config = load_jsonc_file(global_path) if os.path.exists(global_path) else {}
+                config_data = load_jsonc_file(config_path) if os.path.exists(config_path) else {}
             except (json.JSONDecodeError, OSError):
-                global_config = {}
-            self._sources['__global__'] = (global_sig, global_config)
+                config_data = {}
+            self._sources['__config__'] = (config_sig, config_data)
             changed = True
-        global_config = self._sources.get('__global__', ((), {}))[1]
+        config_data = self._sources.get('__config__', ((), {}))[1]
 
-        # 2. 本地 domains/
-        local_domains_dir = os.path.join(base_dir, 'domains')
-        local_sig = self._path_signature(local_domains_dir)
-        if self._sources.get('__local__', ((), {}))[0] != local_sig:
-            self._sources['__local__'] = (local_sig, self._load_domains_dir(local_domains_dir))
-            changed = True
+        adapters_list = config_data.get('_adapters', [])
+        if not isinstance(adapters_list, list):
+            adapters_list = []
 
-        # 3. 订阅源：按 global.jsonc 的 _subscriptions 顺序加载
-        subs_dir = os.path.join(base_dir, 'subscriptions')
-        sub_order = []
-        if os.path.isdir(subs_dir):
-            for sub in global_config.get('_subscriptions', []):
-                if not isinstance(sub, dict):
-                    continue
-                if sub.get('enabled') is False:
-                    continue
-                name = self._subscription_dir_name(sub)
-                sub_file_path = os.path.join(subs_dir, name, 'subscription.jsonc')
+        # 过滤出 enabled 的适配器
+        enabled_adapters = []
+        for item in adapters_list:
+            if not isinstance(item, dict):
+                continue
+            if item.get('enabled') is False:
+                continue
+            enabled_adapters.append(item)
 
-                if not os.path.exists(sub_file_path):
-                    continue
+        # 2. 加载每个适配器
+        new_order = []
+        for item in enabled_adapters:
+            name = item.get('name', '')
+            if not name:
+                continue
+            file_path = self._resolve_adapter_path(item, adapters_dir)
 
-                sub_sig = self._path_signature(sub_file_path)
-                cache_key = f'sub:{name}'
-                sub_order.append(cache_key)
-                if self._sources.get(cache_key, (0,))[0] != sub_sig:
-                    sub_data = _read_subscription_file(sub_file_path)
-                    if sub_data and isinstance(sub_data.get('domains'), dict):
-                        sub_global = sub_data.get('*', {})
-                        sub_domains = dict(sub_data['domains'])
-                        # 解析脚本相对路径（相对于订阅文件所在目录）
-                        sub_dir = str(Path(sub_file_path).resolve().parent)
-                        sub_domains = {
-                            k: _resolve_all_paths(v, sub_dir) if isinstance(v, dict) else v
-                            for k, v in sub_domains.items()
-                        }
-                        # Apply exclude filter
-                        exclude = sub.get('exclude', [])
-                        if exclude:
-                            sub_domains = {
-                                k: v for k, v in sub_domains.items()
-                                if not any(fnmatch.fnmatch(k, pat) for pat in exclude)
-                            }
-                        self._sources[cache_key] = (sub_sig, {
-                            'global': sub_global if isinstance(sub_global, dict) else {},
-                            'domains': sub_domains,
-                        })
-                        changed = True
-        old_sub_keys = [key for key in self._sources if key.startswith('sub:')]
-        for key in old_sub_keys:
-            if key not in sub_order:
+            cache_key = f'adapter:{name}'
+            new_order.append(cache_key)
+
+            sig = self._path_signature(file_path)
+            if self._sources.get(cache_key, (0,))[0] != sig:
+                adapter_data = self._load_adapter_file(file_path)
+                # 应用 exclude 过滤
+                exclude = item.get('exclude', [])
+                if exclude and adapter_data.get('domains'):
+                    adapter_data['domains'] = {
+                        k: v for k, v in adapter_data['domains'].items()
+                        if not any(fnmatch.fnmatch(k, pat) for pat in exclude)
+                    }
+                self._sources[cache_key] = (sig, adapter_data)
+                changed = True
+
+        # 清理移除的适配器
+        old_keys = [k for k in self._sources if k.startswith('adapter:')]
+        for key in old_keys:
+            if key not in new_order:
                 self._sources.pop(key, None)
                 changed = True
-        if getattr(self, '_sub_order', []) != sub_order:
-            self._sub_order = sub_order
+
+        if self._adapter_order != new_order:
+            self._adapter_order = new_order
             changed = True
+        self._first_adapter_name = new_order[0] if new_order else None
 
         if changed or self._merged is None:
             with self._lock:
@@ -196,30 +263,44 @@ class SourceCache:
             return self._merged
 
     def _merge_all(self) -> dict:
-        """按优先级合并所有源。"""
-        global_config = self._sources.get('__global__', ((), {}))[1]
-        local_domains = self._sources.get('__local__', ((), {}))[1]
+        """按优先级合并所有适配器。
 
-        # 合并：从最低优先级开始
+        规则：
+        1. _adapters 顺序 = 优先级（第一个最高）
+        2. 同一适配器内：domain 配置覆盖 "*"（"*" 是内部基准）
+        3. 跨适配器：靠前覆盖靠后
+        4. 第一个适配器的 "*" 作为全局覆盖（查询时通过 load_domain_config 应用）
+        """
         merged_domains = {}
 
-        # 订阅源（从后往前，使靠前的源覆盖靠后的）
-        for key in reversed(getattr(self, '_sub_order', [])):
-            sub_data = self._sources.get(key, (0, {}))[1]
-            sub_global = sub_data.get('global', {})
-            for domain_key, domain_config in sub_data.get('domains', {}).items():
-                if sub_global:
-                    merged_domains[domain_key] = deep_merge(sub_global, domain_config)
-                else:
-                    merged_domains[domain_key] = domain_config
+        # 从后往前合并（靠前的最后覆盖）
+        for cache_key in reversed(self._adapter_order):
+            adapter_data = self._sources.get(cache_key, (0, {'*': {}, 'domains': {}}))[1]
+            glob_defaults = adapter_data.get('*', {})
+            domains = adapter_data.get('domains', {})
 
-        # 本地域名（最高优先级，覆盖订阅源）
-        for domain_key, domain_config in local_domains.items():
-            merged_domains[domain_key] = domain_config
+            for domain_key, domain_config in domains.items():
+                if not isinstance(domain_config, dict):
+                    merged_domains[domain_key] = domain_config
+                    continue
+                # 同一适配器内：domain 覆盖 "*"
+                if glob_defaults:
+                    merged_domains[domain_key] = deep_merge(
+                        copy.deepcopy(glob_defaults),
+                        domain_config,
+                    )
+                else:
+                    merged_domains[domain_key] = copy.deepcopy(domain_config)
 
         return {
-            '*': global_config.get('*', {}),
-            '_subscriptions': global_config.get('_subscriptions', []),
+            '_adapters': [
+                item for item in (
+                    self._sources.get('__config__', ((), {}))[1].get('_adapters', [])
+                    if isinstance(self._sources.get('__config__', ((), {}))[1].get('_adapters'), list)
+                    else []
+                )
+            ],
+            '_first_adapter': self._first_adapter_name,
             **merged_domains,
         }
 
@@ -227,10 +308,10 @@ class SourceCache:
         with self._lock:
             self._sources.clear()
             self._merged = None
-            self._sub_order = []
+            self._adapter_order = []
+            self._first_adapter_name = None
 
 
-# 全局缓存实例
 _cache = SourceCache()
 
 
@@ -239,7 +320,6 @@ _cache = SourceCache()
 # ---------------------------------------------------------------------------
 
 def _get_domain(url: str) -> str:
-    """Extract hostname (without port) from URL for domain matching."""
     return urlparse(url).hostname or ""
 
 
@@ -247,12 +327,10 @@ def match_domain(url: str, domain_map: dict) -> tuple[str | None, dict | None]:
     domain = _get_domain(url)
     if not domain:
         return None, None
-    # 精确匹配
     if domain in domain_map:
         config = _resolve_alias(domain_map[domain], domain_map)
         if config is not None:
             return domain, config
-    # 通配符匹配（最长前缀优先：层级更深的通配符更具体）
     wildcard_keys = sorted(
         [k for k in domain_map if k.startswith('*.')],
         key=lambda k: k.count('.'),
@@ -311,19 +389,32 @@ def load_domain_config(url: str, base_dir: str) -> dict | None:
     }
     """
     all_config = _cache.load(base_dir)
-    defaults = all_config.get('*', {})
+
+    # 获取第一个适配器的 "*" 作为全局覆盖
+    first_adapter_name = all_config.get('_first_adapter')
+    global_override = {}
+    disabled_domains = []
+    if first_adapter_name:
+        first_data = _cache._sources.get(first_adapter_name, (0, {'*': {}, 'domains': {}}))[1]
+        first_glob = first_data.get('*', {})
+        if isinstance(first_glob, dict):
+            global_override = copy.deepcopy(first_glob)
+            disabled_domains = first_glob.get('_disabled_domains', [])
+            if not isinstance(disabled_domains, list):
+                disabled_domains = []
+            # 清理内部字段
+            global_override.pop('_disabled_domains', None)
 
     domain_key, domain_config = match_domain(url, all_config)
     if domain_config is None:
         return None
 
-    # Check if domain is disabled
-    disabled = all_config.get('*', {}).get('_disabled_domains', [])
-    if domain_key in disabled:
+    # 检查域名是否被禁用
+    if domain_key in disabled_domains:
         return None
 
-    # 设计文档要求本地 global.jsonc 的 "*" 最高优先级。
-    merged = deep_merge(domain_config, defaults) if defaults else copy.deepcopy(domain_config)
+    # 合并：全局覆盖（第一个适配器的 "*"）> 域名特定配置
+    merged = deep_merge(domain_config, global_override) if global_override else copy.deepcopy(domain_config)
 
     result = copy.deepcopy(merged)
     result['_domain_key'] = domain_key
@@ -337,16 +428,26 @@ def load_domain_config(url: str, base_dir: str) -> dict | None:
 
 def show_config(url: str, base_dir: str) -> dict:
     all_config = _cache.load(base_dir)
-    defaults = all_config.get('*', {})
+
+    first_adapter_name = all_config.get('_first_adapter')
+    global_override = {}
+    if first_adapter_name:
+        first_data = _cache._sources.get(first_adapter_name, (0, {'*': {}, 'domains': {}}))[1]
+        first_glob = first_data.get('*', {})
+        if isinstance(first_glob, dict):
+            global_override = copy.deepcopy(first_glob)
+            global_override.pop('_disabled_domains', None)
+
     domain_key, domain_config = match_domain(url, all_config)
     if domain_config is None:
         return {'error': f'无匹配域名配置: {url}', 'domain': _get_domain(url)}
-    merged = deep_merge(domain_config, defaults) if defaults else copy.deepcopy(domain_config)
+
+    merged = deep_merge(domain_config, global_override) if global_override else copy.deepcopy(domain_config)
     return {
         'url': url,
         'domain': _get_domain(url),
         'domain_key': domain_key,
-        'defaults': defaults,
+        'defaults': global_override,
         'raw_config': domain_config,
         'merged': merged,
     }

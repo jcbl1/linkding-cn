@@ -55,7 +55,7 @@ def _resolve_path(path: str, base_dir: str) -> str:
 
 def _script_root_for_file_dir(file_dir: str) -> str:
     abs_dir = os.path.abspath(file_dir)
-    if os.path.basename(abs_dir) == 'domains':
+    if False:
         return os.path.dirname(abs_dir)
     return abs_dir
 

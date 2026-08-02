@@ -135,12 +135,12 @@
               </button>
             </div>
             <div id="domain-list" class="wa-domain-list">
-              <div class="wa-domain-item wa-domain-global" data-filename="global.jsonc" data-domain="*" data-is-global="1">
+              <div class="wa-domain-item wa-domain-global" data-domain_key="*" data-is-global="1" data-domain="*" data-is-global="1">
                 <code>*</code>
                 <small class="wa-domain-note">{% translate "global defaults" %}</small>
               </div>
               {% for domain in domain_files %}
-              <div class="wa-domain-item{% if domain.disabled %} wa-domain-sub-disabled{% endif %}" data-filename="{{ domain.filename }}" data-domain="{{ domain.domain_key }}" data-is-alias="{{ domain.is_alias|yesno:'1,0' }}" data-alias-target="{{ domain.target }}" data-requires-cookie="{{ domain.requires_cookie|yesno:'1,0' }}" data-has-cookie="{{ domain.has_cookie|yesno:'1,0' }}" data-disabled="{{ domain.disabled|yesno:'1,0' }}">
+              <div class="wa-domain-item{% if domain.disabled %} wa-domain-sub-disabled{% endif %}" data-domain_key="{{ domain.domain_key }}" data-adapter="{{ domain.adapter }}" data-domain="{{ domain.domain_key }}" data-is-alias="{{ domain.is_alias|yesno:'1,0' }}" data-alias-target="{{ domain.target }}" data-requires-cookie="{{ domain.requires_cookie|yesno:'1,0' }}" data-has-cookie="{{ domain.has_cookie|yesno:'1,0' }}" data-disabled="{{ domain.disabled|yesno:'1,0' }}">
                 <code>{{ domain.domain_key }}</code>
                 {% if domain.is_alias and domain.target %}
                   <small class="wa-alias-target">→ {{ domain.target }}</small>

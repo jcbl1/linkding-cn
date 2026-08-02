@@ -243,25 +243,31 @@ def _is_safe_name(name: str) -> bool:
     return bool(name) and name == os.path.basename(name) and '/' not in name and '\\' not in name and '..' not in name
 
 
-def _validate_subscriptions(issues: list[str], subscriptions):
-    if subscriptions is None:
+def _validate_subscriptions(issues: list[str], adapters):
+    if adapters is None:
         return
-    if not isinstance(subscriptions, list):
-        issues.append("ERROR: _subscriptions 必须是数组")
+    if not isinstance(adapters, list):
+        issues.append("ERROR: _adapters 必须是数组")
         return
-    for index, sub in enumerate(subscriptions):
-        label = f"_subscriptions[{index}]"
-        if not isinstance(sub, dict):
+    from site_adapters.services.subscriptions import is_remote_source
+    for index, adp in enumerate(adapters):
+        label = f"_adapters[{index}]"
+        if not isinstance(adp, dict):
             issues.append(f"ERROR: {label} 必须是对象")
             continue
-        from urllib.parse import urlparse
-        parsed = urlparse(sub.get('url', ''))
-        if parsed.scheme != 'https' or not parsed.netloc:
-            issues.append(f"ERROR: {label}.url 必须是 HTTPS URL")
-        name = sub.get('name', '')
+        name = adp.get('name', '')
         if name and not _is_safe_name(name):
             issues.append(f"ERROR: {label}.name 非法")
-        interval = sub.get('update_interval', 86400)
+        source = adp.get('source', '')
+        if source:
+            if is_remote_source(source):
+                from urllib.parse import urlparse
+                parsed = urlparse(source)
+                if parsed.scheme != 'https' or not parsed.netloc:
+                    issues.append(f"ERROR: {label}.source 必须是 HTTPS URL")
+            elif not os.path.exists(source):
+                issues.append(f"WARN: {label}.source 本地文件不存在: {source}")
+        interval = adp.get('update_interval', 86400)
         if not isinstance(interval, int) or interval <= 0:
             issues.append(f"ERROR: {label}.update_interval 必须是正整数")
 
@@ -471,39 +477,86 @@ def validate_config(base_dir: str, domain_filename: str = '') -> list[str]:
         issues.append(f"ERROR: 目录不存在: {base_dir}")
         return issues
 
-    if not domain_filename:
-        # 检查 global.jsonc
-        global_path = os.path.join(base_dir, 'global.jsonc')
-        if os.path.exists(global_path):
-            try:
-                global_data = load_jsonc_file(global_path)
-                if not isinstance(global_data, dict):
-                    issues.append("ERROR: global.jsonc 顶层必须是对象")
-                else:
-                    _validate_subscriptions(issues, global_data.get('_subscriptions'))
-                    if '*' in global_data:
-                        _validate_domain_config(issues, 'global.jsonc.*', global_data.get('*'), os.path.dirname(global_path))
-            except json.JSONDecodeError as e:
-                issues.append(f"ERROR: global.jsonc 解析失败: {e}")
+    adapters_dir = os.path.join(base_dir, 'adapters')
 
-    # 检查域名文件
-    domains_dir = os.path.join(base_dir, 'domains')
-    if os.path.isdir(domains_dir):
-        filenames = [domain_filename] if domain_filename else os.listdir(domains_dir)
-        for fname in filenames:
-            if not (fname.endswith('.jsonc') or fname.endswith('.json')):
-                continue
-            if fname != os.path.basename(fname) or '/' in fname or '\\' in fname or '..' in fname:
-                issues.append(f"ERROR: 非法文件名: {fname}")
-                continue
-            fpath = os.path.join(domains_dir, fname)
-            if not os.path.exists(fpath):
-                issues.append(f"ERROR: 文件不存在: {fname}")
-                continue
+    if not domain_filename:
+        config_path = os.path.join(adapters_dir, 'config.jsonc')
+        if os.path.exists(config_path):
             try:
-                data = load_jsonc_file(fpath)
-                _validate_domain_config(issues, fname, data, os.path.dirname(fpath))
+                config_data = load_jsonc_file(config_path)
+                if not isinstance(config_data, dict):
+                    issues.append("ERROR: config.jsonc 顶层必须是对象")
+                else:
+                    _validate_subscriptions(issues, config_data.get('_adapters'))
             except json.JSONDecodeError as e:
-                issues.append(f"ERROR: {fname} 解析失败: {e}")
+                issues.append(f"ERROR: config.jsonc 解析失败: {e}")
+
+        if os.path.isdir(adapters_dir):
+            adapters_list = []
+            if os.path.exists(config_path):
+                try:
+                    cfg = load_jsonc_file(config_path)
+                    if isinstance(cfg, dict):
+                        adapters_list = cfg.get('_adapters', [])
+                except Exception:
+                    pass
+            if not isinstance(adapters_list, list):
+                adapters_list = []
+
+            for item in adapters_list:
+                if not isinstance(item, dict):
+                    continue
+                if item.get('enabled') is False:
+                    continue
+                name = item.get('name', '')
+                source = item.get('source')
+                from site_adapters.services.subscriptions import resolve_adapter_path
+                file_path = resolve_adapter_path(name, source, adapters_dir)
+
+                if not os.path.exists(file_path):
+                    issues.append(f"WARN: 适配器文件不存在: {name}")
+                    continue
+
+                try:
+                    data = load_jsonc_file(file_path)
+                    if not isinstance(data, dict):
+                        issues.append(f"ERROR: {name} 顶层必须是对象")
+                        continue
+                    domains = data.get('domains', {})
+                    if isinstance(domains, dict):
+                        for domain_key, domain_config in domains.items():
+                            label = f"{name}/{domain_key}"
+                            _validate_domain_config(issues, label, domain_config, os.path.dirname(file_path))
+                    glob_defaults = data.get('*')
+                    if glob_defaults and isinstance(glob_defaults, dict):
+                        _validate_domain_config(issues, f"{name}.*", glob_defaults, os.path.dirname(file_path))
+                except json.JSONDecodeError as e:
+                    issues.append(f"ERROR: {name} 解析失败: {e}")
+    else:
+        from site_adapters.services.subscriptions import _read_subscription_file, resolve_adapter_path
+        adapters_list = []
+        config_path = os.path.join(adapters_dir, 'config.jsonc')
+        if os.path.exists(config_path):
+            try:
+                cfg = load_jsonc_file(config_path)
+                if isinstance(cfg, dict):
+                    adapters_list = cfg.get('_adapters', [])
+            except Exception:
+                pass
+        if not isinstance(adapters_list, list):
+            adapters_list = []
+
+        found = False
+        for item in adapters_list:
+            if not isinstance(item, dict) or item.get('enabled') is False:
+                continue
+            file_path = resolve_adapter_path(item.get('name', ''), item.get('source'), adapters_dir)
+            data = _read_subscription_file(file_path)
+            if data and isinstance(data.get('domains'), dict) and domain_filename in data['domains']:
+                _validate_domain_config(issues, domain_filename, data['domains'][domain_filename], os.path.dirname(file_path))
+                found = True
+                break
+        if not found:
+            issues.append(f"ERROR: 域名未找到: {domain_filename}")
 
     return issues
