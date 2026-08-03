@@ -16,20 +16,20 @@ Loader — 适配器配置加载 + 合并 + 分源缓存
 config.jsonc 格式：
 {
   "_adapters": [
-    {"name": "defaults"},
-    {"name": "rsshub", "source": "https://...", "interval": 86400, "enabled": true},
-    {"name": "my-local", "source": "./path/to/adapters.jsonc"}
+    {"id": "my-publisher", "name": "my-adapter", "source": "https://...", "update_interval": 86400, "enabled": true},
+    {"id": "local", "name": "custom", "source": "./path/to/adapters.jsonc"}
   ]
 }
 
-- name: 适配器目录名（相对于 adapters/）
-- source: 文件来源（https:// 远程 / 本地路径 / 省略 = adapters/<name>/adapters.jsonc）
-- interval: 远程源更新间隔（秒），默认 86400
+- id: 发布者唯一标识（必填），适配器目录名为 {id}.{name}
+- name: 适配器名称（必填），UI 显示 + 目录名的一部分
+- source: 文件来源（必填，https:// 远程 / 本地路径）
+- update_interval: 远程源更新间隔（秒），默认 86400
 - enabled: 是否启用，默认 true
 
 合并优先级：
   _adapters 数组顺序 = 优先级（第一个最高）
-  → 第一个适配器的 "*" 作为全局覆盖（最高优先级）
+  → defaults 适配器（id="defaults"）的 "*" 作为全局覆盖，对所有域名生效
 """
 
 import copy
@@ -75,7 +75,7 @@ class SourceCache:
         self._sources: dict[str, tuple[tuple, dict]] = {}
         self._merged: dict | None = None
         self._adapter_order: list[str] = []
-        self._first_adapter_name: str | None = None
+        self._defaults_cache_key: str | None = None
         self._last_check: float = 0
 
     def _path_signature(self, path: str) -> tuple:
@@ -105,24 +105,22 @@ class SourceCache:
         """解析适配器文件路径。
 
         entry: {"id": "...", "name": "...", "source": "..."}
-        
-        - 有 source 且是远程 URL → adapters/{id}.{name}/adapters.jsonc
-        - 有 source 且是本地路径 → 直接用该路径
-        - 无 source → adapters/{id}.{name}/adapters.jsonc（有id）
-                        adapters/{name}/adapters.jsonc（无id）
+        source 为必填字段。
+
+        - HTTPS URL → adapters/{id}.{name}/adapters.jsonc（缓存目标）
+        - 绝对路径 → 直接使用该路径
+        - 相对路径 → 相对于 adapters/ 目录解析
         """
         from site_adapters.services.base import _adapter_dir
         name = entry.get('name', '') if isinstance(entry, dict) else ''
-        source = entry.get('source') if isinstance(entry, dict) else None
+        source = entry.get('source', '') if isinstance(entry, dict) else ''
         dir_name = _adapter_dir(entry) if isinstance(entry, dict) else name
-        
-        if source:
-            if source.startswith('https://') or source.startswith('http://'):
-                return os.path.join(adapters_dir, dir_name, _ADAPTER_FILE)
-            if os.path.isabs(source):
-                return source
-            return os.path.normpath(os.path.join(adapters_dir, source))
-        return os.path.join(adapters_dir, dir_name, _ADAPTER_FILE)
+
+        if source.startswith('https://') or source.startswith('http://'):
+            return os.path.join(adapters_dir, dir_name, _ADAPTER_FILE)
+        if os.path.isabs(source):
+            return source
+        return os.path.normpath(os.path.join(adapters_dir, source))
 
     def _load_adapter_file(self, file_path: str) -> dict:
         """加载单个适配器文件，返回 {"*": ..., "domains": {...}}。
@@ -147,20 +145,23 @@ class SourceCache:
                     break
             if file_path is None:
                 logger.warning("Adapter file not found in: %s", dir_path)
-                return {'*': {}, 'domains': {}}
+                return {'defaults': {}, 'global_defaults': {}, 'domains': {}}
         try:
             data = load_jsonc_file(file_path)
         except (json.JSONDecodeError, OSError) as e:
             logger.error("Failed to parse adapter file: %s: %s", file_path, e)
-            return {'*': {}, 'domains': {}}
+            return {'defaults': {}, 'global_defaults': {}, 'domains': {}}
         if not isinstance(data, dict):
             logger.error("Adapter file top-level must be an object: %s", file_path)
-            return {'*': {}, 'domains': {}}
+            return {'defaults': {}, 'global_defaults': {}, 'domains': {}}
 
-        # 提取 "*" 和 domains
-        glob_defaults = data.get('*', {})
+        # 提取 defaults、global_defaults 和 domains
+        glob_defaults = data.get('defaults', {})
         if not isinstance(glob_defaults, dict):
             glob_defaults = {}
+        global_defaults = data.get('global_defaults', {})
+        if not isinstance(global_defaults, dict):
+            global_defaults = {}
 
         domains_raw = data.get('domains', {})
         if isinstance(domains_raw, dict):
@@ -169,7 +170,7 @@ class SourceCache:
             # 兼容：没有 "domains" 键时，所有非元数据键视为域名
             domains = {
                 k: v for k, v in data.items()
-                if k not in ('*', 'domains', '_meta') and not k.startswith('_')
+                if k not in ('defaults', 'global_defaults', 'domains', '_meta') and not k.startswith('_')
             }
 
         # 解析脚本相对路径
@@ -179,7 +180,7 @@ class SourceCache:
             for k, v in domains.items()
         }
 
-        return {'*': glob_defaults, 'domains': domains}
+        return {'defaults': glob_defaults, 'global_defaults': global_defaults, 'domains': domains}
 
     _CHECK_INTERVAL = 5.0
 
@@ -210,29 +211,22 @@ class SourceCache:
         if not isinstance(adapters_list, list):
             adapters_list = []
 
-        # 去重：同一 id+name 或同一 source，保留最先出现的
+        # 去重：id+name 均相同时视为重复，保留最先出现的
         seen_keys = set()
-        seen_sources = set()
         deduped = []
         for item in adapters_list:
             if not isinstance(item, dict):
                 deduped.append(item)
                 continue
             key = (item.get('id', ''), item.get('name', ''))
-            src = item.get('source', '')
             if key in seen_keys:
                 logger.warning('Duplicate adapter id+name skipped: %s', key)
                 continue
-            if src and src in seen_sources:
-                logger.warning('Duplicate adapter source skipped: %s', src)
-                continue
             seen_keys.add(key)
-            if src:
-                seen_sources.add(src)
             deduped.append(item)
         adapters_list = deduped
 
-        # 过滤出 enabled 的适配器（排除 defaults，它总是独立加载）
+        # 过滤出 enabled 的适配器
         enabled_adapters = []
         for item in adapters_list:
             if not isinstance(item, dict):
@@ -251,7 +245,8 @@ class SourceCache:
                 continue
             file_path = self._resolve_adapter_path(item, adapters_dir)
 
-            cache_key = f'adapter:{name}'
+            adapter_id = item.get('id', '')
+            cache_key = f'adapter:{adapter_id}:{name}'
             new_order.append(cache_key)
 
             sig = self._path_signature(file_path)
@@ -274,10 +269,20 @@ class SourceCache:
                 self._sources.pop(key, None)
                 changed = True
 
+        # 确保 defaults 适配器始终排在第一位
+        _defaults_idx = None
+        for i, key in enumerate(new_order):
+            if key.startswith('adapter:defaults:'):
+                _defaults_idx = i
+                break
+        if _defaults_idx is not None and _defaults_idx > 0:
+            new_order.insert(0, new_order.pop(_defaults_idx))
+            changed = True
+
         if self._adapter_order != new_order:
             self._adapter_order = new_order
             changed = True
-        self._first_adapter_name = new_order[0] if new_order else None
+        self._defaults_cache_key = new_order[0] if new_order else None
 
         if changed or self._merged is None:
             with self._lock:
@@ -293,14 +298,14 @@ class SourceCache:
         1. _adapters 顺序 = 优先级（第一个最高）
         2. 同一适配器内：domain 配置覆盖 "*"（"*" 是内部基准）
         3. 跨适配器：靠前覆盖靠后
-        4. 第一个适配器的 "*" 作为全局覆盖（查询时通过 load_domain_config 应用）
+        4. defaults 适配器（id="defaults"）的 global_defaults 作为全局覆盖（通过 load_domain_config 对所有域名生效）
         """
         merged_domains = {}
 
         # 从后往前合并（靠前的最后覆盖）
         for cache_key in reversed(self._adapter_order):
-            adapter_data = self._sources.get(cache_key, (0, {'*': {}, 'domains': {}}))[1]
-            glob_defaults = adapter_data.get('*', {})
+            adapter_data = self._sources.get(cache_key, (0, {'defaults': {}, 'global_defaults': {}, 'domains': {}}))[1]
+            glob_defaults = adapter_data.get('defaults', {})
             domains = adapter_data.get('domains', {})
 
             for domain_key, domain_config in domains.items():
@@ -324,7 +329,7 @@ class SourceCache:
                     else []
                 )
             ],
-            '_first_adapter': self._first_adapter_name,
+            '_defaults_cache_key': self._defaults_cache_key,
             **merged_domains,
         }
 
@@ -333,10 +338,30 @@ class SourceCache:
             self._sources.clear()
             self._merged = None
             self._adapter_order = []
-            self._first_adapter_name = None
+            self._defaults_cache_key = None
 
 
 _cache = SourceCache()
+
+
+# ---------------------------------------------------------------------------
+# _disabled_domains — 从 config.jsonc 顶层读取（独立于适配器合并逻辑）
+# ---------------------------------------------------------------------------
+
+def _get_disabled_domains() -> set[str]:
+    """读取 config.jsonc 顶层的 _disabled_domains 列表。"""
+    adapters_dir = _get_adapters_dir()
+    config_path = os.path.join(adapters_dir, _CONFIG_FILE)
+    try:
+        if os.path.exists(config_path):
+            data = load_jsonc_file(config_path)
+            if isinstance(data, dict):
+                disabled = data.get('_disabled_domains', [])
+                if isinstance(disabled, list):
+                    return set(disabled)
+    except (json.JSONDecodeError, OSError):
+        pass
+    return set()
 
 
 # ---------------------------------------------------------------------------
@@ -414,30 +439,26 @@ def load_domain_config(url: str, base_dir: str) -> dict | None:
     """
     all_config = _cache.load(base_dir)
 
-    # 获取第一个适配器的 "*" 作为全局覆盖
-    first_adapter_name = all_config.get('_first_adapter')
+    # 获取 defaults 适配器的 "*" 作为全局覆盖
+    defaults_key = all_config.get('_defaults_cache_key')
     global_override = {}
-    disabled_domains = []
-    if first_adapter_name:
-        first_data = _cache._sources.get(first_adapter_name, (0, {'*': {}, 'domains': {}}))[1]
-        first_glob = first_data.get('*', {})
-        if isinstance(first_glob, dict):
-            global_override = copy.deepcopy(first_glob)
-            disabled_domains = first_glob.get('_disabled_domains', [])
-            if not isinstance(disabled_domains, list):
-                disabled_domains = []
-            # 清理内部字段
+    if defaults_key:
+        defaults_data = _cache._sources.get(defaults_key, (0, {'defaults': {}, 'global_defaults': {}, 'domains': {}}))[1]
+        defaults_glob = defaults_data.get('defaults', {})
+        if isinstance(defaults_glob, dict):
+            global_override = copy.deepcopy(defaults_glob)
             global_override.pop('_disabled_domains', None)
 
     domain_key, domain_config = match_domain(url, all_config)
     if domain_config is None:
         return None
 
-    # 检查域名是否被禁用
+    # 检查域名是否在 config.jsonc 中被禁用
+    disabled_domains = _get_disabled_domains()
     if domain_key in disabled_domains:
         return None
 
-    # 合并：全局覆盖（第一个适配器的 "*"）> 域名特定配置
+    # 合并：全局覆盖（defaults 适配器的 "*"）> 域名特定配置
     merged = deep_merge(domain_config, global_override) if global_override else copy.deepcopy(domain_config)
 
     result = copy.deepcopy(merged)
@@ -453,18 +474,23 @@ def load_domain_config(url: str, base_dir: str) -> dict | None:
 def show_config(url: str, base_dir: str) -> dict:
     all_config = _cache.load(base_dir)
 
-    first_adapter_name = all_config.get('_first_adapter')
+    defaults_key = all_config.get('_defaults_cache_key')
     global_override = {}
-    if first_adapter_name:
-        first_data = _cache._sources.get(first_adapter_name, (0, {'*': {}, 'domains': {}}))[1]
-        first_glob = first_data.get('*', {})
-        if isinstance(first_glob, dict):
-            global_override = copy.deepcopy(first_glob)
+    if defaults_key:
+        defaults_data = _cache._sources.get(defaults_key, (0, {'defaults': {}, 'global_defaults': {}, 'domains': {}}))[1]
+        global_defaults_data = defaults_data.get('global_defaults', {})
+        if isinstance(global_defaults_data, dict):
+            global_override = copy.deepcopy(global_defaults_data)
             global_override.pop('_disabled_domains', None)
 
     domain_key, domain_config = match_domain(url, all_config)
     if domain_config is None:
         return {'error': f'无匹配域名配置: {url}', 'domain': _get_domain(url)}
+
+    # 检查域名是否在 config.jsonc 中被禁用
+    disabled_domains = _get_disabled_domains()
+    if domain_key in disabled_domains:
+        return {'error': f'域名已禁用: {domain_key}', 'domain': _get_domain(url)}
 
     merged = deep_merge(domain_config, global_override) if global_override else copy.deepcopy(domain_config)
     return {

@@ -40,6 +40,39 @@ def _ensure_base_dirs():
     for name in ('cookies', 'logs', 'test_assets'):
         os.makedirs(os.path.join(base_dir, name), exist_ok=True)
 
+    # 确保 defaults 适配器存在
+    _ensure_defaults_adapter(adapters_dir)
+
+
+def _ensure_defaults_adapter(adapters_dir: str):
+    """首次部署时创建 defaults 适配器和 config.jsonc。"""
+    import json
+    from bookmarks.utils import atomic_write
+
+    config_path = os.path.join(adapters_dir, 'config.jsonc')
+    defaults_dir = os.path.join(adapters_dir, 'defaults')
+    defaults_file = os.path.join(defaults_dir, 'adapters.jsonc')
+
+    # 创建 config.jsonc（如果不存在）
+    if not os.path.exists(config_path):
+        default_config = {
+            '_adapters': [{
+                'id': 'defaults',
+                'name': 'defaults',
+                'source': './defaults/adapters.jsonc',
+                'update_interval': 86400,
+                'enabled': True,
+            }],
+        }
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        atomic_write(config_path, json.dumps(default_config, indent=2, ensure_ascii=False))
+
+    # 创建 defaults/adapters.jsonc（如果不存在）
+    if not os.path.exists(defaults_file):
+        default_data = {'_meta': {'id': 'defaults', 'name': 'defaults', 'description': 'Built-in system adapter with the highest priority. Fields defined in the global_defaults section will populate or override fields of the same name in the defaults section of all adapters.'}, 'defaults': {}, 'global_defaults': {}, 'domains': {}}
+        os.makedirs(defaults_dir, exist_ok=True)
+        atomic_write(defaults_file, json.dumps(default_data, indent=2, ensure_ascii=False))
+
 
 def site_adapters_required(view_func):
     @wraps(view_func)
@@ -116,29 +149,38 @@ def _save_adapters_list(adapters: list[dict]):
 
 
 
+
+
+def _ensure_defaults_first(adapters: list):
+    """确保 id="defaults" 的适配器排在列表第一位。"""
+    defaults_idx = None
+    for i, a in enumerate(adapters):
+        if isinstance(a, dict) and a.get('id') == 'defaults':
+            defaults_idx = i
+            break
+    if defaults_idx is not None and defaults_idx > 0:
+        adapters.insert(0, adapters.pop(defaults_idx))
+
+
 def _get_adapters_list() -> list:
     data, _ = _load_config()
     adapters = data.get("_adapters", [])
     if not isinstance(adapters, list):
         return []
-    # 去重：同一 id+name 或同一 source，保留最先出现的
+    # 去重：id+name 均相同时视为重复，保留最先出现的
     seen_keys = set()
-    seen_sources = set()
     deduped = []
     for item in adapters:
         if not isinstance(item, dict):
             deduped.append(item)
             continue
         key = (item.get('id', ''), item.get('name', ''))
-        src = item.get('source', '')
         if key in seen_keys:
             continue
-        if src and src in seen_sources:
-            continue
         seen_keys.add(key)
-        if src:
-            seen_sources.add(src)
         deduped.append(item)
+    # 确保 defaults 始终排在第一位
+    _ensure_defaults_first(deduped)
     return deduped
 
 
@@ -245,15 +287,23 @@ def _adapter_from_post(request) -> dict:
 
     from site_adapters.services.subscriptions import is_remote_source, validate_subscription_url
 
+    # id, name, source 均为必填
+    if not adapter_id:
+        raise ValueError('id is required')
+    if not name:
+        raise ValueError('name is required')
+    if not source:
+        raise ValueError('source is required')
+
     if is_remote_source(source):
         validate_subscription_url(source)
 
-    if adapter_id and not _is_safe_subscription_name(adapter_id):
+    if not _is_safe_subscription_name(adapter_id):
         raise ValueError('invalid adapter id')
-    if name and not _is_safe_subscription_name(name):
+    if not _is_safe_subscription_name(name):
         raise ValueError('invalid adapter name')
 
-    if source and not is_remote_source(source):
+    if not is_remote_source(source):
         from site_adapters.services.subscriptions import resolve_adapter_path
         full = resolve_adapter_path(name, source)
         if not os.path.exists(full):
@@ -338,7 +388,6 @@ def _adapter_payload(index: int, adapter) -> dict:
 
 def _adapters_response() -> JsonResponse:
     adapters = _get_adapters_list()
-    # 过滤掉 defaults（它是内部适配器，不在 UI 显示）
     visible = [a for a in adapters if isinstance(a, dict)]
     payload = [_adapter_payload(i, a) for i, a in enumerate(visible)]
     return JsonResponse({'adapters': payload})
@@ -370,17 +419,17 @@ def _adapter_cache_dir(adapter: dict) -> str:
 
 
 def _has_adapter_conflict(adapters: list, item: dict, ignore_index: int | None = None) -> bool:
+    """检查适配器是否与已有列表冲突。
+
+    仅按 id+name 组合判断重复，不检查 source 是否相同。
+    """
     new_id = item.get('id', '')
     new_name = item.get('name', '')
-    new_source = item.get('source', '')
     for i, a in enumerate(adapters):
         if i == ignore_index or not isinstance(a, dict):
             continue
-        # 同 id+name 组合视为冲突
+        # id+name 均相等时视为冲突
         if a.get('id') == new_id and a.get('name') == new_name:
-            return True
-        # 同 source 也视为冲突（同一订阅源只能添加一次）
-        if new_source and a.get('source') == new_source:
             return True
     return False
 

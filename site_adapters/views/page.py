@@ -4,7 +4,6 @@ Main page rendering + defaults adapter management.
 import json
 import os
 
-from django.conf import settings as django_settings
 from django.shortcuts import render
 
 from site_adapters.views.helpers import (
@@ -15,17 +14,9 @@ from site_adapters.views.helpers import (
     _ensure_base_dirs,
     _get_adapters_dir,
     _get_base_dir,
-    _get_adapters_list,
-    _load_config,
     _schema_section_fields,
-    _save_adapters_list,
-    _invalidate_site_adapters_cache,
     site_adapters_required,
 )
-from site_adapters.services.auth.cookies import has_cookie_for_domain
-from site_adapters.services.config import load_jsonc_file
-from site_adapters.services.config.loader import _cache
-from site_adapters.services.subscriptions import resolve_adapter_path
 
 
 @site_adapters_required
@@ -33,12 +24,6 @@ def site_adapters_page(request):
     base_dir = _get_base_dir()
     adapters_dir = _get_adapters_dir()
     _ensure_base_dirs()
-
-    # 读取适配器列表
-    adapters_list = _get_adapters_list()
-
-    domain_files = []
-
 
     # 读取 config.jsonc 内容
     config_content = ''
@@ -51,8 +36,6 @@ def site_adapters_page(request):
             pass
 
     return render(request, 'site_adapters/site_adapters.html', {
-        'domain_files': [],
-        'domain_files_json': '[]',
         'config_content': config_content,
         'base_dir': base_dir,
         'adapters_dir': adapters_dir,

@@ -137,32 +137,30 @@ def _validate_download_url(url: str):
     return _validate_https_url(url)
 
 
-def is_remote_source(source: str | None) -> bool:
+def is_remote_source(source: str) -> bool:
     """判断 source 是否为远程 URL。"""
     if not source:
         return False
     return source.startswith('https://') or source.startswith('http://')
 
 
-def resolve_adapter_path(name: str, source: str | None, adapters_dir: str | None = None) -> str:
+def resolve_adapter_path(name: str, source: str, adapters_dir: str | None = None) -> str:
     """解析适配器文件路径。
 
-    - source 为空 → adapters/<name>/adapters.jsonc
-    - source 为 HTTPS URL → adapters/<name>/adapters.jsonc（下载目标）
-    - source 为本地路径 → 直接使用该路径
+    source 为必填。
+
+    - HTTPS URL → adapters/<id>.<name>/adapters.jsonc（此函数用于生成下载目标路径）
+    - 本地路径 → 直接使用该路径
     """
     if adapters_dir is None:
         adapters_dir = _get_adapters_dir_path()
 
-    if source:
-        if is_remote_source(source):
-            return os.path.join(adapters_dir, name, _ADAPTER_FILE)
-        # 本地路径
-        if os.path.isabs(source):
-            return source
-        return os.path.normpath(os.path.join(adapters_dir, source))
-
-    return os.path.join(adapters_dir, name, _ADAPTER_FILE)
+    if is_remote_source(source):
+        return os.path.join(adapters_dir, name, _ADAPTER_FILE)
+    # 本地路径
+    if os.path.isabs(source):
+        return source
+    return os.path.normpath(os.path.join(adapters_dir, source))
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +228,7 @@ def _domain_map(data: dict) -> dict:
         return data['domains']
     return {
         key: value for key, value in data.items()
-        if key not in ('*', 'domains') and not key.startswith('_')
+        if key not in ('defaults', 'global_defaults', 'domains') and not key.startswith('_')
     }
 
 
@@ -241,7 +239,8 @@ def _normalize_domain_config(value):
 
 
 def _materialize_domains(data: dict) -> dict:
-    defaults = data.get('*', {})
+    defaults = data.get('defaults', {})
+    # global_defaults 仅由 defaults 适配器使用，不在适配器内合并
     domains = {}
     for domain_key, config in _domain_map(data).items():
         config = _normalize_domain_config(config)
@@ -395,13 +394,13 @@ def list_cached_domains_from_file(file_path: str) -> list[str]:
     return sorted(data['domains'].keys())
 
 
-def _get_adapter_dir(name: str, adapter_id: str = '') -> str:
+def _get_adapter_dir(name: str, adapter_id: str) -> str:
     from site_adapters.services.base import _adapter_dir
-    dir_name = _adapter_dir({'id': adapter_id, 'name': name}) if adapter_id else name
+    dir_name = _adapter_dir({'id': adapter_id, 'name': name})
     return os.path.join(_get_adapters_dir_path(), dir_name)
 
 
-def _get_adapter_cache_path(name: str, adapter_id: str = '') -> str:
+def _get_adapter_cache_path(name: str, adapter_id: str) -> str:
     return os.path.join(_get_adapter_dir(name, adapter_id), _ADAPTER_FILE)
 
 
@@ -418,9 +417,9 @@ def is_allowed_script_path(script_path: str, base_dir: str) -> bool:
 # 单个订阅下载
 # ---------------------------------------------------------------------------
 
-def fetch_subscription(url: str, name: str = '', force: bool = False) -> str | None:
+def fetch_subscription(url: str, name: str = '', adapter_id: str = '', force: bool = False) -> str | None:
     """
-    下载远程订阅源并缓存为 adapters/<name>/adapters.jsonc
+    下载远程订阅源并缓存为 adapters/{adapter_id}.{name}/adapters.jsonc
 
     如果 url 是本地路径，直接返回该路径（不下载）。
 
@@ -435,8 +434,7 @@ def fetch_subscription(url: str, name: str = '', force: bool = False) -> str | N
         return None
 
     sub_name = _sub_name(url, name)
-    # 使用 name 作为 id（下载时还不知道 _meta.id）
-    file_path = _get_adapter_cache_path(sub_name, name)
+    file_path = _get_adapter_cache_path(sub_name, adapter_id or name)
     meta = _load_meta()
 
     try:
@@ -561,7 +559,8 @@ def _needs_fetch(sub: dict) -> bool:
         if cached_interval == interval and now - cached_fetch < interval:
             return False
 
-    sub_file = _get_adapter_cache_path(_sub_name(url, name), name)
+    adapter_id = sub.get('id', '')
+    sub_file = _get_adapter_cache_path(_sub_name(url, name), adapter_id or name)
     if not os.path.exists(sub_file):
         return True
     try:
@@ -600,7 +599,7 @@ def fetch_all_subscriptions(subscriptions: list[dict]) -> list[str]:
             continue
         name = sub.get('name', '')
 
-        path = fetch_subscription(url, name=name)
+        path = fetch_subscription(url, name=name, adapter_id=sub.get('id', ''))
         if path:
             paths.append(path)
 

@@ -433,7 +433,12 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       var interval = s.update_interval || 86400;
       var rowCls = 'wa-sub-item' + (enabled ? '' : ' wa-sub-disabled');
       h += '<div class="' + rowCls + '" data-index="' + i + '" draggable="true">';
-      h += '<div class="wa-sub-drag" title="' + gettext('Drag to reorder') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-grip"></use></svg></div>';
+      var isDefaults = s.id === 'defaults';
+      if (!isDefaults) {
+        h += '<div class="wa-sub-drag" title="' + gettext('Drag to reorder') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-grip"></use></svg></div>';
+      } else {
+        h += '<div class="wa-sub-drag wa-sub-drag-locked" title="' + gettext('System adapter (cannot reorder)') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-lock"></use></svg></div>';
+      }
       h += '<label class="form-switch wa-sub-toggle">';
       h += '<input type="checkbox" ' + (enabled ? 'checked' : '') + ' data-sub-toggle="' + i + '">';
       h += '<i class="form-icon"></i>';

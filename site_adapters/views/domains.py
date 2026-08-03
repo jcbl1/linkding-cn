@@ -26,24 +26,28 @@ logger = logging.getLogger(__name__)
 
 
 def _defaults_file_path() -> str:
-    """获取默认适配器文件路径。"""
+    """获取 defaults 适配器（id="defaults"）的文件路径。"""
     adapters_list = _get_adapters_list()
-    if adapters_list:
-        first = adapters_list[0]
-        if isinstance(first, dict):
+    for adapter in adapters_list:
+        if not isinstance(adapter, dict):
+            continue
+        if adapter.get('id') == 'defaults':
             return resolve_adapter_path(
-                first.get('name', 'defaults'),
-                first.get('source'),
+                adapter.get('name', ''),
+                adapter.get('source', ''),
             )
-    return os.path.join(_get_adapters_dir(), 'defaults', 'defaults.jsonc')
+    # 回退：构造默认路径
+    return os.path.join(_get_adapters_dir(), 'defaults', 'adapters.jsonc')
 
 
 def _ensure_defaults_file():
     """确保 defaults 适配器文件存在。"""
+    from site_adapters.views.helpers import _ensure_base_dirs
+    _ensure_base_dirs()
     file_path = _defaults_file_path()
     if not os.path.exists(file_path):
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        content = '{\n  "domains": {}\n}\n'
+        content = '{\n  "*": {},\n  "domains": {}\n}\n'
         atomic_write(file_path, content)
     return file_path
 
@@ -58,7 +62,9 @@ def _read_domain_from_adapter(domain_key: str, adapter_name: str = '') -> tuple[
         name = adapter.get('name', '')
         if adapter_name and name != adapter_name:
             continue
-        source = adapter.get('source')
+        source = adapter.get('source', '')
+        if not source:
+            continue
         file_path = resolve_adapter_path(name, source)
         if not os.path.exists(file_path):
             continue

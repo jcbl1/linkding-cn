@@ -30,6 +30,7 @@ from site_adapters.views.helpers import (
 
 logger = logging.getLogger(__name__)
 
+
 @site_adapters_required
 @require_http_methods(["GET", "POST"])
 def subscription_manage(request):
@@ -47,59 +48,12 @@ def subscription_manage(request):
     try:
         if action_name == 'add':
             item = _adapter_from_post(request)
-            source = item.get('source', '')
 
-            # Resolve id and name from the subscription source itself
-            from site_adapters.services.subscriptions import (
-                _read_subscription_file, resolve_adapter_path,
-                is_remote_source, fetch_subscription, _sub_name,
-            )
-
-            resolved_id = item.get('id', '')
-            resolved_name = item.get('name', '')
-
-            if source:
-                if is_remote_source(source):
-                    # Fetch the subscription file to get _meta.id and _meta.name
-                    try:
-                        tmp_path = fetch_subscription(source, name=item.get('name', ''))
-                        if tmp_path:
-                            data = _read_subscription_file(tmp_path)
-                            if data and isinstance(data.get('_meta'), dict):
-                                meta = data['_meta']
-                                resolved_id = resolved_id or meta.get('id', '')
-                                resolved_name = resolved_name or meta.get('name', '')
-                    except Exception:
-                        pass
-                else:
-                    # Local: read the file directly
-                    fp = resolve_adapter_path(item.get('name', ''), source)
-                    data = _read_subscription_file(fp)
-                    if data and isinstance(data.get('_meta'), dict):
-                        meta = data['_meta']
-                        resolved_id = resolved_id or meta.get('id', '')
-                        resolved_name = resolved_name or meta.get('name', '')
-
-            # Fallback: generate id from source if still empty
-            if not resolved_id:
-                if source:
-                    import re as _re, hashlib as _hl
-                    if is_remote_source(source):
-                        from urllib.parse import urlparse as _up
-                        p = _up(source).path.rstrip('/')
-                        fn = p.split('/')[-1] if p else ''
-                        resolved_id = _re.sub(r'\.(jsonc|json)$', '', fn) if fn else ''
-                    else:
-                        resolved_id = _re.sub(r'\.(jsonc|json)$', '', os.path.basename(source))
-                if not resolved_id:
-                    import hashlib as _hl
-                    resolved_id = _hl.md5((source or '').encode()).hexdigest()[:8]
-
-            if not resolved_name:
-                resolved_name = resolved_id
-
-            item['id'] = resolved_id
-            item['name'] = resolved_name
+            # id 和 name 均为必填
+            if not item.get('id', '').strip():
+                return JsonResponse({'error': 'id is required'}, status=400)
+            if not item.get('name', '').strip():
+                return JsonResponse({'error': 'name is required'}, status=400)
 
             if _has_adapter_conflict(adapters, item):
                 return JsonResponse({'error': 'adapter already exists'}, status=409)
@@ -109,17 +63,16 @@ def subscription_manage(request):
         elif action_name == 'save':
             index = _adapter_index(request, adapters)
             item = _adapter_from_post(request)
-            if not item.get('name'):
-                # Try _meta.name from cached file first
-                from site_adapters.services.subscriptions import _read_subscription_file, resolve_adapter_path, is_remote_source
-                old = adapters[index]
-                name_from_meta = None
-                if old.get('source'):
-                    fp = resolve_adapter_path(old.get('name', ''), old.get('source', ''))
-                    data = _read_subscription_file(fp)
-                    if data and isinstance(data.get('_meta'), dict):
-                        name_from_meta = data['_meta'].get('name')
-                item['name'] = name_from_meta or old.get('name') or item.get('id', '')
+            old = adapters[index]
+            # 保留未提供的 id 和 name
+            if not item.get('id', '').strip():
+                item['id'] = old.get('id', '')
+            if not item.get('name', '').strip():
+                item['name'] = old.get('name', '')
+            if not item.get('id', '').strip():
+                return JsonResponse({'error': 'id is required'}, status=400)
+            if not item.get('name', '').strip():
+                return JsonResponse({'error': 'name is required'}, status=400)
             if _has_adapter_conflict(adapters, item, ignore_index=index):
                 return JsonResponse({'error': 'adapter already exists'}, status=409)
             adapters[index] = item
@@ -144,8 +97,6 @@ def subscription_manage(request):
 
         elif action_name == 'reorder':
             indices = request.POST.getlist('indices')
-            logger.warning('REORDER DEBUG: POST keys=%s, raw_indices=%s, adapters_len=%d',
-                           list(request.POST.keys()), indices, len(adapters))
             seen = set()
             reordered = []
             for raw in indices:
@@ -156,10 +107,12 @@ def subscription_manage(request):
                 if 0 <= idx < len(adapters) and idx not in seen:
                     reordered.append(adapters[idx])
                     seen.add(idx)
-            # Append any adapters not in the sent indices (keeps them at the end)
+            # Append any adapters not in the sent indices
             for i, ad in enumerate(adapters):
                 if i not in seen:
                     reordered.append(ad)
+            # 强制 defaults 排第一位
+            _ensure_defaults_first(reordered)
             adapters = reordered
             _save_adapters_list(adapters)
 
@@ -181,7 +134,7 @@ def subscription_manage(request):
             if not source:
                 return JsonResponse({'error': 'no source for adapter'}, status=400)
             from site_adapters.services.subscriptions import fetch_subscription, _read_subscription_file, resolve_adapter_path
-            path = fetch_subscription(source, name=name, force=request.POST.get('force') == '1')
+            path = fetch_subscription(source, name=name, adapter_id=adapter.get('id', ''), force=request.POST.get('force') == '1')
             if path:
                 # Sync _meta.name from fetched file to config name
                 data = _read_subscription_file(path)
@@ -240,12 +193,19 @@ def subscription_domain_read(request):
     """读取订阅域名配置（兼容旧 API）。"""
     domain_key = request.GET.get('domain', '')
     sub_name = request.GET.get('sub', '')
-    from site_adapters.services.subscriptions import resolve_adapter_path, _read_subscription_file
+    from site_adapters.services.subscriptions import _read_subscription_file
 
-    file_path = resolve_adapter_path(sub_name, None)
-    data = _read_subscription_file(file_path)
-    if data and isinstance(data.get('domains'), dict) and domain_key in data['domains']:
-        return JsonResponse({'config': data['domains'][domain_key], 'domain': domain_key})
+    # 在已注册的适配器中查找
+    for adapter in adapters:
+        if not isinstance(adapter, dict):
+            continue
+        if adapter.get('name') == sub_name:
+            from site_adapters.services.subscriptions import resolve_adapter_path
+            file_path = resolve_adapter_path(sub_name, adapter.get('source', ''))
+            data = _read_subscription_file(file_path)
+            if data and isinstance(data.get('domains'), dict) and domain_key in data['domains']:
+                return JsonResponse({'config': data['domains'][domain_key], 'domain': domain_key})
+            break
     return JsonResponse({'error': 'not found'}, status=404)
 
 

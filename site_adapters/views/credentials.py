@@ -38,7 +38,7 @@ def user_cookies(request):
             all_config = _cache.load(base_dir)
             domain_keys = sorted(
                 key for key in all_config
-                if key != '*' and not key.startswith('_')
+                if key != 'defaults' and not key.startswith('_')
             )
             for domain_key in domain_keys:
                 auth = get_auth_requirements_for_domain_key(domain_key, base_dir=base_dir)

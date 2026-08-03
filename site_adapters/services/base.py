@@ -16,12 +16,13 @@ def _get_adapters_dir() -> str:
 
 def _adapter_dir(entry: dict) -> str:
     """从适配器条目计算目录名。
-    
-    - 有 id：{id}.{name}
-    - 无 id：{name}
+
+    id 和 name 均为必填。
+    - id != name → {id}.{name}
+    - id == name → {name}（不重复）
     """
     id_ = entry.get('id', '') if isinstance(entry, dict) else ''
     name = entry.get('name', '') if isinstance(entry, dict) else ''
-    if id_:
-        return f"{id_}.{name}"
-    return name
+    if id_ == name:
+        return name
+    return f"{id_}.{name}"

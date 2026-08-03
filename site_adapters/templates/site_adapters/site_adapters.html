@@ -214,7 +214,6 @@
   <script>
     window.__ld_section_fields = {{ section_fields_json|safe }};
     window.__ld_authority_lists = {{ authority_lists_json|safe }};
-    window.__ld_domain_files = {{ domain_files_json|safe }};
     window.__ld_urls = {
       action: "{% url 'linkding:settings.site_adapters.action' %}",
       domainCreate: "{% url 'linkding:settings.site_adapters.domain_create' %}",

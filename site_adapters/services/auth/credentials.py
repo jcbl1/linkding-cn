@@ -419,7 +419,7 @@ def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') ->
     from site_adapters.services.config.loader import _cache, _resolve_alias
 
     all_config = _cache.load(base_dir)
-    defaults = all_config.get('*', {})
+    defaults = all_config.get('defaults', {})
     raw_config = all_config.get(domain_key)
     if raw_config is None:
         return {'cookie': False, 'headers': [], 'token': False}
@@ -499,7 +499,7 @@ def list_domains_with_toggles(base_dir: str) -> list[dict]:
     all_config = _cache.load(base_dir)
     result = []
     for key, config in all_config.items():
-        if key == '*' or key.startswith('_'):
+        if key == 'defaults' or key.startswith('_'):
             continue
         if not isinstance(config, dict):
             continue

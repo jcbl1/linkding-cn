@@ -509,7 +509,10 @@ def validate_config(base_dir: str, domain_filename: str = '') -> list[str]:
                 if item.get('enabled') is False:
                     continue
                 name = item.get('name', '')
-                source = item.get('source')
+                source = item.get('source', '')
+                if not source:
+                    issues.append(f"WARN: 适配器缺少 source: {name}")
+                    continue
                 from site_adapters.services.subscriptions import resolve_adapter_path
                 file_path = resolve_adapter_path(name, source, adapters_dir)
 
@@ -527,9 +530,12 @@ def validate_config(base_dir: str, domain_filename: str = '') -> list[str]:
                         for domain_key, domain_config in domains.items():
                             label = f"{name}/{domain_key}"
                             _validate_domain_config(issues, label, domain_config, os.path.dirname(file_path))
-                    glob_defaults = data.get('*')
+                    glob_defaults = data.get('defaults')
+                    global_defaults_data = data.get('global_defaults')
                     if glob_defaults and isinstance(glob_defaults, dict):
-                        _validate_domain_config(issues, f"{name}.*", glob_defaults, os.path.dirname(file_path))
+                        _validate_domain_config(issues, f"{name}.defaults", glob_defaults, os.path.dirname(file_path))
+                    if global_defaults_data and isinstance(global_defaults_data, dict):
+                        _validate_domain_config(issues, f"{name}.global_defaults", global_defaults_data, os.path.dirname(file_path))
                 except json.JSONDecodeError as e:
                     issues.append(f"ERROR: {name} 解析失败: {e}")
     else:
@@ -550,7 +556,10 @@ def validate_config(base_dir: str, domain_filename: str = '') -> list[str]:
         for item in adapters_list:
             if not isinstance(item, dict) or item.get('enabled') is False:
                 continue
-            file_path = resolve_adapter_path(item.get('name', ''), item.get('source'), adapters_dir)
+            source = item.get('source', '')
+            if not source:
+                continue
+            file_path = resolve_adapter_path(item.get('name', ''), source, adapters_dir)
             data = _read_subscription_file(file_path)
             if data and isinstance(data.get('domains'), dict) and domain_filename in data['domains']:
                 _validate_domain_config(issues, domain_filename, data['domains'][domain_filename], os.path.dirname(file_path))
