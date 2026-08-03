@@ -142,6 +142,33 @@ def _get_adapters_list() -> list:
     return deduped
 
 
+def _get_disabled_domains() -> set[str]:
+    """Read _disabled_domains from config.jsonc. Returns a set of domain keys."""
+    data, _ = _load_config()
+    disabled = data.get('_disabled_domains', [])
+    if not isinstance(disabled, list):
+        return set()
+    return set(disabled)
+
+
+def _toggle_domain_disabled(domain_key: str, disabled: bool):
+    """Add or remove domain_key from _disabled_domains in config.jsonc."""
+    current = _get_disabled_domains()
+    if disabled:
+        current.add(domain_key)
+    else:
+        current.discard(domain_key)
+    path = _config_path()
+    text = ''
+    if os.path.exists(path):
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+    new_text = _replace_top_level_jsonc_value(text, '_disabled_domains', sorted(current))
+    atomic_write(path, new_text)
+    _invalidate_site_adapters_cache()
+
+
+
 # Test helpers
 def _sanitize_url_for_filename(url: str) -> str:
     return "".join(c if (c.isalnum() or c in "-_.") else "_" for c in url)[:120]
@@ -356,3 +383,109 @@ def _has_adapter_conflict(adapters: list, item: dict, ignore_index: int | None =
         if new_source and a.get('source') == new_source:
             return True
     return False
+
+
+
+
+def build_domain_files_meta() -> list[dict]:
+    """Lightweight variant: returns domain list WITHOUT config data.
+    Includes 'sections' key listing config top-level keys for tag display."""
+    full = build_domain_files()
+    result = []
+    for d in full:
+        item = {k: v for k, v in d.items() if k != 'config'}
+        config = d.get('config') or {}
+        item['sections'] = sorted(k for k in config.keys() if isinstance(config.get(k), dict))
+        result.append(item)
+    return result
+
+def build_domain_files() -> list[dict]:
+    """Build the full domain list from all enabled adapters, including config,
+    disabled state, and shadow info. Reusable by page view and API."""
+    from site_adapters.services.auth.cookies import has_cookie_for_domain
+    from site_adapters.services.config import load_jsonc_file
+    from site_adapters.services.subscriptions import resolve_adapter_path
+    import os
+
+    adapters_list = _get_adapters_list()
+    adapters_dir = _get_adapters_dir()
+    disabled_domains = _get_disabled_domains()
+    domain_files = []
+    seen_domains: dict[str, str] = {}
+
+    for adapter in adapters_list:
+        if not isinstance(adapter, dict):
+            continue
+        if adapter.get('enabled') is False:
+            continue
+        name = adapter.get('name', '')
+        source = adapter.get('source')
+        # Resolve file path
+        dir_name = _adapter_dir(adapter)
+        file_path = os.path.join(adapters_dir, dir_name, 'adapters.jsonc')
+        if source and not source.startswith('http') and os.path.exists(os.path.join(adapters_dir, source) if not os.path.isabs(source) else source):
+            file_path = os.path.normpath(os.path.join(adapters_dir, source)) if not os.path.isabs(source) else source
+
+        if not os.path.exists(file_path):
+            continue
+
+        try:
+            data = load_jsonc_file(file_path)
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        if not isinstance(data, dict):
+            continue
+
+        domains = data.get('domains', {})
+        if not isinstance(domains, dict):
+            domains = {}
+
+        for domain_key, domain_config in domains.items():
+            is_alias = isinstance(domain_config, dict) and domain_config.get('type') == 'alias'
+            target = domain_config.get('target', '') if is_alias else ''
+            has_cookie = has_cookie_for_domain(domain_key)
+            requires_cookie = (
+                not is_alias
+                and isinstance(domain_config, dict)
+                and (bool(domain_config.get('auth', {}).get('cookie'))
+                     or bool(domain_config.get('cookie')))
+            )
+            disabled = domain_key in disabled_domains
+
+            if domain_key in seen_domains:
+                domain_files.append({
+                    'domain_key': domain_key,
+                    'adapter': name,
+                    'is_alias': is_alias,
+                    'target': target,
+                    'has_cookie': has_cookie,
+                    'requires_cookie': requires_cookie,
+                    'disabled': disabled,
+                    'shadowed': True,
+                    'shadowed_by': seen_domains[domain_key],
+                    'config': domain_config,
+                })
+                continue
+
+            seen_domains[domain_key] = name
+            domain_files.append({
+                'domain_key': domain_key,
+                'adapter': name,
+                'is_alias': is_alias,
+                'target': target,
+                'has_cookie': has_cookie,
+                'requires_cookie': requires_cookie,
+                'disabled': disabled,
+                'shadowed': False,
+                'shadowed_by': '',
+                'config': domain_config,
+            })
+
+    return domain_files
+
+
+def _adapter_dir(adapter: dict) -> str:
+    """Get the directory name for an adapter."""
+    from site_adapters.services.base import _adapter_dir as _base_adapter_dir
+    return _base_adapter_dir(adapter)

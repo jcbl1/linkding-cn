@@ -42,7 +42,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     document.getElementById('view-subscriptions').hidden = mode !== 'subscriptions';
     document.getElementById('view-domains').hidden = mode !== 'domains';
     if (mode === 'subscriptions') loadSubscriptions();
-    if (mode === 'domains') loadDomainList();
+    if (mode === 'domains') restoreSearchResults();
   }
   document.querySelectorAll('[name="view-mode"]').forEach(function (r) {
     r.addEventListener('change', function () { switchMode(this.value); });
@@ -50,112 +50,340 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
 
   // ===== Domain list =====
   var domainEntries = [];
-  function loadDomainList() {
-    // 从模板提供的 domain_files_json 读取
-    var data = window.__ld_domain_files || [];
-    domainEntries = data.map(function (d) {
-      return {
-        domain_key: d.domain_key || '',
-        adapter: d.adapter || '',
-        source: d.adapter === 'defaults' ? 'local' : 'subscription',
-        is_alias: d.is_alias || false,
-        target: d.target || '',
-        requires_cookie: d.requires_cookie || false,
-        has_cookie: d.has_cookie || false,
-        disabled: d.disabled || false
-      };
-    });
-    renderDomainList();
+  var domainResultsVisible = false;
+  var expandedDomains = {};  // rowId → true
+  var configCache = {};  // domain_key → config object
+  var _domainViewMode = 'structured';  // 'structured' or 'raw'
+  var SEARCH_KEY = 'ld:site-adapters-domain-search';
+  var RESULTS_KEY = 'ld:site-adapters-domain-results';
+
+  function getStoredSearch() {
+    try { return localStorage.getItem(SEARCH_KEY) || ''; } catch (e) { return ''; }
+  }
+  function setStoredSearch(val) {
+    try { localStorage.setItem(SEARCH_KEY, val || ''); } catch (e) {}
+  }
+  function getStoredResults() {
+    try { var r = localStorage.getItem(RESULTS_KEY); return r ? JSON.parse(r) : null; } catch (e) { return null; }
+  }
+  function setStoredResults(data) {
+    try { localStorage.setItem(RESULTS_KEY, JSON.stringify(data)); } catch (e) {}
+  }
+  function clearStoredResults() {
+    try { localStorage.removeItem(RESULTS_KEY); } catch (e) {}
   }
 
-  var domainSortAsc = true, activeDomainFile = null;
-  function renderDomainList(filter) {
-    var list = document.getElementById('domain-list'); if (!list) return;
-    var h = '<div class="wa-domain-item wa-domain-global" data-domain_key="*" data-is-global="1" data-domain="*" data-is-global="1"><code>*</code><small class="wa-domain-note">' + gettext('global defaults') + '</small></div>';
-    var items = domainEntries.slice();
-    if (filter) { var q = filter.toLowerCase(); items = items.filter(function (x) { return x.domain_key.toLowerCase().indexOf(q) >= 0; }); }
-    if (!domainSortAsc) items.reverse();
-    items.forEach(function (d) {
-      var cls = 'wa-domain-item' + (d.disabled ? ' wa-domain-sub-disabled' : '') + (activeDomainFile && activeDomainFile.domain_key === d.filename ? ' active' : '');
-      h += '<div class="' + cls + '" data-domain_key="' + esc(d.filename) + '" data-domain="' + esc(d.domain_key) + '">';
-      h += '<code>' + esc(d.domain_key) + '</code>';
-      if (d.is_alias && d.target) h += '<small class="wa-alias-target">&rarr; ' + esc(d.target) + '</small>';
-      h += '<label class="form-switch wa-domain-local-switch"><input type="checkbox" ' + (d.disabled ? '' : 'checked') + ' data-local-domain="' + esc(d.domain_key) + '"><i class="form-icon"></i></label>';
-      h += '</div>';
-    });
-    list.innerHTML = h;
-    list.querySelectorAll('.wa-domain-item').forEach(function (el) {
-      el.addEventListener('click', function (e) { if (!e.target.closest('input')) selectDomain(this.dataset.filename); });
-    });
-    list.querySelectorAll('input[data-local-domain]').forEach(function (cb) {
-      cb.addEventListener('change', function () { apiPost(urls.localDomainToggle, { domain: this.dataset.localDomain, enabled: this.checked ? '1' : '0' }).then(function (r) { if (r.error) toast(r.error, 'error'); }); });
-    });
-  }
-  function selectDomain(fn) {
-    activeDomainFile = domainEntries.find(function (d) { return d.domain_key === fn; }) || { domain_key: fn, source: 'local' };
-    renderDomainList(document.getElementById('domain-search').value);
-    document.getElementById('domain-editor-header').hidden = false;
-    document.getElementById('editor-empty').hidden = true;
-    document.getElementById('editor-content').hidden = false;
-    document.getElementById('editor-filename').textContent = fn;
-    document.getElementById('btn-delete-domain').hidden = (fn === '*');
-    document.getElementById('cookie-banner').hidden = true;
-    apiGet(urls.domainRead + '?domain_key=' + encodeURIComponent(fn)).then(function (d) {
-      var c = document.getElementById('cm-domain-container'); c.textContent = d.content || '';
-      c.style.cssText = 'font-family:monospace;font-size:13px;white-space:pre-wrap;padding:12px;min-height:300px;outline:none;overflow:auto;background:var(--wa-surface-alt);';
-      c.contentEditable = 'true'; c.setAttribute('spellcheck', 'false');
-    });
-  }
-  document.getElementById('domain-search').addEventListener('input', function () { renderDomainList(this.value); });
-  document.getElementById('btn-sort-domains').addEventListener('click', function () { domainSortAsc = !domainSortAsc; renderDomainList(document.getElementById('domain-search').value); });
-  document.getElementById('btn-save-domain').addEventListener('click', function () {
-    if (!activeDomainFile) return;
-    apiPost(urls.domainSave, { filename: activeDomainFile.domain_key, content: document.getElementById('cm-domain-container').textContent || '' })
-      .then(function (r) { if (r.error) toast(r.error, 'error'); else { toast(gettext('Saved'), 'success'); loadDomainList(); } });
-  });
-  document.getElementById('btn-delete-domain').addEventListener('click', function () {
-    if (!activeDomainFile || activeDomainFile.domain_key === 'global.jsonc') return;
-    if (!confirm(gettext('Delete') + ' ' + activeDomainFile.domain_key + '?')) return;
-    apiPost(urls.domainDelete, { filename: activeDomainFile.domain_key }).then(function (r) {
-      if (r.error) { toast(r.error, 'error'); return; }
-      activeDomainFile = null; document.getElementById('domain-editor-header').hidden = true;
-      document.getElementById('editor-empty').hidden = false; document.getElementById('editor-content').hidden = true;
-      document.getElementById('cookie-banner').hidden = true; loadDomainList();
-    });
-  });
-  document.getElementById('btn-add-domain').addEventListener('click', function () {
-    var n = prompt(gettext('Domain name (e.g. example.com):')); if (!n) return;
-    apiPost(urls.domainCreate, { domain_key: n }).then(function (r) { if (r.error) toast(r.error, 'error'); else loadDomainList(); });
-  });
-  document.getElementById('btn-rename-domain').addEventListener('click', function () {
-    if (!activeDomainFile || activeDomainFile.domain_key === 'global.jsonc') return;
-    var nn = prompt(gettext('New domain name:'), activeDomainFile.domain_key);
-    if (!nn || nn === activeDomainFile.domain_key) return;
-    apiPost(urls.domainRename, { old_filename: activeDomainFile.domain_key, new_domain: nn }).then(function (r) {
-      if (r.error) toast(r.error, 'error'); else { activeDomainFile = null; loadDomainList(); }
-    });
-  });
-  document.getElementById('btn-copy-to-local').addEventListener('click', function () {
-    if (!activeDomainFile) return;
-    apiPost(urls.domainSave, { filename: activeDomainFile.domain_key, action: 'copy_to_local' })
-      .then(function (r) { if (r.error) toast(r.error, 'error'); else toast(gettext('Copied to local'), 'success'); });
-  });
-  document.getElementById('btn-validate').addEventListener('click', function () {
-    if (!activeDomainFile) return;
-    apiPost(urls.action, { action: 'validate', filename: activeDomainFile.domain_key, content: document.getElementById('cm-domain-container').textContent || '' })
-      .then(function (r) {
-        document.getElementById('domain-validate-results').hidden = false;
-        document.getElementById('domain-validate-status').textContent = r.error ? gettext('Invalid') : gettext('Valid');
-        document.getElementById('domain-validate-status').style.color = r.error ? 'red' : 'green';
-        document.getElementById('domain-validate-output').textContent = r.error || r.message || JSON.stringify(r, null, 2);
+  function restoreSearchResults() {
+    var stored = getStoredResults();
+    var searchTerm = getStoredSearch();
+    if (stored && stored.length > 0) {
+      domainEntries = stored.map(function (item) {
+        var rowId = (item.domain_key || '') + '::' + (item.adapter || '');
+        item.rowId = rowId;
+        item.sections = item.sections || [];
+        if (configCache[item.domain_key]) item.config = configCache[item.domain_key];
+        if (!item.config) item.config = null;
+        return item;
       });
+      var searchInput = document.getElementById('domain-search');
+      if (searchInput) searchInput.value = searchTerm;
+      domainResultsVisible = true;
+      var clearBtn = document.getElementById('btn-clear-domain-search');
+      if (clearBtn && searchTerm) clearBtn.removeAttribute('hidden');
+      else if (clearBtn) clearBtn.setAttribute('hidden', '');
+      renderDomainResults();
+    }
+  }
+
+  function performSearch(query) {
+    var searchInput = document.getElementById('domain-search');
+    query = query || (searchInput ? searchInput.value.trim() : '');
+    setStoredSearch(query);
+
+    // Build URL with optional query
+    var url = urls.domainsAll;
+    if (query) url += '?q=' + encodeURIComponent(query);
+
+    apiGet(url).then(function (d) {
+      domainEntries = (d.domain_files || []).map(function (item) {
+        var rowId = (item.domain_key || '') + '::' + (item.adapter || '');
+        return {
+          rowId: rowId,
+          domain_key: item.domain_key || '',
+          adapter: item.adapter || '',
+          is_alias: item.is_alias || false,
+          target: item.target || '',
+          requires_cookie: item.requires_cookie || false,
+          has_cookie: item.has_cookie || false,
+          disabled: item.disabled || false,
+          shadowed: item.shadowed || false,
+          shadowed_by: item.shadowed_by || '',
+          sections: item.sections || [],
+          config: configCache[item.domain_key] || null
+        };
+      });
+      domainResultsVisible = true;
+      var searchInput2 = document.getElementById('domain-search');
+      var clearBtn2b = document.getElementById('btn-clear-domain-search');
+      if (clearBtn2b) clearBtn2b.removeAttribute('hidden');
+      setStoredResults(domainEntries.map(function (e) {
+        // Don't store config in localStorage (could be large)
+        var o = {};
+        for (var k in e) { if (k !== 'config') o[k] = e[k]; }
+        o.sections = e.sections || [];
+        return o;
+      }));
+      renderDomainResults();
+    }).catch(function () {
+      toast(gettext('Search failed'), 'error');
+    });
+  }
+
+  function renderDomainResults() {
+    var wrap = document.getElementById('domain-results-wrap');
+    var tbody = document.getElementById('domain-table-body');
+    var viewToggle = document.getElementById('domain-view-toggle');
+    var clearBtn = document.getElementById('btn-clear-domain-search');
+    if (!wrap || !tbody) return;
+
+    if (domainResultsVisible) {
+      wrap.removeAttribute('hidden');
+    } else {
+      wrap.setAttribute('hidden', '');
+    }
+    if (!domainResultsVisible) {
+      if (viewToggle) viewToggle.setAttribute('hidden', '');
+      return;
+    }
+
+
+
+    // Update clear button visibility
+    var searchInput = document.getElementById('domain-search');
+    if (clearBtn) { if (domainResultsVisible) clearBtn.removeAttribute('hidden'); else clearBtn.setAttribute('hidden', ''); }
+
+    var h = '';
+    domainEntries.forEach(function (d) {
+      var tags = buildDomainTags(d);
+      var rowCls = 'wa-domain-row' + (d.shadowed ? ' wa-domain-row-shadowed' : '') + (d.disabled && !d.shadowed ? ' wa-domain-disabled' : '') + (expandedDomains[d.rowId] ? ' wa-domain-row-expanded' : '');
+      h += '<tr class="' + rowCls + '" data-row-id="' + esc(d.rowId) + '" data-adapter="' + esc(d.adapter) + '"' + (d.shadowed_by ? ' title="' + esc(gettext('Overridden by')) + ' ' + esc(d.shadowed_by) + '"' : '') + '>';
+      // Column 1: Toggle
+      h += '<td class="wa-col-toggle"><label class="form-switch"><input type="checkbox" ' + (d.disabled ? '' : 'checked') + ' data-local-domain="' + esc(d.domain_key) + '"><i class="form-icon"></i></label></td>';
+      // Column 2: Domain + tags
+      h += '<td class="wa-col-domain">';
+      h += '<div class="wa-domain-main"><code>' + esc(d.domain_key) + '</code>';
+      if (d.is_alias && d.target) h += ' <span class="wa-alias-badge">&rarr; ' + esc(d.target) + '</span>';
+      h += '</div>';
+      if (tags.length > 0) {
+        h += '<div class="wa-domain-tags">';
+        tags.forEach(function (tag) {
+          h += '<span class="wa-tag wa-tag-' + esc(tag.cls) + '"' + (tag.title ? ' title="' + esc(tag.title) + '"' : '') + '>' + esc(tag.label) + '</span>';
+        });
+        h += '</div>';
+      }
+      h += '</td>';
+      // Column 3: Source
+      h += '<td class="wa-col-source"><span class="wa-source-badge">' + esc(d.adapter) + '</span></td>';
+      h += '</tr>';
+      if (expandedDomains[d.rowId]) {
+        h += renderDetailRow(d);
+      }
+    });
+    tbody.innerHTML = h;
+
+    // Row click → expand / collapse
+    tbody.querySelectorAll('.wa-domain-row').forEach(function (tr) {
+      tr.addEventListener('click', function (e) {
+        if (e.target.closest('input, label')) return;
+        toggleDomainDetail(this.dataset.rowId);
+      });
+    });
+    // Toggle switches
+    tbody.querySelectorAll('input[data-local-domain]').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var domainKey = this.dataset.localDomain;
+        var enabled = this.checked;
+        apiPost(urls.localDomainToggle, { domain: domainKey, enabled: enabled ? '1' : '0' })
+          .then(function (r) {
+            if (r.error) { toast(r.error, 'error'); return; }
+            var entry = domainEntries.find(function (e) { return e.domain_key === domainKey; });
+            if (entry) { entry.disabled = !enabled; }
+            setStoredResults(domainEntries.map(function (e) {
+              var o = {};
+              for (var k in e) {
+                if (k !== 'config' && k !== 'sections') o[k] = e[k];
+              }
+              o.sections = e.sections || [];
+              return o;
+            }));
+            renderDomainResults();
+          });
+      });
+    });
+  }
+
+  function buildDomainTags(d) {
+    var tags = [];
+    // Section tags (from metadata or config)
+    var sections = d.sections || [];
+    if (sections.length === 0 && d.config) {
+      sections = Object.keys(d.config).filter(function (k) { return d.config[k] !== null && typeof d.config[k] === 'object'; });
+    }
+    sections.forEach(function (s) {
+      tags.push({ label: s, cls: 'section' });
+    });
+    // Shadowed tag
+    if (d.shadowed) {
+      tags.push({ label: gettext('overridden'), cls: 'shadowed', title: gettext('Overridden by') + ' ' + (d.shadowed_by || '') });
+    }
+    // Cookie needed
+    if (d.requires_cookie && !d.has_cookie) {
+      tags.push({ label: gettext('cookie needed'), cls: 'warn' });
+    }
+    return tags;
+  }
+
+  function renderDetailRow(d) {
+    if (d.config) {
+      return buildDetailHtml(d);
+    }
+    return '<tr class="wa-domain-detail" data-row-id="' + esc(d.rowId) + '"><td colspan="3"><div class="wa-detail-loading">' + gettext('Loading...') + '</div></td></tr>';
+  }
+
+  function buildDetailHtml(d) {
+    var config = d.config || {};
+    var h = '<tr class="wa-domain-detail" data-row-id="' + esc(d.rowId) + '"><td colspan="3"><div class="wa-detail-inner">';
+    h += '<div class="wa-detail-header">';
+    h += '<span class="wa-detail-title">' + esc(d.domain_key) + '</span>';
+    h += '<span class="wa-detail-source">' + gettext('Source') + ': ' + esc(d.adapter || '—') + '</span>';
+    h += '</div><div class="wa-detail-body">';
+
+    if (_domainViewMode === 'raw') {
+      h += '<pre class="wa-detail-code">' + esc(JSON.stringify(config, null, 2)) + '</pre>';
+    } else {
+      var sections = Object.keys(config);
+      if (sections.length === 0) {
+        h += '<pre class="wa-detail-code">' + esc(JSON.stringify(config, null, 2)) + '</pre>';
+      } else {
+        sections.forEach(function (section) {
+          var val = config[section];
+          var isObj = val !== null && typeof val === 'object';
+          var keyCount = isObj ? Object.keys(val).length : 0;
+          h += '<details class="wa-detail-section" open>';
+          h += '<summary class="wa-detail-section-heading"><span>' + esc(section) + '</span>';
+          if (isObj && keyCount > 0) h += ' <span class="wa-detail-section-count">' + keyCount + ' keys</span>';
+          h += '</summary>';
+          h += '<pre class="wa-detail-code">' + esc(JSON.stringify(val, null, 2)) + '</pre>';
+          h += '</details>';
+        });
+      }
+    }
+
+    h += '</div></div></td></tr>';
+    return h;
+  }
+
+  function toggleDomainDetail(rowId) {
+    if (expandedDomains[rowId]) {
+      delete expandedDomains[rowId];
+      renderDomainResults();
+      return;
+    }
+    var entry = domainEntries.find(function (e) { return e.rowId === rowId; });
+    if (!entry) return;
+    var domainKey = entry.domain_key;
+
+    expandedDomains[rowId] = true;
+    // Render immediately with loading state
+    renderDomainResults();
+
+    // If config is already cached, re-render with detail
+    if (entry.config) {
+      renderDomainResults();
+      return;
+    }
+
+    // Fetch config from server
+    var readUrl = urls.domainRead + '?domain_key=' + encodeURIComponent(domainKey);
+    if (entry.adapter) readUrl += '&adapter=' + encodeURIComponent(entry.adapter);
+    apiGet(readUrl).then(function (d) {
+      var cfg = d.config || {};
+      configCache[domainKey] = cfg;
+      // Update config for ALL entries with this domain_key (including shadowed)
+      domainEntries.forEach(function (e) {
+        if (e.domain_key === domainKey) e.config = cfg;
+      });
+      if (expandedDomains[rowId]) {
+        renderDomainResults();
+      }
+    }).catch(function () {
+      domainEntries.forEach(function (e) {
+        if (e.domain_key === domainKey) e.config = {};
+      });
+      if (expandedDomains[rowId]) {
+        renderDomainResults();
+      }
+    });
+  }
+
+  // ===== Event bindings =====
+  // Search button
+  document.getElementById('btn-search-domains').addEventListener('click', function () {
+    var q = document.getElementById('domain-search').value.trim();
+    if (!q) {
+      // Show confirmation modal
+      var overlay = document.getElementById('domain-confirm-overlay');
+      var msg = document.getElementById('domain-confirm-msg');
+      msg.textContent = gettext('This will list all domains from enabled subscriptions. This may consume significant data. Continue?');
+      overlay.hidden = false;
+    } else {
+      performSearch(q);
+    }
   });
-  document.getElementById('btn-close-domain-validate').addEventListener('click', function () { document.getElementById('domain-validate-results').hidden = true; });
-  document.getElementById('btn-paste-cookie').addEventListener('click', function () {
-    if (!activeDomainFile) return;
-    var c = prompt(gettext('Paste cookie string:')); if (!c) return;
-    apiPost(urls.saveCookie, { domain_key: activeDomainFile.domain_key, cookie: c })
-      .then(function (r) { if (r.error) toast(r.error, 'error'); else { toast(gettext('Cookie saved'), 'success'); loadDomainList(); } });
+
+  // Enter key in search input
+  document.getElementById('domain-search').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') document.getElementById('btn-search-domains').click();
+  });
+
+  // Clear button
+  var searchInputEl2 = document.getElementById('domain-search');
+  var clearBtn2 = document.getElementById('btn-clear-domain-search');
+  searchInputEl2.addEventListener('input', function () {
+    if (clearBtn2) clearBtn2.hidden = !this.value;
+  });
+  if (clearBtn2) {
+    clearBtn2.addEventListener('click', function () {
+      searchInputEl2.value = '';
+      setStoredSearch('');
+      clearStoredResults();
+      domainEntries = [];
+      domainResultsVisible = false;
+      expandedDomains = {};
+      renderDomainResults();
+      clearBtn2.hidden = true;
+      searchInputEl2.focus();
+    });
+  }
+
+  // View mode toggle
+  document.querySelectorAll('[name="domain-view-mode"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      _domainViewMode = this.value;
+      if (Object.keys(expandedDomains).length > 0) renderDomainResults();
+    });
+  });
+
+  // Confirm modal
+  document.getElementById('btn-domain-confirm-ok').addEventListener('click', function () {
+    document.getElementById('domain-confirm-overlay').hidden = true;
+    performSearch('');
+  });
+  document.getElementById('btn-domain-confirm-cancel').addEventListener('click', function () {
+    document.getElementById('domain-confirm-overlay').hidden = true;
+  });
+  document.getElementById('domain-confirm-overlay').addEventListener('mousedown', function (e) {
+    if (e.target === this) this.hidden = true;
   });
 
   // ===== Subscriptions =====
@@ -459,7 +687,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
   var testStatus = document.getElementById('test-status');
 
   function restoreResult() {
-    try { var s = JSON.parse(localStorage.getItem(RESULT_KEY)); if (s && s.data) { resultsSection.hidden = false; document.getElementById('test-bar').hidden = false; renderTestResult(s.data, s.elapsed || 0, s.testType || ''); } } catch (e) {}
+    try { var s = JSON.parse(localStorage.getItem(RESULT_KEY)); if (s && s.data) { resultsSection.removeAttribute('hidden'); document.getElementById('test-bar').removeAttribute('hidden'); renderTestResult(s.data, s.elapsed || 0, s.testType || ''); } } catch (e) {}
   }
   function saveResult(data, elapsed, testType) { try { localStorage.setItem(RESULT_KEY, JSON.stringify({ data: data, elapsed: elapsed, testType: testType })); } catch (e) {} }
   var blurTimer = null;
@@ -482,7 +710,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     try { localStorage.setItem(URL_HISTORY_KEY, JSON.stringify(testHistory)); } catch (ex) {}
     var type = this.test_type.value, username = this.test_username.value.trim();
     var startTime = Date.now();
-    resultsSection.hidden = false; document.getElementById('test-bar').hidden = false; testStatus.innerHTML = '<span class="wa-status-tag wa-status-tag-running">' + esc(type) + '</span> ' + gettext('Running\u2026'); testStatus.style.color = ''; testOutput.innerHTML = '';
+    resultsSection.removeAttribute('hidden'); document.getElementById('test-bar').removeAttribute('hidden'); testStatus.innerHTML = '<span class="wa-status-tag wa-status-tag-running">' + esc(type) + '</span> ' + gettext('Running\u2026'); testStatus.style.color = ''; testOutput.innerHTML = '';
     apiPost(urls.action, { action: 'test', url: url, test_type: type, test_username: username || '' })
       .then(function (r) {
         var elapsed = Date.now() - startTime;
@@ -499,14 +727,14 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
   });
   document.getElementById('btn-show-details').addEventListener('click', function () {
     var raw = document.getElementById('test-raw');
-    var showingRaw = !raw.hidden;
-    if (showingRaw) { raw.hidden = true; testOutput.hidden = false; this.textContent = gettext('Raw JSON'); }
-    else { raw.hidden = false; testOutput.hidden = true; this.textContent = gettext('Show output'); }
+    var showingRaw = raw.hasAttribute('hidden');
+    if (showingRaw) { raw.removeAttribute('hidden'); testOutput.setAttribute('hidden', ''); this.textContent = gettext('Show output'); }
+    else { raw.setAttribute('hidden', ''); testOutput.removeAttribute('hidden'); this.textContent = gettext('Raw JSON'); }
   });
   document.getElementById('btn-clear-test').addEventListener('click', function () {
     testOutput.innerHTML = ''; document.getElementById('test-raw').textContent = '';
-    testStatus.innerHTML = ''; document.getElementById('test-bar').hidden = true;
-    resultsSection.hidden = true; try { localStorage.removeItem(RESULT_KEY); } catch (e) {}
+    testStatus.innerHTML = ''; document.getElementById('test-bar').setAttribute('hidden', '');
+    resultsSection.setAttribute('hidden', ''); try { localStorage.removeItem(RESULT_KEY); } catch (e) {}
   });
   document.getElementById('btn-clean-test-files').addEventListener('click', function () { apiPost(urls.action, { action: 'clean_test_files' }).then(function (r) { if (r.error) toast(r.error, 'error'); else toast(gettext('Test files cleaned'), 'success'); }); });
 

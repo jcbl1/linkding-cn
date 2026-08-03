@@ -207,49 +207,32 @@ def subscription_manage(request):
 
 @site_adapters_required
 def all_domains(request):
-    """返回所有域名列表（兼容旧 API）。"""
-    from site_adapters.services.config import load_jsonc_file
-    from site_adapters.services.subscriptions import resolve_adapter_path
+    """返回域名列表（元数据，不含 config）。
+    支持 ?q= 参数进行服务端过滤。"""
+    from site_adapters.views.helpers import build_domain_files_meta
+    try:
+        domain_files = build_domain_files_meta()
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
 
-    adapters = _get_adapters_list()
-    local_domains = []
-    sub_domains = []
+    q = request.GET.get('q', '').strip().lower()
+    if q:
+        domain_files = [d for d in domain_files if q in d.get('domain_key', '').lower()]
 
-    for adapter in adapters:
-        if not isinstance(adapter, dict) or adapter.get('enabled') is False:
-            continue
-        name = adapter.get('name', '')
-        source = adapter.get('source')
-        file_path = resolve_adapter_path(name, source)
-        if not os.path.exists(file_path):
-            continue
-        try:
-            data = load_jsonc_file(file_path)
-        except Exception:
-            continue
-        if not isinstance(data, dict) or not isinstance(data.get('domains'), dict):
-            continue
-
-        if name == 'defaults':
-            local_domains = sorted(data['domains'].keys())
-        else:
-            sub_domains.append({
-                'name': name,
-                'domains': [{'domain': d, 'enabled': True, 'overridden': False}
-                           for d in sorted(data['domains'].keys())],
-            })
-
-    return JsonResponse({'local': local_domains, 'subscriptions': sub_domains})
+    return JsonResponse({'domain_files': domain_files, 'total_count': len(domain_files)})
 
 
 @site_adapters_required
 @require_POST
 def local_domain_toggle(request):
-    """开关本地域名（兼容旧 API）。"""
+    """开关域名启用/禁用状态。写入 config.jsonc 的 _disabled_domains。"""
+    from site_adapters.views.helpers import _toggle_domain_disabled
     domain_key = request.POST.get('domain', '')
+    if not domain_key:
+        return JsonResponse({'error': 'domain key required'}, status=400)
     enabled = request.POST.get('enabled', '1') == '1'
-    # TODO: implement toggle in defaults adapter
-    return JsonResponse({'success': True})
+    _toggle_domain_disabled(domain_key, disabled=not enabled)
+    return JsonResponse({'success': True, 'domain': domain_key, 'enabled': enabled})
 
 
 @site_adapters_required

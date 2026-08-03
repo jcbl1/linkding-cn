@@ -37,60 +37,7 @@ def site_adapters_page(request):
     # 读取适配器列表
     adapters_list = _get_adapters_list()
 
-    # 读取所有适配器的域名列表
     domain_files = []
-    seen_domains = set()
-
-    for adapter in adapters_list:
-        if not isinstance(adapter, dict):
-            continue
-        if adapter.get('enabled') is False:
-            continue
-        name = adapter.get('name', '')
-        source = adapter.get('source')
-        from site_adapters.services.base import _adapter_dir
-        dir_name = _adapter_dir(adapter)
-        file_path = os.path.join(adapters_dir, dir_name, 'adapters.jsonc')
-        if source and not source.startswith('http') and os.path.exists(os.path.join(adapters_dir, source) if not os.path.isabs(source) else source):
-            file_path = os.path.normpath(os.path.join(adapters_dir, source)) if not os.path.isabs(source) else source
-
-        if not os.path.exists(file_path):
-            continue
-
-        try:
-            data = load_jsonc_file(file_path)
-        except (json.JSONDecodeError, OSError):
-            continue
-
-        if not isinstance(data, dict):
-            continue
-
-        domains = data.get('domains', {})
-        if not isinstance(domains, dict):
-            domains = {}
-
-        for domain_key, domain_config in domains.items():
-            if domain_key in seen_domains:
-                continue
-            seen_domains.add(domain_key)
-
-            is_alias = isinstance(domain_config, dict) and domain_config.get('type') == 'alias'
-            target = domain_config.get('target', '') if is_alias else ''
-            has_cookie = has_cookie_for_domain(domain_key)
-            requires_cookie = (
-                not is_alias
-                and isinstance(domain_config, dict)
-                and bool(domain_config.get('auth', {}).get('cookie'))
-            )
-
-            domain_files.append({
-                'domain_key': domain_key,
-                'adapter': name,
-                'is_alias': is_alias,
-                'target': target,
-                'has_cookie': has_cookie,
-                'requires_cookie': requires_cookie,
-            })
 
 
     # 读取 config.jsonc 内容
@@ -104,8 +51,8 @@ def site_adapters_page(request):
             pass
 
     return render(request, 'site_adapters/site_adapters.html', {
-        'domain_files': domain_files,
-        'domain_files_json': json.dumps(domain_files, ensure_ascii=False),
+        'domain_files': [],
+        'domain_files_json': '[]',
         'config_content': config_content,
         'base_dir': base_dir,
         'adapters_dir': adapters_dir,

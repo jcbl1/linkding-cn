@@ -48,13 +48,16 @@ def _ensure_defaults_file():
     return file_path
 
 
-def _read_domain_from_adapter(domain_key: str) -> tuple[str | None, str | None, dict | None]:
-    """在所有适配器中查找域名，返回 (file_path, domain_key, config)。"""
+def _read_domain_from_adapter(domain_key: str, adapter_name: str = '') -> tuple[str | None, str | None, dict | None]:
+    """在所有适配器中查找域名，返回 (file_path, domain_key, config)。
+    如果指定 adapter_name，只查找该适配器。"""
     adapters_list = _get_adapters_list()
     for adapter in adapters_list:
         if not isinstance(adapter, dict) or adapter.get('enabled') is False:
             continue
         name = adapter.get('name', '')
+        if adapter_name and name != adapter_name:
+            continue
         source = adapter.get('source')
         file_path = resolve_adapter_path(name, source)
         if not os.path.exists(file_path):
@@ -111,12 +114,13 @@ def _delete_domain_from_file(file_path: str, domain_key: str):
 
 @site_adapters_required
 def domain_read(request):
-    """读取域名配置。"""
+    """读取域名配置。支持 ?adapter= 参数指定适配器。"""
     domain_key = request.GET.get('domain_key', '')
     if not domain_key:
         return JsonResponse({'error': 'domain_key required'}, status=400)
 
-    file_path, found_key, config = _read_domain_from_adapter(domain_key)
+    adapter_name = request.GET.get('adapter', '')
+    file_path, found_key, config = _read_domain_from_adapter(domain_key, adapter_name)
     if found_key is None:
         return JsonResponse({'error': 'domain not found'}, status=404)
 

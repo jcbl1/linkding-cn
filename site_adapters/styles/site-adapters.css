@@ -1010,3 +1010,327 @@
   font-size: 11px;
   color: var(--wa-muted);
 }
+
+/* ===== Domain Table (new layout) ===== */
+.wa-domain-card {
+  border: 1px solid var(--wa-border);
+  border-radius: var(--wa-radius);
+  overflow: hidden;
+  background: var(--wa-surface);
+}
+
+.wa-domain-table-wrap {
+  overflow-x: auto;
+}
+
+.wa-domain-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+}
+
+.wa-domain-table thead {
+  background: var(--wa-surface-alt);
+  border-bottom: 1px solid var(--wa-border);
+}
+
+.wa-domain-table th {
+  padding: 9px 14px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--wa-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.wa-col-domain { width: auto; }
+.wa-col-source { width: 130px; }
+.wa-col-status { width: 40px; text-align: center; }
+.wa-col-toggle { width: 80px; text-align: center; }
+
+.wa-domain-row {
+  border-bottom: 1px solid var(--wa-border);
+  transition: background 0.12s;
+  cursor: pointer;
+}
+
+.wa-domain-row:hover {
+  background: var(--wa-hover);
+}
+
+.wa-domain-row td {
+  padding: 10px 14px;
+  vertical-align: middle;
+}
+
+.wa-domain-row .wa-col-domain code {
+  font-size: 12px;
+  color: var(--text-color);
+}
+
+.wa-domain-row-global {
+  background: color-mix(in srgb, var(--wa-accent) 4%, var(--wa-surface-alt));
+  cursor: default;
+}
+.wa-domain-row-global:hover {
+  background: color-mix(in srgb, var(--wa-accent) 6%, var(--wa-surface-alt));
+}
+.wa-domain-row-global td {
+  font-weight: 500;
+}
+
+.wa-domain-row-expanded {
+  background: var(--wa-active);
+  border-bottom: none;
+}
+.wa-domain-row-expanded:hover {
+  background: color-mix(in srgb, var(--wa-accent) 15%, var(--wa-surface));
+}
+
+.wa-domain-disabled {
+  opacity: 0.45;
+}
+
+.wa-domain-note {
+  color: var(--wa-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.wa-source-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--wa-hover);
+  color: var(--wa-muted);
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wa-source-badge-default {
+  background: color-mix(in srgb, var(--wa-accent) 10%, transparent);
+  color: var(--wa-accent);
+}
+
+.wa-alias-badge {
+  display: inline-block;
+  color: var(--wa-accent);
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  margin-left: 6px;
+}
+
+.wa-cookie-badge {
+  font-weight: 600;
+  font-size: 13px;
+}
+.wa-cookie-ok { color: #16a34a; }
+.wa-cookie-warn { color: #ea580c; }
+
+/* Detail row */
+.wa-domain-detail {
+  background: var(--wa-surface-alt);
+  border-bottom: 1px solid var(--wa-border);
+}
+
+.wa-domain-detail td {
+  padding: 6px 14px 16px 14px;
+}
+
+.wa-detail-inner {
+  border: 1px solid var(--wa-border);
+  border-radius: var(--wa-radius);
+  background: var(--wa-surface);
+  overflow: hidden;
+}
+
+.wa-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--wa-surface-alt);
+  border-bottom: 1px solid var(--wa-border);
+}
+
+.wa-detail-title {
+  font-weight: 600;
+  font-size: 14px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-color);
+}
+
+.wa-detail-source {
+  font-size: 12px;
+  color: var(--wa-muted);
+}
+
+.wa-detail-body {
+  padding: 8px 0;
+}
+
+.wa-detail-section {
+  border-bottom: 1px solid var(--wa-border);
+}
+
+.wa-detail-section:last-child {
+  border-bottom: none;
+}
+
+.wa-detail-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wa-muted);
+  user-select: none;
+  transition: color 0.12s;
+}
+
+.wa-detail-section-heading:hover {
+  color: var(--text-color);
+}
+
+.wa-detail-section-count {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--wa-muted);
+  background: var(--wa-hover);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.wa-detail-code {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 10px 16px 14px 16px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-color);
+  overflow-x: auto;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.wa-detail-loading {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--wa-muted);
+  font-size: 13px;
+}
+
+.wa-detail-error {
+  padding: 16px;
+  color: var(--ld-error, #dc2626);
+  font-size: 13px;
+}
+
+/* ===== Shadowed domain rows ===== */
+.wa-domain-row-shadowed {
+  opacity: 0.6;
+}
+.wa-domain-row-shadowed code {
+  text-decoration: line-through;
+}
+.wa-shadowed-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--wa-muted);
+  background: var(--wa-hover);
+  margin-left: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  cursor: help;
+}
+.wa-shadowed-icon {
+  color: var(--wa-muted);
+  font-size: 14px;
+  cursor: help;
+}
+
+/* Domain search with clear button */
+.wa-domain-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.wa-domain-search-wrap .form-input {
+  width: 100%;
+  padding-right: 28px;
+}
+
+/* ===== Domain tags ===== */
+.wa-domain-main {
+  margin-bottom: 2px;
+}
+.wa-domain-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.wa-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.5;
+  text-transform: lowercase;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+.wa-tag-section {
+  background: color-mix(in srgb, var(--wa-accent) 12%, transparent);
+  color: var(--wa-accent);
+}
+.wa-tag-shadowed {
+  background: var(--wa-hover);
+  color: var(--wa-muted);
+}
+.wa-tag-warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* ===== View toggle bar ===== */
+.wa-view-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--wa-surface-alt);
+  border-bottom: 1px solid var(--wa-border);
+}
+.wa-view-toggle-label {
+  font-size: 12px;
+  color: var(--wa-muted);
+  font-weight: 500;
+}
+.wa-view-toggle .settings-segmented-option {
+  font-size: 12px;
+}
+.wa-view-toggle .settings-segmented-option span {
+  padding: 3px 10px;
+}
+
+/* Adjust column widths for 3-column layout */
+.wa-col-toggle {
+  width: 72px;
+  text-align: center;
+}
