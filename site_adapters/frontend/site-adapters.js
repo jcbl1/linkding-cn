@@ -321,7 +321,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
           list.querySelectorAll('.wa-sub-item').forEach(function (el) {
             indices.push(el.dataset.index);
           });
-          apiPost(urls.subscriptionManage, { action: 'reorder', 'indices[]': indices }).then(function (r) {
+          apiPost(urls.subscriptionManage, { action: 'reorder', indices: indices }).then(function (r) {
             if (!r.error) { subData = r.adapters || []; renderSubscriptions(); }
             else { toast(r.error, 'error'); loadSubscriptions(); }
           });

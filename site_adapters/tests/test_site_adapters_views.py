@@ -50,15 +50,10 @@ class SiteAdaptersViewsTestCase(TestCase):
 
         self.assertEqual(response.status_code, 302)
 
-    def test_site_adapters_page_renders_global_content(self):
-        with open(os.path.join(self.base_dir, "global.jsonc"), "w", encoding="utf-8") as f:
-            f.write('{"*": {"http": {"timeout": 9}}}')
-
+    def test_site_adapters_page_renders(self):
         response = self.client.get(reverse("linkding:settings.site_adapters"))
-
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "site-adapters.css")
-        self.assertContains(response, "timeout")
 
     def test_domain_lifecycle_supports_alias_save_rename_and_delete(self):
         response = self.client.post(

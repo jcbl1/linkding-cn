@@ -114,31 +114,32 @@ def _save_adapters_list(adapters: list[dict]):
     _invalidate_site_adapters_cache()
 
 
-def _save_defaults_scope(content: str) -> str:
-    """保存 defaults 适配器的 '*' 配置。"""
-    value = parse_jsonc(content)
-    if not isinstance(value, dict):
-        raise ValueError('defaults scope must be an object')
-
-    defaults_dir = os.path.join(_get_adapters_dir(), 'defaults')
-    os.makedirs(defaults_dir, exist_ok=True)
-    defaults_path = os.path.join(defaults_dir, 'defaults.jsonc')
-
-    # 读取现有文件
-    text = ''
-    if os.path.exists(defaults_path):
-        with open(defaults_path, encoding='utf-8') as f:
-            text = f.read()
-    new_text = _replace_top_level_jsonc_value(text, '*', value)
-    atomic_write(defaults_path, new_text)
-    _invalidate_site_adapters_cache()
-    return new_text
 
 
 def _get_adapters_list() -> list:
     data, _ = _load_config()
     adapters = data.get("_adapters", [])
-    return adapters if isinstance(adapters, list) else []
+    if not isinstance(adapters, list):
+        return []
+    # 去重：同一 id+name 或同一 source，保留最先出现的
+    seen_keys = set()
+    seen_sources = set()
+    deduped = []
+    for item in adapters:
+        if not isinstance(item, dict):
+            deduped.append(item)
+            continue
+        key = (item.get('id', ''), item.get('name', ''))
+        src = item.get('source', '')
+        if key in seen_keys:
+            continue
+        if src and src in seen_sources:
+            continue
+        seen_keys.add(key)
+        if src:
+            seen_sources.add(src)
+        deduped.append(item)
+    return deduped
 
 
 # Test helpers
@@ -311,7 +312,7 @@ def _adapter_payload(index: int, adapter) -> dict:
 def _adapters_response() -> JsonResponse:
     adapters = _get_adapters_list()
     # 过滤掉 defaults（它是内部适配器，不在 UI 显示）
-    visible = [a for a in adapters if isinstance(a, dict) and a.get('name') != 'defaults']
+    visible = [a for a in adapters if isinstance(a, dict)]
     payload = [_adapter_payload(i, a) for i, a in enumerate(visible)]
     return JsonResponse({'adapters': payload})
 
@@ -344,9 +345,14 @@ def _adapter_cache_dir(adapter: dict) -> str:
 def _has_adapter_conflict(adapters: list, item: dict, ignore_index: int | None = None) -> bool:
     new_id = item.get('id', '')
     new_name = item.get('name', '')
+    new_source = item.get('source', '')
     for i, a in enumerate(adapters):
         if i == ignore_index or not isinstance(a, dict):
             continue
+        # 同 id+name 组合视为冲突
         if a.get('id') == new_id and a.get('name') == new_name:
+            return True
+        # 同 source 也视为冲突（同一订阅源只能添加一次）
+        if new_source and a.get('source') == new_source:
             return True
     return False

@@ -143,17 +143,23 @@ def subscription_manage(request):
                     pass
 
         elif action_name == 'reorder':
-            indices = request.POST.getlist('indices[]')
+            indices = request.POST.getlist('indices')
+            logger.warning('REORDER DEBUG: POST keys=%s, raw_indices=%s, adapters_len=%d',
+                           list(request.POST.keys()), indices, len(adapters))
+            seen = set()
             reordered = []
             for raw in indices:
                 try:
                     idx = int(raw)
                 except (ValueError, TypeError):
                     continue
-                if 0 <= idx < len(adapters):
+                if 0 <= idx < len(adapters) and idx not in seen:
                     reordered.append(adapters[idx])
-            if len(reordered) != len(adapters):
-                return JsonResponse({'error': 'invalid reorder indices'}, status=400)
+                    seen.add(idx)
+            # Append any adapters not in the sent indices (keeps them at the end)
+            for i, ad in enumerate(adapters):
+                if i not in seen:
+                    reordered.append(ad)
             adapters = reordered
             _save_adapters_list(adapters)
 

@@ -18,7 +18,6 @@ from site_adapters.views.helpers import (
     _get_adapters_list,
     _load_config,
     _schema_section_fields,
-    _save_defaults_scope,
     _save_adapters_list,
     _invalidate_site_adapters_cache,
     site_adapters_required,
@@ -93,15 +92,6 @@ def site_adapters_page(request):
                 'requires_cookie': requires_cookie,
             })
 
-    # 读取 defaults.jsonc 的 "*" 内容（全局默认）
-    defaults_content = ''
-    defaults_path = os.path.join(adapters_dir, 'defaults', 'defaults.jsonc')
-    if os.path.exists(defaults_path):
-        try:
-            with open(defaults_path, encoding='utf-8') as f:
-                defaults_content = f.read()
-        except Exception:
-            pass
 
     # 读取 config.jsonc 内容
     config_content = ''
@@ -116,7 +106,6 @@ def site_adapters_page(request):
     return render(request, 'site_adapters/site_adapters.html', {
         'domain_files': domain_files,
         'domain_files_json': json.dumps(domain_files, ensure_ascii=False),
-        'global_content': defaults_content,
         'config_content': config_content,
         'base_dir': base_dir,
         'adapters_dir': adapters_dir,

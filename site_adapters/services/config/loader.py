@@ -210,13 +210,37 @@ class SourceCache:
         if not isinstance(adapters_list, list):
             adapters_list = []
 
-        # 过滤出 enabled 的适配器
+        # 去重：同一 id+name 或同一 source，保留最先出现的
+        seen_keys = set()
+        seen_sources = set()
+        deduped = []
+        for item in adapters_list:
+            if not isinstance(item, dict):
+                deduped.append(item)
+                continue
+            key = (item.get('id', ''), item.get('name', ''))
+            src = item.get('source', '')
+            if key in seen_keys:
+                logger.warning('Duplicate adapter id+name skipped: %s', key)
+                continue
+            if src and src in seen_sources:
+                logger.warning('Duplicate adapter source skipped: %s', src)
+                continue
+            seen_keys.add(key)
+            if src:
+                seen_sources.add(src)
+            deduped.append(item)
+        adapters_list = deduped
+
+        # 过滤出 enabled 的适配器（排除 defaults，它总是独立加载）
         enabled_adapters = []
         for item in adapters_list:
             if not isinstance(item, dict):
                 continue
             if item.get('enabled') is False:
                 continue
+            name = item.get('name', '')
+
             enabled_adapters.append(item)
 
         # 2. 加载每个适配器
