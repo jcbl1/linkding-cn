@@ -491,6 +491,11 @@
   .wa-editor-header {
     flex-wrap: wrap;
   }
+  .wa-url-history {
+    flex: none;
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 /* ---------- 测试结果结构 ---------- */

@@ -700,10 +700,19 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     testDropdown.classList.add('open');
   }
   function removeHistoryItem(url) { testHistory = testHistory.filter(function (u) { return u !== url; }); try { localStorage.setItem(URL_HISTORY_KEY, JSON.stringify(testHistory)); } catch (e) {} }
-  testUrlInput.addEventListener('input', function () { updateDropdown(this.value); });
+  testUrlInput.addEventListener('input', function () {
+    updateDropdown(this.value);
+    var clearBtn = document.querySelector('[data-action="clear-url"]');
+    if (clearBtn) clearBtn.hidden = !this.value;
+  });
   testUrlInput.addEventListener('focus', function () { if (blurTimer) { clearTimeout(blurTimer); blurTimer = null; } updateDropdown(this.value); });
   testUrlInput.addEventListener('blur', function () { blurTimer = setTimeout(function () { testDropdown.classList.remove('open'); }, 200); });
-  document.querySelector('[data-action="clear-url"]').addEventListener('click', function () { testUrlInput.value = ''; if (blurTimer) { clearTimeout(blurTimer); blurTimer = null; } testUrlInput.focus(); });
+  document.querySelector('[data-action="clear-url"]').addEventListener('click', function () {
+    testUrlInput.value = '';
+    this.hidden = true;
+    if (blurTimer) { clearTimeout(blurTimer); blurTimer = null; }
+    testUrlInput.focus();
+  });
   document.getElementById('test-form').addEventListener('submit', function (e) {
     e.preventDefault(); var url = testUrlInput.value.trim(); if (!url) return;
     testHistory = testHistory.filter(function (u) { return u !== url; }); testHistory.unshift(url); if (testHistory.length > 50) testHistory.length = 50;
