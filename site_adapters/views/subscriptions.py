@@ -18,6 +18,7 @@ from site_adapters.views.helpers import (
     _adapter_index,
     _adapter_payload,
     _adapters_response,
+    _ensure_defaults_first,
     _get_adapters_dir,
     _get_adapters_list,
     _has_adapter_conflict,
