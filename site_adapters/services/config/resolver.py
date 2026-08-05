@@ -101,10 +101,10 @@ def _apply_toggles(section_data: dict, full_config: dict, username: str) -> tupl
             selector = toggle_def.get('selector', '')
             if not selector:
                 continue
-            default_remove = toggle_def.get('default', False)
+            default_keep = toggle_def.get('default', True)
             user_choice = user_prefs.get(toggle_id)
-            should_remove = user_choice if user_choice is not None else default_remove
-            if should_remove:
+            should_keep = user_choice if user_choice is not None else default_keep
+            if not should_keep:
                 if selector not in remove_elements:
                     remove_elements.append(selector)
                 if selector in keep_elements:
