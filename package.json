@@ -4,13 +4,15 @@
   "description": "Self-hosted bookmark manager - Chinese enhanced fork of linkding",
   "main": "index.js",
   "scripts": {
-    "build": "npm run build-js && npm run build-theme-light && npm run build-theme-dark && npm run build-defuddle && npm run build-site-adapters-css",
+    "build": "npm run build-js && npm run build-adapters-js && npm run build-theme-light && npm run build-theme-dark && npm run build-defuddle && npm run build-site-adapters-css",
     "build-js": "rollup -c",
+    "build-adapters-js": "node site_adapters/frontend/build-adapters.js",
     "build-theme-light": "POSTCSS_DISABLE_CACHE=true postcss -o bookmarks/static/theme-light.css bookmarks/styles/theme-light.css",
     "build-theme-dark": "POSTCSS_DISABLE_CACHE=true postcss -o bookmarks/static/theme-dark.css bookmarks/styles/theme-dark.css",
     "build-defuddle": "node esbuild.config.mjs",
     "dev": "rollup -c -w",
-    "build-site-adapters-css": "POSTCSS_DISABLE_CACHE=true postcss -o site_adapters/static/site-adapters.css site_adapters/styles/site-adapters.css"
+    "build-site-adapters-css": "POSTCSS_DISABLE_CACHE=true postcss -o site_adapters/static/site-adapters.css site_adapters/styles/site-adapters.css",
+    "dev-site-adapters-css": "POSTCSS_DISABLE_CACHE=true postcss -o site_adapters/static/site-adapters.css site_adapters/styles/site-adapters.css -w"
   },
   "repository": {
     "type": "git",

@@ -31,20 +31,61 @@ def _get_credentials_dir() -> str:
     return os.path.join(_get_base_dir(), 'credentials')
 
 
+def _match_user_domain_dir(username: str, domain_key: str) -> str | None:
+    """在用户凭据目录中查找最佳匹配的域名目录。
+    
+    优先精确匹配，其次选择最具体的通配符匹配。
+    例: domain_key="www.zhihu.com" 时, 优先返回 "www.zhihu.com/",
+        其次 "*.zhihu.com/", 最后 "*.com/"。
+    """
+    user_dir = os.path.join(_get_credentials_dir(), 'users', username)
+    if not os.path.isdir(user_dir):
+        return None
+    
+    best_wildcard = None
+    best_wildcard_depth = -1
+    
+    for entry in os.listdir(user_dir):
+        entry_path = os.path.join(user_dir, entry)
+        if not os.path.isdir(entry_path):
+            continue
+        
+        if entry == domain_key:
+            return entry  # 精确匹配，直接返回
+        
+        if entry.startswith('*.'):
+            suffix = entry[1:]  # ".zhihu.com"
+            if domain_key.endswith(suffix):
+                depth = entry.count('.')
+                if depth > best_wildcard_depth:
+                    best_wildcard = entry
+                    best_wildcard_depth = depth
+    
+    return best_wildcard
+
 def _get_user_cookie_path(username: str, domain: str) -> str:
-    return os.path.join(_get_credentials_dir(), 'users', username, domain, 'cookie.json')
+    matched = _match_user_domain_dir(username, domain)
+    effective_domain = matched if matched else domain
+    return os.path.join(_get_credentials_dir(), 'users', username, effective_domain, 'cookie.json')
 
 
 def _get_user_header_path(username: str, domain: str) -> str:
-    return os.path.join(_get_credentials_dir(), 'users', username, domain, 'header.json')
+    matched = _match_user_domain_dir(username, domain)
+    effective_domain = matched if matched else domain
+    return os.path.join(_get_credentials_dir(), 'users', username, effective_domain, 'header.json')
 
 
 def _get_user_token_path(username: str, domain: str) -> str:
-    return os.path.join(_get_credentials_dir(), 'users', username, domain, 'token.json')
+    matched = _match_user_domain_dir(username, domain)
+    effective_domain = matched if matched else domain
+    return os.path.join(_get_credentials_dir(), 'users', username, effective_domain, 'token.json')
 
 
 def _get_user_token_cache_path(username: str, domain: str) -> str:
-    return os.path.join(_get_credentials_dir(), 'users', username, domain, 'token_cache.json')
+    matched = _match_user_domain_dir(username, domain)
+    effective_domain = matched if matched else domain
+    return os.path.join(_get_credentials_dir(), 'users', username, effective_domain, 'token_cache.json')
+
 
 
 def _get_meta_path() -> str:
@@ -314,7 +355,7 @@ def save_user_token_cache(username: str, domain: str, cache_data: dict):
 
 
 def list_user_credentials(username: str) -> list[dict]:
-    """列出用户的所有凭据。"""
+    """列出用户的所有凭据（含解密后的值）。"""
     result = []
     meta = _load_meta()
     fingerprint_ok = check_key_fingerprint()
@@ -333,14 +374,18 @@ def list_user_credentials(username: str) -> list[dict]:
         if os.path.exists(cookie_path):
             meta_key = f'cookies:{username}:{domain}'
             m = meta['credentials'].get(meta_key, {})
-            _, status = _read_encrypted_file(cookie_path)
+            cookie_content, status = _read_encrypted_file(cookie_path)
             if not fingerprint_ok and status == 'ok':
                 status = 'key_changed'
+            cookie_str = ''
+            if cookie_content and status == 'ok':
+                cookie_str = _json_cookie_to_header_string(cookie_content) or ''
             result.append({
                 'domain': domain,
                 'type': 'cookie',
                 'status': status,
                 'updated_at': m.get('updated_at', ''),
+                'cookie': cookie_str,
             })
 
         # header
@@ -352,16 +397,20 @@ def list_user_credentials(username: str) -> list[dict]:
             if not fingerprint_ok and status == 'ok':
                 status = 'key_changed'
             header_names = []
+            header_values = {}
             if hdr_content:
                 try:
                     hdrs = json.loads(hdr_content)
-                    header_names = list(hdrs.keys()) if isinstance(hdrs, dict) else []
+                    if isinstance(hdrs, dict):
+                        header_names = list(hdrs.keys())
+                        header_values = hdrs
                 except (json.JSONDecodeError, AttributeError):
                     pass
             result.append({
                 'domain': domain,
                 'type': 'header',
                 'header_names': header_names,
+                'header_values': header_values,
                 'status': status,
                 'updated_at': m.get('updated_at', ''),
             })
@@ -371,14 +420,22 @@ def list_user_credentials(username: str) -> list[dict]:
         if os.path.exists(token_path):
             meta_key = f'tokens:{username}:{domain}'
             m = meta['credentials'].get(meta_key, {})
-            _, status = _read_encrypted_file(token_path)
+            token_content, status = _read_encrypted_file(token_path)
             if not fingerprint_ok and status == 'ok':
                 status = 'key_changed'
+            token_str = ''
+            if token_content and status == 'ok':
+                try:
+                    token_data = json.loads(token_content)
+                    token_str = token_data.get('refresh_token', '') if isinstance(token_data, dict) else ''
+                except (json.JSONDecodeError, AttributeError):
+                    pass
             result.append({
                 'domain': domain,
                 'type': 'token',
                 'status': status,
                 'updated_at': m.get('updated_at', ''),
+                'token': token_str,
             })
 
     return result

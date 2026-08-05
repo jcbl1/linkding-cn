@@ -24,9 +24,9 @@ from site_adapters.views import (
     save_cookie,
     site_adapters_page as site_adapters,
     subscription_manage,
-    cookies_page,
-    user_cookies,
-    user_toggles,
+    adapters_page,
+    user_credentials,
+    snapshot_toggles,
     view_snapshot,
 )
 from .toasts import *

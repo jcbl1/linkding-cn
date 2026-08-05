@@ -32,9 +32,9 @@ from site_adapters.views.subscriptions import (
     subscription_manage,
 )
 from site_adapters.views.credentials import (
-    cookies_page,
-    user_cookies,
-    user_toggles,
+    adapters_page,
+    user_credentials,
+    snapshot_toggles,
 )
 from site_adapters.views.snapshot import view_snapshot
 
@@ -44,6 +44,6 @@ __all__ = [
     'action', 'save_cookie',
     'all_domains', 'local_domain_toggle',
     'subscription_domain_read', 'subscription_domain_toggle', 'subscription_manage',
-    'cookies_page', 'user_cookies', 'user_toggles',
+    'adapters_page', 'user_credentials', 'snapshot_toggles',
     'view_snapshot',
 ]

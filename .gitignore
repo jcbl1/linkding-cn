@@ -188,8 +188,7 @@ typings/
 /bookmarks/static/reader-unavailable.js*
 /site_adapters/static/site-adapters.js*
 /site_adapters/static/site-adapters.css
-/site_adapters/static/cookies.js*
-/site_adapters/static/credentials.js*
+/site_adapters/static/adapters.js*
 # CSS compilation output
 /bookmarks/static/theme-*.css*
 # esbuild bundled defuddle (built from defuddle_entry.js)

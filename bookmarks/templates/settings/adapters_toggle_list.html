@@ -1,0 +1,61 @@
+{% load i18n %}
+{% if toggle_domains %}
+  <div class="wa-table-head">
+    <span class="wa-toggle-col-domain">{% translate "Domain" %}</span>
+    <span class="wa-toggle-col-total">{% translate "Total" %}</span>
+    <span class="wa-toggle-col-modified">{% translate "Modified" %}</span>
+  </div>
+
+  {% for d in toggle_domains %}
+    <div class="wa-toggle-domain-row" data-domain="{{ d.domain }}">
+      <div class="wa-toggle-domain-bar">
+        <span class="wa-toggle-col-domain">
+          <span class="wa-toggle-expand-icon"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-chevron-right"></use></svg></span>
+          <span class="wa-toggle-domain-name">{{ d.domain }}</span>
+        </span>
+        <span class="wa-toggle-col-total">{{ d.total }}</span>
+        <span class="wa-toggle-col-modified">{{ d.modified }}</span>
+      </div>
+
+      <div class="wa-toggle-detail">
+        <div class="wa-toggle-detail-head">
+          <span class="wa-toggle-detail-col-name">{% translate "Name" %}</span>
+          <span class="wa-toggle-detail-col-label">{% translate "Label" %}</span>
+          <span class="wa-toggle-detail-col-selector">{% translate "Selector" %}</span>
+          <span class="wa-toggle-detail-col-enabled">{% translate "Enabled" %}</span>
+        </div>
+        {% for item in d.items %}
+          <div class="wa-toggle-item">
+            <span class="wa-toggle-item-id" title="{{ item.id }}">{{ item.id }}</span>
+            <span class="wa-toggle-item-label" title="{{ item.label }}">{{ item.label }}</span>
+            <span class="wa-toggle-item-selector" title="{{ item.selector }}">{{ item.selector }}</span>
+                <label class="form-switch wa-toggle-item-switch">
+                <input type="checkbox" class="wa-toggle-pref" data-domain="{{ d.domain }}" data-toggle="{{ item.id }}" data-default="{{ item.default|yesno:'true,false' }}" {% if item.checked %}checked{% endif %}>
+                <i class="form-icon"></i>
+              </label>
+          </div>
+        {% empty %}
+          <div class="wa-toggle-empty-detail">{% translate "No toggles defined." %}</div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+
+  {% if toggle_domains.paginator.num_pages > 1 %}
+    <div style="display:flex;justify-content:center;align-items:center;gap:8px;padding:12px 14px;border-top:1px solid var(--wa-border)">
+      {% if toggle_domains.has_previous %}
+        <a class="btn btn-sm" href="?{% if cred_q %}q={{ cred_q|urlencode }}&{% endif %}{% if toggle_q %}tq={{ toggle_q|urlencode }}&{% endif %}{% if modified_only %}modified_only=1&{% endif %}page={{ toggle_domains.previous_page_number }}">←</a>
+      {% endif %}
+      <span style="font-size:12px;color:var(--wa-muted)">
+        {% blocktranslate with current=toggle_domains.number total=toggle_domains.paginator.num_pages %}Page {{ current }} of {{ total }}{% endblocktranslate %}
+      </span>
+      {% if toggle_domains.has_next %}
+        <a class="btn btn-sm" href="?{% if cred_q %}q={{ cred_q|urlencode }}&{% endif %}{% if toggle_q %}tq={{ toggle_q|urlencode }}&{% endif %}{% if modified_only %}modified_only=1&{% endif %}page={{ toggle_domains.next_page_number }}">→</a>
+      {% endif %}
+    </div>
+  {% endif %}
+{% else %}
+  <div style="padding:24px;text-align:center;color:var(--wa-muted);font-size:13px">
+    {% translate "No matching results." %}
+  </div>
+{% endif %}

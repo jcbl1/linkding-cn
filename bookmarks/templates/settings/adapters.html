@@ -1,0 +1,157 @@
+{% extends "bookmarks/layout.html" %}
+{% load i18n static %}
+
+{% block head %}
+  {% translate "Adapters - Linkding" as page_title %}
+  {% with page_title=page_title %}
+    {{ block.super }}
+  {% endwith %}
+  <link href="{% static 'site-adapters.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
+{% endblock %}
+
+{% block content %}
+  <main class="settings-page" ld-settings-page ld-site-adapters aria-labelledby="main-heading">
+    <div class="settings-page-header">
+      <div>
+        <h1 id="main-heading">{% translate "Adapters" %}</h1>
+      </div>
+    </div>
+
+    <div class="settings-layout">
+      <div class="settings-content">
+
+        {# ── Credentials Manage ── #}
+        <section class="settings-section" aria-labelledby="credentials-heading">
+          <div class="settings-section-heading" style="margin-bottom:12px">
+            <div class="settings-label-row" style="justify-content:space-between">
+              <div style="display:flex;align-items:center;gap:4px">
+                <h2 id="credentials-heading">{% translate "Credentials Manage" %}</h2>
+                <span class="settings-help" data-settings-help data-settings-help-open="false">
+                  <button type="button" class="settings-help-button" data-settings-help-button aria-label="{% translate 'More info' %}" aria-expanded="false">
+                    <svg width="20" height="20" aria-hidden="true"><use href="#ld-icon-info"></use></svg>
+                  </button>
+                  <span class="settings-help-popover" role="tooltip"><span class="form-input-hint">{% translate "Some websites require login to access their content. Provide your credentials below so linkding can fetch metadata, snapshots, and reader-mode articles from those sites." %}</span></span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="wa-warning">
+            <p class="wa-warning-title">{% translate "Security Notice" %}</p>
+            <p class="wa-warning-copy">{% translate "Your credentials are encrypted at rest but remain accessible to all admin users of this instance. Do not provide credentials if you don't trust the administrators." %}</p>
+          </div>
+
+          <div class="wa-toolbar" style="display:flex;align-items:center;gap:12px">
+            <form method="get" style="display:flex;gap:8px;flex:1;max-width:400px">
+              {% if toggle_q %}<input type="hidden" name="tq" value="{{ toggle_q }}">{% endif %}
+              {% if modified_only %}<input type="hidden" name="modified_only" value="1">{% endif %}
+              <input type="text" class="form-input" name="q" value="{{ cred_q }}" placeholder="{% translate 'Filter by domain...' %}" autocomplete="off" style="flex:1">
+              <button type="submit" class="btn btn-primary btn-sm">{% translate "Search" %}</button>
+            </form>
+          </div>
+
+          <div class="wa-table-scroll" style="max-height:400px">
+            <div class="wa-table-head">
+              <span class="wa-col-domain">{% translate "Domain" %}</span>
+              <span class="wa-col-type">{% translate "Type" %}</span>
+              <span class="wa-col-updated">{% translate "Updated" %}</span>
+              <span class="wa-col-actions">
+                <button type="button" class="btn btn-primary btn-sm" id="btn-add-credential">
+                  {% translate "Add" %}
+                </button>
+              </span>
+            </div>
+            <div class="wa-table-body">
+              {% if credentials %}
+                {% for cred in credentials %}
+                  <div class="wa-cred-row">
+                    <span class="wa-col-domain" style="font-weight:500;font-family:monospace;font-size:12px">{{ cred.domain }}</span>
+                    <span class="wa-col-type">
+                      <span class="wa-badge">
+                        {% if cred.type == 'cookie' %}Cookie{% elif cred.type == 'token' %}Token{% else %}Header{% endif %}
+                      </span>
+                      {% if cred.type == 'header' and cred.header_names %}
+                        <span class="text-gray" style="font-size:11px">({{ cred.header_names|slice:":3"|join:", " }}{% if cred.header_names|length > 3 %}...{% endif %})</span>
+                      {% endif %}
+                    </span>
+                    <span class="wa-col-updated" style="font-size:11px;color:var(--wa-muted)">
+                      {{ cred.updated_at|slice:":10" }}
+                      {% if cred.status != 'ok' %}
+                        <span class="wa-badge wa-badge-warn">key changed</span>
+                      {% endif %}
+                    </span>
+                    <span class="wa-col-actions">
+                      <button type="button" class="btn btn-sm js-edit-cred" data-domain="{{ cred.domain }}" data-type="{{ cred.type }}">{% translate "Edit" %}</button>
+                      <form method="post" style="display:inline" onsubmit="return confirm('{% translate "Delete credentials?" %}')">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete_credential">
+                        <input type="hidden" name="domain" value="{{ cred.domain }}">
+                        <input type="hidden" name="type" value="{{ cred.type }}">
+                        {% if cred.type == 'header' and cred.header_names.0 %}
+                          <input type="hidden" name="header_name" value="{{ cred.header_names.0 }}">
+                        {% endif %}
+                        <button type="submit" class="btn btn-sm btn-error">{% translate "Delete" %}</button>
+                      </form>
+                    </span>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <div style="padding:24px;text-align:center;color:var(--wa-muted);font-size:13px">
+                  {% if cred_q %}{% translate "No matching results." %}{% else %}{% translate "No credentials added yet." %}{% endif %}
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </section>
+
+        {# ── Snapshot Preferences ── #}
+        <section class="settings-section" aria-labelledby="toggles-heading">
+          <div class="settings-section-heading" style="margin-bottom:12px">
+            <div class="settings-label-row">
+              <h2 id="toggles-heading">{% translate "Snapshot Preferences" %}</h2>
+              <span class="settings-help" data-settings-help data-settings-help-open="false">
+                <button type="button" class="settings-help-button" data-settings-help-button aria-label="{% translate 'More info' %}" aria-expanded="false">
+                  <svg width="20" height="20" aria-hidden="true"><use href="#ld-icon-info"></use></svg>
+                </button>
+                <span class="settings-help-popover" role="tooltip"><span class="form-input-hint">{% translate "Control which page elements to keep or remove when generating snapshots for each site." %}</span></span>
+              </span>
+            </div>
+          </div>
+
+          <form method="get" id="toggle-filter-form" data-turbo-frame="toggle-prefs-frame">
+            <div class="wa-toolbar" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              {% if cred_q %}<input type="hidden" name="q" value="{{ cred_q }}">{% endif %}
+              <div style="display:flex;gap:8px;max-width:340px">
+                <input type="text" class="form-input" name="tq" value="{{ toggle_q }}" placeholder="{% translate 'Filter by domain...' %}" autocomplete="off" style="flex:1">
+                <button type="submit" class="btn btn-primary btn-sm">{% translate "Search" %}</button>
+              </div>
+              <label class="form-switch" style="margin:0">
+                <input type="checkbox" name="modified_only" value="1" {% if modified_only %}checked{% endif %}>
+                <i class="form-icon"></i> {% translate "Only modified" %}
+              </label>
+            </div>
+          </form>
+
+          <div class="wa-table-scroll" style="max-height:500px">
+            <turbo-frame id="toggle-prefs-frame" >
+              {% include "settings/adapters_toggle_list.html" %}
+            </turbo-frame>
+          </div>
+        </section>
+
+      </div>
+    </div>
+
+    <div class="modals"></div>
+  </main>
+
+  <script>
+    window.__ld_csrf_token = "{{ csrf_token }}";
+    window.__ld_urls = window.__ld_urls || {};
+    window.__ld_urls.credentials_api = "{% url 'linkding:settings.credentials_api' %}";
+    window.__ld_credentials_data = {{ credentials_json|safe }};
+    window.__ld_snapshot_toggles_url = "{% url 'linkding:settings.snapshot_toggles' %}";
+    window.__ld_auth_domains = {{ auth_domains_json|safe }};
+  </script>
+  <script src="{% static 'adapters.js' %}?v={{ app_version }}"></script>
+{% endblock %}
