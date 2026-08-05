@@ -309,6 +309,34 @@ class FeedsTestCase(TestCase, BookmarkFactoryMixin):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "<item>", count=4)
 
+    def test_shared_user_parameter(self):
+        user1 = self.setup_user(enable_sharing=True)
+        user2 = self.setup_user(enable_sharing=True)
+
+        user1_bookmarks = [
+            self.setup_bookmark(shared=True, user=user1),
+            self.setup_bookmark(shared=True, user=user1),
+        ]
+        self.setup_bookmark(shared=True, user=user2)
+        self.setup_bookmark(shared=True, user=user2)
+
+        feed_url = reverse("linkding:feeds.shared", args=[self.token.key])
+
+        # without user parameter - all shared bookmarks
+        response = self.client.get(feed_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "<item>", count=4)
+
+        # with user parameter - only user1's bookmarks
+        response = self.client.get(feed_url + f"?user={user1.username}")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "<item>", count=len(user1_bookmarks))
+
+        # with unknown user - no items
+        response = self.client.get(feed_url + "?user=nonexistent")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "<item>", count=0)
+
     def test_with_tags(self):
         bookmarks = [
             self.setup_bookmark(description="test description"),
