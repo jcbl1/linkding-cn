@@ -386,6 +386,8 @@ class BookmarkBundle(models.Model):
 class BookmarkSearch:
     SORT_ADDED_ASC = "added_asc"
     SORT_ADDED_DESC = "added_desc"
+    SORT_MODIFIED_ASC = "modified_asc"
+    SORT_MODIFIED_DESC = "modified_desc"
     SORT_TITLE_ASC = "title_asc"
     SORT_TITLE_DESC = "title_desc"
     SORT_RANDOM = "random"
@@ -742,6 +744,8 @@ class BookmarkSearchForm(forms.Form):
     SORT_CHOICES = [
         (BookmarkSearch.SORT_ADDED_ASC, _("Added ↑")),
         (BookmarkSearch.SORT_ADDED_DESC, _("Added ↓")),
+        (BookmarkSearch.SORT_MODIFIED_ASC, _("Modified ↑")),
+        (BookmarkSearch.SORT_MODIFIED_DESC, _("Modified ↓")),
         (BookmarkSearch.SORT_TITLE_ASC, _("Title ↑")),
         (BookmarkSearch.SORT_TITLE_DESC, _("Title ↓")),
         (BookmarkSearch.SORT_RANDOM, _("Random")),
