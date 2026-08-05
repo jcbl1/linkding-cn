@@ -51,8 +51,9 @@ def _match_user_domain_dir(username: str, domain_key: str) -> str | None:
             continue
         
         if entry == domain_key:
-            return entry  # 精确匹配，直接返回
+            return entry  # Exact match
         
+        # Stored wildcard (e.g. "*.zhihu.com") matches search domain_key (e.g. "www.zhihu.com")
         if entry.startswith('*.'):
             suffix = entry[1:]  # ".zhihu.com"
             if domain_key.endswith(suffix):
@@ -60,7 +61,14 @@ def _match_user_domain_dir(username: str, domain_key: str) -> str | None:
                 if depth > best_wildcard_depth:
                     best_wildcard = entry
                     best_wildcard_depth = depth
-    
+        
+        # Search wildcard (e.g. "*.zhihu.com") matches stored plain domain (e.g. "zhihu.com")
+        if domain_key.startswith('*.'):
+            bare = domain_key[2:]  # "zhihu.com"
+            if entry == bare:
+                # Treat as exact match for wildcard search
+                return entry
+
     return best_wildcard
 
 def _get_user_cookie_path(username: str, domain: str) -> str:

@@ -726,6 +726,42 @@
   white-space: pre-wrap;
   word-break: break-all;
 }
+.wa-match-detail {
+  margin-top: 4px;
+  padding: 10px 12px;
+  background: var(--wa-surface-alt);
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.wa-match-section-title {
+  margin: 8px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wa-match-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.wa-match-label {
+  padding: 3px 8px 3px 0;
+  color: var(--ld-text-secondary, #64748b);
+  white-space: nowrap;
+  vertical-align: top;
+  width: 80px;
+}
+
+.wa-match-value {
+  padding: 3px 0;
+  word-break: break-all;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
 
 /* ---------- stdin 展示 ---------- */
 .wa-stdin-pre {

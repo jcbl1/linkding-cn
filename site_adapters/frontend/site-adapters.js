@@ -988,17 +988,99 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     }
   }
 
+
+  function renderMatchedConfig(r) {
+    var matched = r.matched !== false;
+    var domainKey = r.domain_key || '';
+    var adapter = r.adapter || null;
+    var config = r.config;
+
+    var summaryValue;
+    if (matched && domainKey) {
+      var name = (adapter && adapter.name) ? ' (' + esc(adapter.name) + ')' : '';
+      summaryValue = esc(domainKey) + esc(name);
+    } else {
+      summaryValue = gettext('Not matched');
+    }
+
+    var hasAdapterInfo = matched && adapter;
+    var hasConfigContent = false;
+    if (config && Object.keys(config).length) {
+      var visibleKeys = Object.keys(config).filter(function(k) { return !k.startsWith('_'); });
+      if (visibleKeys.length) hasConfigContent = true;
+    }
+    var hasDetail = hasAdapterInfo || hasConfigContent;
+
+    var detailId = hasDetail ? ('wa-match-detail-' + Math.random().toString(36).slice(2, 8)) : '';
+    var h = '';
+    h += '<div class="wa-result-row">';
+    h += '<span class="wa-result-label">' + esc(gettext('matched_config')) + '</span>';
+    h += '<span class="wa-result-value">';
+
+    if (hasDetail) {
+      h += '<span class="wa-cmd-toggle" onclick="var d=document.getElementById(' + "'" + detailId + "'" + ');var s=this.querySelector(' + "'" + '.wa-cmd-arrow' + "'" + ');if(d.hidden){d.hidden=false;s.textContent=' + "'" + '\u25BC' + "'" + ';}else{d.hidden=true;s.textContent=' + "'" + '\u25B6' + "'" + ';}">';
+      h += '<span class="wa-cmd-arrow">\u25B6</span> ';
+    }
+
+    h += summaryValue;
+
+    if (hasDetail) {
+      h += '</span>';
+      h += '<div id="' + detailId + '" class="wa-match-detail" hidden>';
+    }
+
+    if (hasAdapterInfo) {
+      h += '<h4 class="wa-match-section-title">' + gettext('Adapter Info') + '</h4>';
+      h += '<table class="wa-match-table"><tbody>';
+      [
+        {label: 'id', value: adapter.id},
+        {label: 'name', value: adapter.name},
+        {label: 'description', value: adapter.description},
+        {label: 'source', value: adapter.source},
+        {label: 'local_path', value: adapter.local_path}
+      ].forEach(function(row) {
+        if (!row.value) return;
+        h += '<tr><td class="wa-match-label">' + esc(row.label) + '</td><td class="wa-match-value">' + esc(row.value) + '</td></tr>';
+      });
+      h += '</tbody></table>';
+    }
+
+    if (hasConfigContent) {
+      var displayConfig = {};
+      Object.keys(config).forEach(function(k) {
+        if (!k.startsWith('_')) displayConfig[k] = config[k];
+      });
+      if (Object.keys(displayConfig).length) {
+        h += '<h4 class="wa-match-section-title">' + gettext('Config Content') + '</h4>';
+        h += '<pre class="wa-result-code">' + esc(JSON.stringify(displayConfig, null, 2)) + '</pre>';
+      }
+    }
+
+    if (hasDetail) {
+      h += '</div>';
+      h += '</span>';
+    }
+    h += '</div>';
+    return h;
+  }
+
   function renderConfigResult(r) {
     var result = r.result || {};
     var h = '<div class="wa-result-section">';
     h += '<div class="wa-result-block">';
     h += '<h3 class="wa-result-heading">' + gettext('Summary') + '</h3>';
+    // url, domain, matched config
     h += renderSummaryRows([
       {label: 'url', value: result.url, link: true},
-      {label: 'domain', value: result.domain},
-      {label: 'domain_key', value: result.domain_key}
+      {label: 'domain', value: result.domain}
     ]);
-    h += renderCommandInfo(r.executions);
+    var matchObj = {
+      matched: result.matched !== false,
+      domain_key: result.domain_key || '',
+      adapter: result.adapter || null,
+      config: (result.merged && Object.keys(result.merged).length) ? result.merged : result.raw_config
+    };
+    h += renderMatchedConfig(matchObj);
     h += '</div>';
     if (result.merged && Object.keys(result.merged).length) {
       h += '<div class="wa-result-block">';
@@ -1017,10 +1099,13 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     var h = '<div class="wa-result-section">';
     h += '<div class="wa-result-block">';
     h += '<h3 class="wa-result-heading">' + gettext('Summary') + '</h3>';
-    h += renderSummaryRows([
-      {label: 'original_url', value: r.original_url, link: true},
-      {label: 'request_url', value: r.request_url, link: true}
-    ]);
+    // original URL, request URL (if rewritten), matched config, command
+    var metaUrlRows = [{label: 'original_url', value: r.original_url, link: true}];
+    if (r.request_url && r.request_url !== r.original_url) {
+      metaUrlRows.push({label: 'request_url', value: r.request_url, link: true});
+    }
+    h += renderSummaryRows(metaUrlRows);
+    h += renderMatchedConfig(r);
     h += renderCommandInfo(filterExecutions(r.executions, ['metadata', 'metadata_script']));
     h += '</div>';
     if (r.result) {
@@ -1040,6 +1125,9 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     if (r.config && Object.keys(r.config).length) {
       h += renderCollapsible(gettext('Config'), renderConfigJSON(r.config), false);
     }
+    if (r.default_config && Object.keys(r.default_config).length) {
+      h += renderCollapsible(gettext('Built-in Default Engine Config'), renderConfigJSON(r.default_config), true);
+    }
     if (r.executions && r.executions.length) {
       h += renderCollapsible(gettext('Execution Log'), renderExecutionLog(r.executions), false);
     }
@@ -1051,10 +1139,13 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     var h = '<div class="wa-result-section">';
     h += '<div class="wa-result-block">';
     h += '<h3 class="wa-result-heading">' + gettext('Summary') + '</h3>';
-    h += renderSummaryRows([
-      {label: 'original_url', value: r.original_url, link: true},
-      {label: 'request_url', value: r.request_url, link: true}
-    ]);
+    // original URL, request URL (if rewritten), matched config, command
+    var snapUrlRows = [{label: 'original_url', value: r.original_url, link: true}];
+    if (r.request_url && r.request_url !== r.original_url) {
+      snapUrlRows.push({label: 'request_url', value: r.request_url, link: true});
+    }
+    h += renderSummaryRows(snapUrlRows);
+    h += renderMatchedConfig(r);
     h += renderCommandInfo(filterExecutions(r.executions, ['snapshot', 'snapshot_script']));
     h += '</div>';
     if (r.result) {
@@ -1073,6 +1164,9 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     if (r.config && Object.keys(r.config).length) {
       h += renderCollapsible(gettext('Config'), renderConfigJSON(r.config), false);
     }
+    if (r.default_config && Object.keys(r.default_config).length) {
+      h += renderCollapsible(gettext('Built-in Default Engine Config'), renderConfigJSON(r.default_config), true);
+    }
     if (r.executions && r.executions.length) {
       h += renderCollapsible(gettext('Execution Log'), renderExecutionLog(r.executions), false);
     }
@@ -1084,10 +1178,13 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     var h = '<div class="wa-result-section">';
     h += '<div class="wa-result-block">';
     h += '<h3 class="wa-result-heading">' + gettext('Summary') + '</h3>';
-    h += renderSummaryRows([
-      {label: 'original_url', value: r.original_url, link: true},
-      {label: 'request_url', value: r.request_url, link: true}
-    ]);
+    // original URL, request URL (if rewritten), matched config, command
+    var readerUrlRows = [{label: 'original_url', value: r.original_url, link: true}];
+    if (r.request_url && r.request_url !== r.original_url) {
+      readerUrlRows.push({label: 'request_url', value: r.request_url, link: true});
+    }
+    h += renderSummaryRows(readerUrlRows);
+    h += renderMatchedConfig(r);
     h += renderCommandInfo(filterExecutions(r.executions, ['reader']));
     h += '</div>';
     if (r.result) {
@@ -1110,6 +1207,9 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     if (r.config && Object.keys(r.config).length) {
       h += renderCollapsible(gettext('Config'), renderConfigJSON(r.config), false);
     }
+    if (r.default_config && Object.keys(r.default_config).length) {
+      h += renderCollapsible(gettext('Built-in Default Engine Config'), renderConfigJSON(r.default_config), true);
+    }
     if (r.executions && r.executions.length) {
       h += renderCollapsible(gettext('Execution Log'), renderExecutionLog(r.executions), false);
     }
@@ -1129,6 +1229,8 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     h += '<div class="wa-result-block">';
     h += '<h3 class="wa-result-heading">' + gettext('Result') + '</h3>';
     h += renderResultRows({
+      'has_global_cookie': r.has_global_cookie,
+      'has_user_cookie': r.has_user_cookie,
       'has_cookie': r.has_cookie,
       'cookie_preview': r.cookie_preview,
       'refreshed': r.refreshed
@@ -1147,21 +1249,31 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       var cfg = r.config;
       h += '<div class="wa-result-block wa-pipeline-step">';
       h += '<h3 class="wa-result-heading"><span class="wa-pipeline-step-num">1</span> ' + gettext('Config') + '</h3>';
+      // url, domain, matched config
       h += renderSummaryRows([
         {label: 'url', value: cfg.url, link: true},
-        {label: 'domain', value: cfg.domain},
-        {label: 'domain_key', value: cfg.domain_key}
+        {label: 'domain', value: cfg.domain}
       ]);
+      var pipeCfgMatchObj = {
+        matched: cfg.matched !== false,
+        domain_key: cfg.domain_key || '',
+        adapter: cfg.adapter || null,
+        config: (cfg.merged && Object.keys(cfg.merged).length) ? cfg.merged : cfg.raw_config
+      };
+      h += renderMatchedConfig(pipeCfgMatchObj);
       h += '</div>';
     }
     if (r.metadata) {
       var m = r.metadata;
       h += '<div class="wa-result-block wa-pipeline-step">';
       h += '<h3 class="wa-result-heading"><span class="wa-pipeline-step-num">2</span> ' + gettext('Metadata') + '</h3>';
-      h += renderSummaryRows([
-        {label: 'original_url', value: m.original_url, link: true},
-        {label: 'request_url', value: m.request_url, link: true}
-      ]);
+      // original URL, request URL (if rewritten), matched config
+      var pipeMetaUrlRows = [{label: 'original_url', value: m.original_url, link: true}];
+      if (m.request_url && m.request_url !== m.original_url) {
+        pipeMetaUrlRows.push({label: 'request_url', value: m.request_url, link: true});
+      }
+      h += renderSummaryRows(pipeMetaUrlRows);
+      h += renderMatchedConfig(m);
       if (m.result) {
         var orderedKeys = ['title', 'description', 'preview_image'];
         var restKeys = Object.keys(m.result).filter(function (k) { return orderedKeys.indexOf(k) < 0 && k !== 'url'; });
@@ -1177,10 +1289,13 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       var s = r.snapshot;
       h += '<div class="wa-result-block wa-pipeline-step">';
       h += '<h3 class="wa-result-heading"><span class="wa-pipeline-step-num">3</span> ' + gettext('Snapshot') + '</h3>';
-      h += renderSummaryRows([
-        {label: 'original_url', value: s.original_url, link: true},
-        {label: 'request_url', value: s.request_url, link: true}
-      ]);
+      // original URL, request URL (if rewritten), matched config
+      var pipeSnapUrlRows = [{label: 'original_url', value: s.original_url, link: true}];
+      if (s.request_url && s.request_url !== s.original_url) {
+        pipeSnapUrlRows.push({label: 'request_url', value: s.request_url, link: true});
+      }
+      h += renderSummaryRows(pipeSnapUrlRows);
+      h += renderMatchedConfig(s);
       if (s.result) {
         var pipeSnapFields = {};
         Object.keys(s.result).forEach(function (k) {
@@ -1197,10 +1312,13 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       var rd = r.reader;
       h += '<div class="wa-result-block wa-pipeline-step">';
       h += '<h3 class="wa-result-heading"><span class="wa-pipeline-step-num">4</span> ' + gettext('Reader') + '</h3>';
-      h += renderSummaryRows([
-        {label: 'original_url', value: rd.original_url, link: true},
-        {label: 'request_url', value: rd.request_url, link: true}
-      ]);
+      // original URL, request URL (if rewritten), matched config
+      var pipeReaderUrlRows = [{label: 'original_url', value: rd.original_url, link: true}];
+      if (rd.request_url && rd.request_url !== rd.original_url) {
+        pipeReaderUrlRows.push({label: 'request_url', value: rd.request_url, link: true});
+      }
+      h += renderSummaryRows(pipeReaderUrlRows);
+      h += renderMatchedConfig(rd);
       if (rd.result) {
         h += renderResultRows({
           'title': rd.result.title,

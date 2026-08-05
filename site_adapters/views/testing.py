@@ -118,47 +118,127 @@ def _test_config(url, base_dir, username, entries):
     return _test_response({'type': 'config', 'result': result}, entries=entries)
 
 
+def _make_default_metadata_config():
+    """为无匹配域名的场景构建内置引擎默认参数。"""
+    return {
+        '_engine': 'built-in',
+        'timeout': 10,
+        'chunk_size': 50 * 1024,
+        'proxy': None,
+        'headers': {},
+        'script': None,
+        'select_title': None,
+        'select_description': None,
+        'select_image': None,
+        'request_url': None,
+        'rewrite_url': None,
+    }
+
+
+def _make_default_snapshot_config():
+    """为无匹配域名的场景构建内置快照引擎默认参数。"""
+    from django.conf import settings as django_settings
+    return {
+        '_engine': 'built-in (SingleFile)',
+        'script': None,
+        'process_lazy_images': None,
+        'remove_classes': None,
+        'set_styles': None,
+        'singlefile_args': {},
+        'singlefile_path': getattr(django_settings, 'LD_SINGLEFILE_PATH', 'single-file'),
+        'singlefile_timeout': getattr(django_settings, 'LD_SINGLEFILE_TIMEOUT_SEC', 60),
+        'user_agent': getattr(django_settings, 'LD_DEFAULT_USER_AGENT', ''),
+        'headers': {},
+        'proxy': None,
+        'request_url': None,
+    }
+
+
+def _make_default_reader_config():
+    """为无匹配域名的场景构建内置阅读器引擎默认参数。"""
+    return {
+        '_engine': 'built-in (defuddle)',
+        'script': None,
+        'defuddle_args': {},
+    }
+
+
+
+def _extract_match_info(config):
+    """从 config 中提取匹配信息。"""
+    if not config:
+        return {
+            'matched': False,
+            'domain_key': None,
+            'adapter': None,
+        }
+    return {
+        'matched': True,
+        'domain_key': config.get('_domain_key'),
+        'adapter': config.get('_adapter'),
+    }
+
+
 def _test_metadata(url, base_dir, username, entries):
     config = get_metadata_config(url, username=username)
+    no_match = False
     if not config:
-        return _test_response({'type': 'metadata', 'result': None, 'error': '无匹配域名配置'}, entries=entries)
+        no_match = True
     metadata, sources, config = load_website_metadata_for_test(url, username=username)
-    return _test_response({
+    match_info = _extract_match_info(config)
+    result = {
         'type': 'metadata',
+        'no_match': no_match,
+        'matched': match_info['matched'],
+        'domain_key': match_info['domain_key'],
+        'adapter': match_info['adapter'],
         'config': config,
         'original_url': url,
-        'request_url': config.get('_request_url', url),
+        'request_url': config.get('_request_url', url) if config else url,
         'result': metadata.to_dict(),
         'sources': sources,
-    }, entries=entries)
+    }
+    if no_match:
+        result['default_config'] = _make_default_metadata_config()
+    return _test_response(result, entries=entries)
 
 
 def _test_snapshot(url, base_dir, username, entries):
     config = get_snapshot_config(url, username=username)
+    no_match = False
     if not config:
-        return _test_response({'type': 'snapshot', 'result': None, 'error': '无匹配域名配置'}, entries=entries)
+        no_match = True
     from bookmarks.services.snapshot_processor import create_snapshot
     os.makedirs(TEST_ASSETS_DIR, exist_ok=True)
     filename = 'snapshot_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
     out_path = os.path.join(TEST_ASSETS_DIR, filename)
     create_snapshot(url, out_path, username=username)
-    return _test_response({
+    match_info = _extract_match_info(config)
+    result = {
         'type': 'snapshot',
+        'no_match': no_match,
+        'matched': match_info['matched'],
+        'domain_key': match_info['domain_key'],
+        'adapter': match_info['adapter'],
         'config': config,
         'original_url': url,
-        'request_url': config.get('_request_url', url),
+        'request_url': config.get('_request_url', url) if config else url,
         'result': {
             'file': filename,
             'size': os.path.getsize(out_path),
             'view_url': f'/admin/site-adapters/view-snapshot?file={filename}',
         },
-    }, entries=entries)
+    }
+    if no_match:
+        result['default_config'] = _make_default_snapshot_config()
+    return _test_response(result, entries=entries)
 
 
 def _test_reader(url, base_dir, username, entries):
     config = get_reader_config(url, username=username)
+    no_match = False
     if not config:
-        return _test_response({'type': 'reader', 'result': None, 'error': '无匹配域名配置'}, entries=entries)
+        no_match = True
     from bookmarks.services import reader_processor
     from bookmarks.services.snapshot_processor import create_snapshot
     os.makedirs(TEST_ASSETS_DIR, exist_ok=True)
@@ -173,11 +253,16 @@ def _test_reader(url, base_dir, username, entries):
     reader_path = os.path.join(TEST_ASSETS_DIR, reader_filename)
     with open(reader_path, 'w', encoding='utf-8') as f:
         f.write(reader_html)
-    return _test_response({
+    match_info = _extract_match_info(config)
+    result_data = {
         'type': 'reader',
+        'no_match': no_match,
+        'matched': match_info['matched'],
+        'domain_key': match_info['domain_key'],
+        'adapter': match_info['adapter'],
         'config': config,
         'original_url': url,
-        'request_url': config.get('_request_url', url),
+        'request_url': config.get('_request_url', url) if config else url,
         'result': {
             'title': result.get('title', ''),
             'word_count': result.get('wordCount', 0),
@@ -186,12 +271,16 @@ def _test_reader(url, base_dir, username, entries):
             'snapshot_size': os.path.getsize(snap_path),
             'snapshot_view_url': f'/admin/site-adapters/view-snapshot?file={snap_filename}',
         },
-        'defuddle_args': config.get('defuddle_args'),
-    }, entries=entries)
+        'defuddle_args': config.get('defuddle_args') if config else None,
+    }
+    if no_match:
+        result_data['default_config'] = _make_default_reader_config()
+    return _test_response(result_data, entries=entries)
 
 
 def _test_cookie(url, base_dir, username, entries):
     from site_adapters.services.auth.cookies import get_cookie_for_domain
+    from site_adapters.services.auth.credentials import get_user_cookie
     all_config = {}
     try:
         all_config = _cache.load(base_dir)
@@ -200,29 +289,51 @@ def _test_cookie(url, base_dir, username, entries):
     domain_key, _ = match_domain(url, all_config)
     if not domain_key:
         return _test_response({'type': 'cookie', 'error': '无匹配域名'}, entries=entries)
+
+    # 1) Check global cookie (shared across users, from cookies/ directory)
+    global_cookie = get_cookie_for_domain(domain_key)
+    has_global_cookie = bool(global_cookie)
+
+    # 2) Check user credential cookie (per-user, highest priority)
+    user_cookie_str = None
+    if username:
+        user_cookie_str, _ = get_user_cookie(username, domain_key)
+    has_user_cookie = bool(user_cookie_str)
+
+    # Combined: user credential takes precedence
+    cookie = user_cookie_str if user_cookie_str else global_cookie
+    has_cookie = has_global_cookie or has_user_cookie
+    cookie_preview = cookie[:50] + '...' if cookie and len(cookie) > 50 else (cookie or '')
+
+    # Get config for refresh info
     metadata_config = get_metadata_config(url, username=username) or {}
     snapshot_config = get_snapshot_config(url, username=username) or {}
     config = metadata_config
     if snapshot_config.get('cookie', {}).get('file') and not metadata_config.get('cookie', {}).get('file'):
         config = snapshot_config
     cookie_config = config.get('cookie', {})
-    cookie_file = cookie_config.get('file', '')
-    cookie = load_cookie_file(cookie_file) if cookie_file else get_cookie_for_domain(domain_key)
-    has_cookie = bool(cookie)
-    cookie_preview = cookie[:50] + '...' if cookie and len(cookie) > 50 else cookie
+
     refreshed = False
-    if cookie_config:
+    if cookie_config and cookie:
         before = cookie
         after = verify_and_refresh(cookie_config, url, domain_key, {'url': url, 'status': 0, 'title': '', 'body_preview': ''})
         refreshed = bool(after and after != before)
-        cookie = load_cookie_file(cookie_file) if cookie_file else get_cookie_for_domain(domain_key)
-        has_cookie = bool(cookie)
-        if has_cookie:
-            cookie_preview = cookie[:50] + '...' if cookie and len(cookie) > 50 else cookie
+        if refreshed:
+            # Re-read after refresh
+            global_cookie = get_cookie_for_domain(domain_key)
+            if username:
+                user_cookie_str, _ = get_user_cookie(username, domain_key)
+            cookie = user_cookie_str if user_cookie_str else global_cookie
+            has_cookie = bool(cookie)
+            if has_cookie:
+                cookie_preview = cookie[:50] + '...' if cookie and len(cookie) > 50 else cookie
+
     return _test_response({
         'type': 'cookie',
         'domain_key': domain_key,
         'has_cookie': has_cookie,
+        'has_global_cookie': has_global_cookie,
+        'has_user_cookie': has_user_cookie,
         'cookie_preview': cookie_preview,
         'refreshed': refreshed,
     }, entries=entries)
@@ -248,11 +359,21 @@ def _test_pipeline(url, base_dir, username, entries):
     reader_path = os.path.join(TEST_ASSETS_DIR, reader_filename)
     with open(reader_path, 'w', encoding='utf-8') as f:
         f.write(reader_html)
-    return _test_response({
+    metadata_no_match = not meta_config
+    snapshot_no_match = not snap_config
+    reader_no_match = not reader_config
+    md_match = _extract_match_info(meta_config)
+    snap_match = _extract_match_info(snap_config)
+    rd_match = _extract_match_info(reader_config)
+    result = {
         'type': 'pipeline',
         'config': config_result,
         'metadata': {
             'config': meta_config,
+            'matched': md_match['matched'],
+            'domain_key': md_match['domain_key'],
+            'adapter': md_match['adapter'],
+            'no_match': metadata_no_match,
             'original_url': url,
             'request_url': meta_config.get('_request_url', url) if meta_config else url,
             'result': metadata.to_dict(),
@@ -260,6 +381,10 @@ def _test_pipeline(url, base_dir, username, entries):
         },
         'snapshot': {
             'config': snap_config,
+            'matched': snap_match['matched'],
+            'domain_key': snap_match['domain_key'],
+            'adapter': snap_match['adapter'],
+            'no_match': snapshot_no_match,
             'original_url': url,
             'request_url': snap_config.get('_request_url', url) if snap_config else url,
             'result': {
@@ -270,6 +395,10 @@ def _test_pipeline(url, base_dir, username, entries):
         },
         'reader': {
             'config': reader_config,
+            'matched': rd_match['matched'],
+            'domain_key': rd_match['domain_key'],
+            'adapter': rd_match['adapter'],
+            'no_match': reader_no_match,
             'original_url': url,
             'request_url': reader_config.get('_request_url', url) if reader_config else url,
             'result': {
@@ -282,7 +411,14 @@ def _test_pipeline(url, base_dir, username, entries):
             },
             'defuddle_args': reader_config.get('defuddle_args') if reader_config else None,
         },
-    }, entries=entries)
+    }
+    if metadata_no_match:
+        result['metadata']['default_config'] = _make_default_metadata_config()
+    if snapshot_no_match:
+        result['snapshot']['default_config'] = _make_default_snapshot_config()
+    if reader_no_match:
+        result['reader']['default_config'] = _make_default_reader_config()
+    return _test_response(result, entries=entries)
 
 
 def _handle_clean_test_files() -> JsonResponse:

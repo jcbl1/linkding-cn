@@ -242,6 +242,7 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
     # Metadata
     result['_domain_key'] = full_config.get('_domain_key')
     result['_raw'] = full_config.get('_raw')
+    result['_adapter'] = full_config.get('_adapter')
 
     return result
 
