@@ -115,12 +115,26 @@ def _cookie_data_to_string(data) -> str | None:
     return None
 
 
+def _derive_cookie_domain(domain_key: str) -> str:
+    """从 domain key 推导 cookie 的 domain 字段。
+
+    用户粘贴的 cookie 通常设在父域名上（如 .zhihu.com），
+    而非精确的子域名（如 www.zhihu.com）。这里取最后两级域名并加前导点。
+    """
+    host = domain_key.removeprefix('*.')
+    parts = host.split('.')
+    parent = '.'.join(parts[-2:]) if len(parts) >= 2 else host
+    return f'.{parent}'
+
+
+
 def cookie_string_to_playwright_list(cookie_str: str, domain_key: str) -> list[dict]:
     """Convert a 'name=value; name2=value2' cookie string to Playwright format list.
 
     Shared utility to avoid duplicating this conversion in cookies, credentials, and browser_fallback.
     """
     cookies_list = []
+    cookie_domain = _derive_cookie_domain(domain_key)
     for pair in cookie_str.split(';'):
         pair = pair.strip()
         if '=' in pair:
@@ -128,7 +142,7 @@ def cookie_string_to_playwright_list(cookie_str: str, domain_key: str) -> list[d
             cookies_list.append({
                 "name": name.strip(),
                 "value": value.strip(),
-                "domain": domain_key.removeprefix('*.'),
+                "domain": cookie_domain,
                 "path": "/",
             })
     return cookies_list
@@ -441,18 +455,39 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
 # 临时文件（供 SingleFile 使用）
 # ---------------------------------------------------------------------------
 
+def copy_cookie_data_to_temp(data) -> str | None:
+    """Copy Playwright cookie data (list or dict) directly to a temp file.
+
+    Bypasses the string round-trip so original domain / path / sameSite
+    metadata is preserved exactly as stored.
+    """
+    if not data:
+        return None
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as tmp:
+        json.dump(data, tmp)
+        return tmp.name
+
+
 def generate_temp_cookies_file(domain_key: str, cookie_str: str = None) -> str | None:
     """Generate a temporary Playwright cookies file.
+
+    When a raw cookie string is given (e.g. user-pasted), it is converted
+    to Playwright format.  When cookie_str is None, the domain's stored
+    cookie file is searched and copied directly to preserve original
+    metadata.
 
     Caller must delete the returned path after use.
     """
     if cookie_str is None:
-        cookie_str = get_cookie_for_domain(domain_key)
-    if not cookie_str:
-        return None
-
+        cookies_dir = _get_cookies_dir()
+        path = _match_cookie_file(domain_key, cookies_dir)
+        data = _load_cookie_data(path) if path else None
+        return copy_cookie_data_to_temp(data)
+    # User-provided raw string → convert to Playwright format
     cookies_list = cookie_string_to_playwright_list(cookie_str, domain_key)
+    return copy_cookie_data_to_temp(cookies_list)
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as tmp:
-        json.dump(cookies_list, tmp)
-        return tmp.name
+def copy_cookie_file_to_temp(path: str) -> str | None:
+    """Copy a stored Playwright cookie file directly to a temp file."""
+    data = _load_cookie_data(path)
+    return copy_cookie_data_to_temp(data)

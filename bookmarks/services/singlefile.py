@@ -11,8 +11,8 @@ from contextlib import suppress
 from django.conf import settings
 
 from site_adapters.services.auth.cookies import (
+    copy_cookie_file_to_temp,
     generate_temp_cookies_file,
-    load_cookie_file,
 )
 from site_adapters.services.execution_log import log_execution
 
@@ -65,8 +65,10 @@ def get_custom_options(config: dict):
                 logger.warning("Ignoring unknown SingleFile arg: %s", arg)
                 continue
             if value is True:
-                args.append(arg)
-            elif value is False or value is None:
+                args.append(f"{arg}=true")
+            elif value is False:
+                args.append(f"{arg}=false")
+            elif value is None:
                 continue
             elif isinstance(value, list):
                 args.extend(f"{arg}={item}" for item in value)
@@ -139,13 +141,9 @@ def _build_site_adapter_options(config: dict) -> tuple[list[str], list[str]]:
         if cookie_file:
             temp_files.append(cookie_file)
     elif cookie_file:
-        cookie_str = load_cookie_file(cookie_file)
-        if cookie_str:
-            cookie_file = generate_temp_cookies_file(config.get("_domain_key", ""), cookie_str=cookie_str)
-            if cookie_file:
-                temp_files.append(cookie_file)
-        else:
-            cookie_file = None
+        cookie_file = copy_cookie_file_to_temp(cookie_file)
+        if cookie_file:
+            temp_files.append(cookie_file)
     if not cookie_file and config.get("_domain_key"):
         cookie_file = generate_temp_cookies_file(config["_domain_key"])
         if cookie_file:
@@ -169,6 +167,7 @@ def create_snapshot(url: str, filepath: str, config: dict = None):
     required_options = [
         "--browser-arg=--disable-blink-features=AutomationControlled",
         f"--user-agent={settings.LD_DEFAULT_USER_AGENT}",
+        "--block-fonts=true",
     ]
     # 自动解析 cloakbrowser 路径（最低优先级，允许显式覆盖）
     browser_path = _resolve_browser_path()
