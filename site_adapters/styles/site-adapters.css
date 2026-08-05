@@ -96,14 +96,16 @@
   border: 1px solid var(--wa-border);
   border-radius: 4px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  max-height: 220px;
-  overflow-y: auto;
+  width: 100%;
+  max-height: 70vh;
   z-index: 100;
   display: none;
+  flex-direction: column;
 }
 .wa-url-dropdown.open {
-  display: block;
+  display: flex;
 }
+
 .wa-url-dropdown-item {
   padding: 8px 12px;
   cursor: pointer;
@@ -115,6 +117,13 @@
 }
 .wa-url-dropdown-item:hover {
   background: var(--wa-hover);
+}
+
+/* ── 下拉列表滚动区 ── */
+.wa-url-dropdown-list {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 /* 测试结果（独立区域） */
@@ -469,27 +478,6 @@
   flex-wrap: wrap;
 }
 
-  .wa-domain-panel {
-    width: 100%;
-    max-height: 240px;
-    border-right: none;
-    border-bottom: 1px solid var(--wa-border);
-  }
-  .wa-test-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .wa-test-actions {
-    flex-wrap: wrap;
-  }
-  .wa-editor-header {
-    flex-wrap: wrap;
-  }
-  .wa-url-history {
-    flex: none;
-    width: 100%;
-    min-width: 0;
-  }
 
 /* ---------- 测试结果结构 ---------- */
 .wa-result-section {
@@ -561,6 +549,17 @@
   padding: 16px;
   color: var(--ld-error, #dc2626);
   font-weight: 500;
+}
+
+.wa-no-match-banner {
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--wa-surface-alt, #f1f5f9);
+  border-left: 3px solid var(--ld-warning, #f59e0b);
+  color: var(--ld-text-secondary, #64748b);
+  font-size: 13px;
+  line-height: 1.5;
+  border-radius: 0 4px 4px 0;
 }
 
 .wa-result-code {
@@ -700,12 +699,6 @@
   flex-shrink: 0;
 }
 
-  .wa-result-label {
-    width: auto;
-  }
-  .wa-preview-img {
-    max-width: 100%;
-  }
 
 /* ---------- 执行日志命令展开 ---------- */
 .wa-cmd-toggle {
@@ -775,9 +768,11 @@
 .wa-url-dropdown-clear {
   padding: 8px 12px;
   cursor: pointer;
+  flex-shrink: 0;
+  background: var(--wa-surface, #fff);
+  text-align: center;
   font-size: 12px;
   color: var(--wa-muted);
-  text-align: left;
   border-top: 1px solid var(--wa-border);
 }
 .wa-url-dropdown-clear:hover {
@@ -1400,7 +1395,6 @@
 .wa-toggle-detail-col-label { flex: 0 1 200px; max-width: 300px; min-width: 80px; }
 .wa-toggle-detail-col-selector { width: 160px; max-width: 160px; flex-shrink: 0; }
 .wa-toggle-detail-col-enabled { width: 60px; flex-shrink: 0; text-align: left; }
-  .wa-col-actions { width: 130px; }
 .wa-col-domain { flex: 1; min-width: 120px; }
 .wa-col-type { width: 90px; flex-shrink: 0; }
 
@@ -1568,6 +1562,9 @@
     width: 100%;
     min-width: 0;
   }
+  .wa-url-dropdown {
+    max-height: 60vh;
+  }
 
   /* ── 测试结果 ── */
   .wa-result-row {
@@ -1586,11 +1583,11 @@
   .settings-layout,
   .settings-content,
   .settings-section {
-    overflow-x: hidden;
+    overflow-x: clip;
     max-width: 100vw;
   }
   .wa-table-scroll {
-    overflow-x: hidden;
+    overflow-x: clip;
   }
   .wa-table-head,
   .wa-cred-row,
