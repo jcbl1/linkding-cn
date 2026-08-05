@@ -95,7 +95,7 @@ def _handle_test(request) -> JsonResponse:
         return JsonResponse({'error': 'URL required'}, status=400)
 
     base_dir = _get_base_dir()
-    username = request.POST.get('test_username', '').strip() or request.user.username
+    username = request.POST.get('test_username', '').strip()
 
     handlers = {
         'config': _test_config,

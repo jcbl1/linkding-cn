@@ -419,11 +419,13 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
 
   function renderSubscriptions() {
     var list = document.getElementById('subscription-list'); if (!list) return;
+    var defaultsRow = document.getElementById('defaults-row'); if (!defaultsRow) return;
     if (!subData.length) {
+      defaultsRow.innerHTML = '';
       list.innerHTML = '<p class="text-gray" style="padding:16px">' + gettext('No adapters.') + '</p>';
       return;
     }
-    var h = '';
+    var parts = { defaults: '', rest: '' };
     subData.forEach(function (s, i) {
       var label = s.source_name || s.name || (s.id ? s.id : '');
       var remote = s.source && (s.source.startsWith('https://') || s.source.startsWith('http://'));
@@ -431,117 +433,112 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       var version = s.version || '';
       var lastFetch = s.last_fetch || 0;
       var interval = s.update_interval || 86400;
-      var rowCls = 'wa-sub-item' + (enabled ? '' : ' wa-sub-disabled');
-      h += '<div class="' + rowCls + '" data-index="' + i + '" draggable="true">';
       var isDefaults = s.id === 'defaults';
-      if (!isDefaults) {
-        h += '<div class="wa-sub-drag" title="' + gettext('Drag to reorder') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-grip"></use></svg></div>';
+      var rowCls = 'wa-sub-item' + (enabled ? '' : ' wa-sub-disabled');
+      var key = isDefaults ? 'defaults' : 'rest';
+      parts[key] += '<div class="' + rowCls + '" data-index="' + i + '" draggable="true">';
+      if (isDefaults) {
+        parts[key] += '<div class="wa-sub-drag-locked" title="' + gettext('System adapter (cannot reorder)') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-lock"></use></svg></div>';
       } else {
-        h += '<div class="wa-sub-drag wa-sub-drag-locked" title="' + gettext('System adapter (cannot reorder)') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-lock"></use></svg></div>';
+        parts[key] += '<div class="wa-sub-drag" title="' + gettext('Drag to reorder') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-grip"></use></svg></div>';
       }
-      h += '<label class="form-switch wa-sub-toggle">';
-      h += '<input type="checkbox" ' + (enabled ? 'checked' : '') + ' data-sub-toggle="' + i + '">';
-      h += '<i class="form-icon"></i>';
-      h += '</label>';
-      h += '<div class="wa-sub-body">';
-      h += '<div class="wa-sub-view">';
-      h += '<span class="wa-sub-name">' + esc(label) + '</span>';
-      h += '<span class="wa-sub-meta">';
-      h += '<span>' + (s.domain_count || 0) + ' ' + gettext('domains') + '</span>';
-      h += '<span class="wa-sub-sep">·</span>';
-      h += '<span>' + formatTimeAgo(lastFetch) + '</span>';
-      if (version) { h += '<span class="wa-sub-sep">·</span><span>v' + esc(version) + '</span>'; }
-      h += '</span>';
-      h += '</div>';
-      h += '</div>';
-      if (!enabled) h += '<span class="wa-badge wa-badge-warn wa-sub-disabled-badge">' + gettext('disabled') + '</span>';
-      h += '<div class="wa-sub-actions">';
-      h += '<button class="btn btn-sm js-sub-edit" data-index="' + i + '" title="' + gettext('Edit') + '" aria-label="' + gettext('Edit') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-edit"></use></svg></button>';
-      if (remote) h += '<button class="btn btn-sm js-sub-update" data-index="' + i + '" title="' + gettext('Update') + '" aria-label="' + gettext('Update') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-refresh"></use></svg></button>';
-      h += '<button class="btn btn-sm btn-error js-sub-delete" data-index="' + i + '" title="' + gettext('Delete') + '" aria-label="' + gettext('Delete') + '" ld-confirm-question="' + gettext('Delete') + ' ' + esc(label) + '?" ld-confirm-danger=""><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-delete"></use></svg></button>';
-      h += '<button class="btn btn-sm js-sub-expand" data-index="' + i + '" title="' + gettext('Details') + '" aria-label="' + gettext('Details') + '"><svg width="16" height="16" aria-hidden="true" class="wa-sub-chevron"><use href="#ld-icon-chevron-down"></use></svg></button>';
-      h += '</div>';
-      h += '<div class="wa-sub-detail" hidden>';
-      h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Source') + ':</span><code>' + esc(s.source || '-') + '</code></div>';
-      if (s.id) { h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">ID:</span><code>' + esc(s.id) + '</code></div>'; }
-      if (s.source_name) { h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Name') + ':</span><span>' + esc(s.source_name) + '</span></div>'; }
-      if (s.description) { h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Description') + ':</span><span>' + esc(s.description) + '</span></div>'; }
-      h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Interval') + ':</span><span>' + esc(String(interval)) + 's (' + formatNextFetch(lastFetch, interval) + ')</span></div>';
-      h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Last fetch') + ':</span><span>' + (lastFetch ? new Date(lastFetch * 1000).toLocaleString() : '-') + '</span></div>';
-      if (version) { h += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Version') + ':</span><span>v' + esc(version) + '</span></div>'; }
-      h += '</div>';
-      h += '</div>';
+      parts[key] += '<label class="form-switch wa-sub-toggle">';
+      parts[key] += '<input type="checkbox" ' + (enabled ? 'checked' : '') + ' data-sub-toggle="' + i + '">';
+      parts[key] += '<i class="form-icon"></i>';
+      parts[key] += '</label>';
+      parts[key] += '<div class="wa-sub-body">';
+      parts[key] += '<div class="wa-sub-view">';
+      parts[key] += '<span class="wa-sub-name">' + esc(label) + '</span>';
+      if (s.cache_missing) parts[key] += ' <span class="wa-badge wa-badge-warn" title="' + gettext('Cache file missing. Click Update to re-download.') + '">' + gettext('missing') + '</span>';
+      parts[key] += '<span class="wa-sub-meta">';
+      parts[key] += '<span>' + (s.domain_count || 0) + ' ' + gettext('domains') + '</span>';
+      parts[key] += '<span class="wa-sub-sep">·</span>';
+      parts[key] += '<span>' + formatTimeAgo(lastFetch) + '</span>';
+      if (version) { parts[key] += '<span class="wa-sub-sep">·</span><span>v' + esc(version) + '</span>'; }
+      parts[key] += '</span>';
+      parts[key] += '</div>';
+      parts[key] += '</div>';
+      if (!enabled) parts[key] += '<span class="wa-badge wa-badge-warn wa-sub-disabled-badge">' + gettext('disabled') + '</span>';
+      parts[key] += '<div class="wa-sub-actions">';
+      parts[key] += '<button class="btn btn-sm js-sub-edit" data-index="' + i + '" title="' + gettext('Edit') + '" aria-label="' + gettext('Edit') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-edit"></use></svg></button>';
+      if (remote) parts[key] += '<button class="btn btn-sm js-sub-update" data-index="' + i + '" title="' + gettext('Update') + '" aria-label="' + gettext('Update') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-refresh"></use></svg></button>';
+      parts[key] += '<button class="btn btn-sm btn-error js-sub-delete" data-index="' + i + '" title="' + gettext('Delete') + '" aria-label="' + gettext('Delete') + '" ld-confirm-question="' + gettext('Delete') + ' ' + esc(label) + '?" ld-confirm-danger=""><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-delete"></use></svg></button>';
+      parts[key] += '<button class="btn btn-sm js-sub-expand" data-index="' + i + '" title="' + gettext('Details') + '" aria-label="' + gettext('Details') + '"><svg width="16" height="16" aria-hidden="true" class="wa-sub-chevron"><use href="#ld-icon-chevron-down"></use></svg></button>';
+      parts[key] += '</div>';
+      parts[key] += '<div class="wa-sub-detail" hidden>';
+      parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Source') + ':</span><code>' + esc(s.source || '-') + '</code></div>';
+      if (s.id) { parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">ID:</span><code>' + esc(s.id) + '</code></div>'; }
+      if (s.source_name) { parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Name') + ':</span><span>' + esc(s.source_name) + '</span></div>'; }
+      if (s.description) { parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Description') + ':</span><span>' + esc(s.description) + '</span></div>'; }
+      parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Interval') + ':</span><span>' + esc(String(interval)) + 's (' + formatNextFetch(lastFetch, interval) + ')</span></div>';
+      parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Last fetch') + ':</span><span>' + (lastFetch ? new Date(lastFetch * 1000).toLocaleString() : '-') + '</span></div>';
+      if (version) { parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Version') + ':</span><span>v' + esc(version) + '</span></div>'; }
+      parts[key] += '</div>';
+      parts[key] += '</div>';
     });
-    list.innerHTML = h;
+    defaultsRow.innerHTML = parts.defaults;
+    list.innerHTML = parts.rest;
 
-    // Toggle
-    list.querySelectorAll('[data-sub-toggle]').forEach(function (cb) {
-      cb.addEventListener('change', function () {
-        var idx = parseInt(this.dataset.subToggle);
-        var action = this.checked ? 'enable' : 'disable';
-        apiPost(urls.subscriptionManage, { action: action, index: idx }).then(function (r) {
-          if (r.error) { toast(r.error, 'error'); loadSubscriptions(); }
-          else { subData = r.adapters || []; renderSubscriptions(); }
+    var allContainers = [defaultsRow, list];
+    allContainers.forEach(function (container) {
+      container.querySelectorAll('[data-sub-toggle]').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          var idx = parseInt(this.dataset.subToggle);
+          var action = this.checked ? 'enable' : 'disable';
+          apiPost(urls.subscriptionManage, { action: action, index: idx }).then(function (r) {
+            if (r.error) { toast(r.error, 'error'); loadSubscriptions(); }
+            else { subData = r.adapters || []; renderSubscriptions(); }
+          });
+        });
+      });
+      container.querySelectorAll('.js-sub-edit').forEach(function (btn) {
+        btn.addEventListener('click', function () { openModal('edit', parseInt(this.dataset.index)); });
+      });
+      container.querySelectorAll('.js-sub-update').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var idx = parseInt(this.dataset.index);
+          var btnEl = this;
+          btnEl.disabled = true;
+          var origHTML = btnEl.innerHTML;
+          btnEl.innerHTML = '<svg width="16" height="16" aria-hidden="true" class="wa-spin"><use href="#ld-icon-loader"></use></svg>';
+          apiPost(urls.subscriptionManage, { action: 'update', index: idx }).then(function (r) {
+            if (r.error) { toast(r.error, 'error'); }
+            else { subData = r.adapters || []; renderSubscriptions(); toast(gettext('Updated'), 'success'); }
+          }).catch(function () { toast(gettext('Update failed'), 'error'); })
+          .finally(function () { btnEl.disabled = false; btnEl.innerHTML = origHTML; });
+        });
+      });
+      container.querySelectorAll('.js-sub-delete').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          var idx = parseInt(this.dataset.index);
+          var popup = document.createElement('ld-confirm-popup');
+          popup._button = this;
+          popup._onConfirm = function () {
+            apiPost(urls.subscriptionManage, { action: 'delete', index: idx }).then(function (r) {
+              if (r.error) { toast(r.error, 'error'); }
+              else { subData = r.adapters || []; renderSubscriptions(); }
+            });
+          };
+          document.body.appendChild(popup);
+        });
+      });
+      container.querySelectorAll('.js-sub-expand').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var row = btn.closest('.wa-sub-item');
+          var detail = row.querySelector(".wa-sub-detail");
+          var chevron = btn.querySelector('.wa-sub-chevron use');
+          if (detail.hidden) {
+            detail.hidden = false;
+            chevron.parentElement.classList.add('wa-sub-chevron-up');
+          } else {
+            detail.hidden = true;
+            chevron.parentElement.classList.remove('wa-sub-chevron-up');
+          }
         });
       });
     });
 
-    // Edit
-    list.querySelectorAll('.js-sub-edit').forEach(function (btn) {
-      btn.addEventListener('click', function () { openModal('edit', parseInt(this.dataset.index)); });
-    });
-
-    // Update (single)
-    list.querySelectorAll('.js-sub-update').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var idx = parseInt(this.dataset.index);
-        var btnEl = this;
-        btnEl.disabled = true;
-        var origHTML = btnEl.innerHTML;
-        btnEl.innerHTML = '<svg width="16" height="16" aria-hidden="true" class="wa-spin"><use href="#ld-icon-loader"></use></svg>';
-        apiPost(urls.subscriptionManage, { action: 'update', index: idx }).then(function (r) {
-          if (r.error) { toast(r.error, 'error'); }
-          else { subData = r.adapters || []; renderSubscriptions(); toast(gettext('Updated'), 'success'); }
-        }).catch(function () { toast(gettext('Update failed'), 'error'); })
-        .finally(function () { btnEl.disabled = false; btnEl.innerHTML = origHTML; });
-      });
-    });
-
-    // Delete — use ld-confirm-popup
-    list.querySelectorAll('.js-sub-delete').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        var idx = parseInt(this.dataset.index);
-        var popup = document.createElement('ld-confirm-popup');
-        popup._button = this;
-        popup._onConfirm = function () {
-          apiPost(urls.subscriptionManage, { action: 'delete', index: idx }).then(function (r) {
-            if (r.error) { toast(r.error, 'error'); }
-            else { subData = r.adapters || []; renderSubscriptions(); }
-          });
-        };
-        document.body.appendChild(popup);
-      });
-    });
-
-    // Expand/collapse
-    list.querySelectorAll('.js-sub-expand').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var row = btn.closest('.wa-sub-item');
-        var detail = row.querySelector(".wa-sub-detail");
-        var chevron = btn.querySelector('.wa-sub-chevron use');
-        if (detail.hidden) {
-          detail.hidden = false;
-          chevron.parentElement.classList.add('wa-sub-chevron-up');
-        } else {
-          detail.hidden = true;
-          chevron.parentElement.classList.remove('wa-sub-chevron-up');
-        }
-      });
-    });
-
-    // Drag-and-drop with SortableJS
     if (subSortable) subSortable.destroy();
     if (typeof Sortable !== 'undefined') {
       subSortable = new Sortable(list, {
@@ -562,7 +559,6 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       });
     }
   }
-
   // ===== Modal =====
   function openModal(mode, index) {
     var overlay = document.getElementById('sub-modal-overlay');
@@ -592,6 +588,10 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
 
   function saveModal() {
     var form = document.getElementById('sub-modal-form');
+    var btn = document.getElementById('btn-modal-save');
+    var origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '...';
     var data = {
       action: form.elements['action'].value,
       source: form.elements['source'].value.trim(),
@@ -604,40 +604,44 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     if (form.elements['index'].value) data.index = form.elements['index'].value;
 
     apiPost(urls.subscriptionManage, data).then(function (r) {
-      if (r.error) { toast(r.error, 'error'); return; }
+      if (r.error) { toast(r.error, 'error'); btn.disabled = false; btn.textContent = origText; return; }
       subData = r.adapters || [];
       renderSubscriptions();
       closeModal();
+      toast(gettext('Saved'), 'success');
+    }).catch(function () {
+      toast(gettext('Save failed'), 'error');
+    }).finally(function () {
+      btn.disabled = false;
+      btn.textContent = origText;
     });
   }
 
   // Auto-detect name from source on blur in add mode
   document.getElementById('sub-source').addEventListener('blur', function () {
-    var form = document.getElementById('sub-modal-form');
-    if (form.elements['action'].value !== 'add') return;
-    var source = this.value.trim();
-    var nameField = document.getElementById('sub-name');
-    if (!source) { nameField.placeholder = ''; return; } // Don't overwrite user input
-
-    // Extract a readable name from the source path
-    var cleaned = source.replace(/\\/g, '/').replace(/\/$/, '');
-    var parts = cleaned.split('/');
-    var filename = parts[parts.length - 1] || '';
-    // Remove extension
-    var basename = filename.replace(/\.(jsonc|json)$/i, '');
-    if (!basename || basename === 'adapters') {
-      // Use the parent directory name
-      basename = parts.length > 1 ? parts[parts.length - 2] : cleaned;
-    }
-    // Make it readable: replace dashes/underscores with spaces, capitalize
-    if (basename) {
-      basename = basename.replace(/[-_]/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-      nameField.placeholder = basename;
-    } else {
-      nameField.placeholder = '';
+    if ('add' === document.getElementById('sub-modal-form').elements.action.value) {
+      var src = this.value.trim();
+      var nameEl = document.getElementById('sub-name');
+      var idEl = document.getElementById('sub-id');
+      if (src) {
+        var parts = src.replace(/\\/g, '/').replace(/\/$/, '').split('/');
+        var fname = (parts[parts.length - 1] || '').replace(/\.(jsonc|json)$/i, '');
+        if (!fname || fname === 'adapters') fname = parts.length > 1 ? parts[parts.length - 2] : '';
+        if (fname) {
+          fname = fname.replace(/[-_]/g, ' ').replace(/\b\w/g, function (m) { return m.toUpperCase(); });
+          nameEl.placeholder = fname;
+        } else { nameEl.placeholder = ''; }
+        if (src.startsWith('./') || src.startsWith('../') || src.startsWith('/')) {
+          apiGet(urls.subscriptionManage + '?action=detect_id&source=' + encodeURIComponent(src)).then(function (r) {
+            if (r) {
+              if (r.id) { idEl.value = r.id; }
+              if (r.name && !nameEl.value) { nameEl.value = r.name; nameEl.placeholder = ''; }
+            }
+          }).catch(function () {});
+        }
+      } else { nameEl.placeholder = ''; idEl.value = ''; }
     }
   });
-
   document.getElementById('btn-add-subscription').addEventListener('click', function () { openModal('add'); });
   document.getElementById('btn-modal-close').addEventListener('click', closeModal);
   document.getElementById('btn-modal-cancel').addEventListener('click', closeModal);
@@ -685,7 +689,9 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
   var URL_HISTORY_KEY = 'ld:test-urls', RESULT_KEY = 'ld:test-result';
   var testHistory = [];
   try { testHistory = JSON.parse(localStorage.getItem(URL_HISTORY_KEY) || '[]'); } catch (e) {}
+  var TEST_PREFS_KEY = 'ld:test-prefs';
   var testUrlInput = document.getElementById('test-url');
+  var testFormEl = document.getElementById('test-form');
   var testDropdown = document.getElementById('wa-url-dropdown');
   var resultsSection = document.getElementById('test-results');
   var testOutput = document.getElementById('test-output');
@@ -695,12 +701,30 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     try { var s = JSON.parse(localStorage.getItem(RESULT_KEY)); if (s && s.data) { resultsSection.removeAttribute('hidden'); document.getElementById('test-bar').removeAttribute('hidden'); renderTestResult(s.data, s.elapsed || 0, s.testType || ''); } } catch (e) {}
   }
   function saveResult(data, elapsed, testType) { try { localStorage.setItem(RESULT_KEY, JSON.stringify({ data: data, elapsed: elapsed, testType: testType })); } catch (e) {} }
+
+  function restoreTestPrefs() {
+    try {
+      var p = JSON.parse(localStorage.getItem(TEST_PREFS_KEY));
+      if (p) {
+        if (p.url && testUrlInput) testUrlInput.value = p.url;
+        if (p.test_type && testFormEl) testFormEl.test_type.value = p.test_type;
+        if (p.test_username && testFormEl) testFormEl.test_username.value = p.test_username;
+        var clearBtn = document.querySelector('[data-action="clear-url"]');
+        if (clearBtn && p.url) clearBtn.hidden = false;
+      }
+    } catch (e) {}
+  }
+  function saveTestPrefs() {
+    try { localStorage.setItem(TEST_PREFS_KEY, JSON.stringify({ url: testUrlInput ? testUrlInput.value.trim() : '', test_type: testFormEl ? testFormEl.test_type.value : '', test_username: testFormEl ? testFormEl.test_username.value.trim() : '' })); } catch (e) {}
+  }
+  if (testUrlInput) { testUrlInput.addEventListener('input', saveTestPrefs); testUrlInput.addEventListener('change', saveTestPrefs); }
+
   var blurTimer = null;
   function updateDropdown(filter) {
     testDropdown.innerHTML = ''; var q = (filter || '').toLowerCase();
     var matches = testHistory.filter(function (u) { return u.toLowerCase().indexOf(q) >= 0; });
     if (!matches.length) { testDropdown.classList.remove('open'); return; }
-    matches.slice(0, 8).forEach(function (url) { var div = document.createElement('div'); div.className = 'wa-url-dropdown-item'; div.innerHTML = '<span>' + esc(url) + '</span><button type="button" class="wa-url-dropdown-del" title="' + gettext('Delete') + '" aria-label="' + gettext('Delete') + '">&times;</button>'; div.querySelector('span').addEventListener('mousedown', function (e) { e.preventDefault(); testUrlInput.value = url; testDropdown.classList.remove('open'); }); div.querySelector('.wa-url-dropdown-del').addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); removeHistoryItem(url); updateDropdown(testUrlInput.value); }); testDropdown.appendChild(div); });
+    matches.slice(0, 8).forEach(function (url) { var div = document.createElement('div'); div.className = 'wa-url-dropdown-item'; div.innerHTML = '<span>' + esc(url) + '</span><button type="button" class="wa-url-dropdown-del" title="' + gettext('Delete') + '" aria-label="' + gettext('Delete') + '">&times;</button>'; div.querySelector('span').addEventListener('mousedown', function (e) { e.preventDefault(); testUrlInput.value = url; var cb = document.querySelector('[data-action="clear-url"]'); if (cb) cb.hidden = false; testDropdown.classList.remove('open'); }); div.querySelector('.wa-url-dropdown-del').addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); removeHistoryItem(url); updateDropdown(testUrlInput.value); }); testDropdown.appendChild(div); });
     if (testHistory.length > 0) { var clearDiv = document.createElement('div'); clearDiv.className = 'wa-url-dropdown-clear'; clearDiv.textContent = gettext('Clear all history'); clearDiv.addEventListener('mousedown', function (e) { e.preventDefault(); testHistory = []; try { localStorage.removeItem(URL_HISTORY_KEY); } catch (ex) {} testDropdown.innerHTML = ''; testDropdown.classList.remove('open'); }); testDropdown.appendChild(clearDiv); }
     testDropdown.classList.add('open');
   }
@@ -724,6 +748,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     try { localStorage.setItem(URL_HISTORY_KEY, JSON.stringify(testHistory)); } catch (ex) {}
     var type = this.test_type.value, username = this.test_username.value.trim();
     var startTime = Date.now();
+    saveTestPrefs();
     resultsSection.removeAttribute('hidden'); document.getElementById('test-bar').removeAttribute('hidden'); testStatus.innerHTML = '<span class="wa-status-tag wa-status-tag-running">' + esc(type) + '</span> ' + gettext('Running\u2026'); testStatus.style.color = ''; testOutput.innerHTML = '';
     apiPost(urls.action, { action: 'test', url: url, test_type: type, test_username: username || '' })
       .then(function (r) {
@@ -750,6 +775,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     testStatus.innerHTML = ''; document.getElementById('test-bar').setAttribute('hidden', '');
     resultsSection.setAttribute('hidden', ''); try { localStorage.removeItem(RESULT_KEY); } catch (e) {}
   });
+  if (testFormEl) { testFormEl.test_type.addEventListener('change', saveTestPrefs); testFormEl.test_username.addEventListener('input', saveTestPrefs); }
   document.getElementById('btn-clean-test-files').addEventListener('click', function () { apiPost(urls.action, { action: 'clean_test_files' }).then(function (r) { if (r.error) toast(r.error, 'error'); else toast(gettext('Test files cleaned'), 'success'); }); });
 
   // ===== Test Result Renderers =====
@@ -1200,6 +1226,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     return h;
   }
 
+  restoreTestPrefs();
   restoreResult();
   switchMode(MODE);
 })();

@@ -117,6 +117,7 @@
               <svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-refresh"></use></svg>
             </button>
           </div>
+          <div id="defaults-row"></div>
           <div id="subscription-list" class="wa-sub-list"></div>
         </div>
       </div>
@@ -136,11 +137,12 @@
             <input type="hidden" name="id" value="">
             <div class="wa-form-group">
               <label class="wa-form-label" for="sub-source">{% translate "Source" %} <span class="wa-required">*</span></label>
-              <input type="text" id="sub-source" name="source" class="form-input" required autocomplete="off" placeholder="https://... or ./rsshub/adapters.jsonc">
+              <input type="text" id="sub-source" name="source" class="form-input" required autocomplete="off" placeholder="./my_subcription/adapters.jsonc or https://...">
               <span class="form-input-hint">{% translate "Remote: https:// URL. Local: relative path under adapters/." %}</span>
             </div>
             <div class="wa-form-group">
               <label class="wa-form-label" for="sub-name">{% translate "Name" %} <span class="wa-optional">({% translate 'optional' %})</span></label>
+              <input type="hidden" id="sub-id" name="id">
               <input type="text" id="sub-name" name="name" class="form-input" autocomplete="off" placeholder="{% translate 'Auto-detected from source' %}">
             </div>
             <div class="wa-form-group">

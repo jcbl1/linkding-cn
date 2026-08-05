@@ -188,7 +188,6 @@
   flex: 1;
 }
 .wa-sub-list {
-  min-height: 120px;
 }
 .wa-sub-list > .wa-cookie-row {
   display: flex;
@@ -827,7 +826,8 @@
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
-.wa-sub-drag {
+.wa-sub-drag,
+.wa-sub-drag-locked {
   cursor: grab;
   color: var(--wa-muted);
   flex-shrink: 0;
@@ -837,6 +837,9 @@
 }
 .wa-sub-drag:active {
   cursor: grabbing;
+}
+.wa-sub-drag-locked {
+  cursor: default;
 }
 
 .wa-sub-toggle {

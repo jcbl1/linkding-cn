@@ -42,6 +42,22 @@ def subscription_manage(request):
         return JsonResponse({'error': str(e)}, status=400)
 
     if request.method == 'GET':
+        if request.GET.get('action') == 'detect_id':
+            source = request.GET.get('source', '').strip()
+            if not source:
+                return JsonResponse({'error': 'source required'}, status=400)
+            from site_adapters.services.subscriptions import is_remote_source, _read_subscription_file, resolve_adapter_path
+            if is_remote_source(source):
+                return JsonResponse({'id': '', 'name': ''})
+            try:
+                file_path = resolve_adapter_path('', source)
+                data = _read_subscription_file(file_path)
+                if data and isinstance(data.get('_meta'), dict):
+                    meta = data['_meta']
+                    return JsonResponse({'id': meta.get('id', ''), 'name': meta.get('name', '')})
+            except Exception:
+                pass
+            return JsonResponse({'id': '', 'name': ''})
         return _adapters_response()
 
     action_name = request.POST.get('action', '')
@@ -49,6 +65,28 @@ def subscription_manage(request):
     try:
         if action_name == 'add':
             item = _adapter_from_post(request)
+
+            # 远程源：先轻量下载提取 _meta，再用正确的 id/name 正式缓存
+            source = item.get('source', '')
+            from site_adapters.services.subscriptions import is_remote_source
+            if is_remote_source(source) and (not item.get('id', '').strip() or not item.get('name', '').strip()):
+                from site_adapters.services.subscriptions import _download_jsonc, fetch_subscription
+                try:
+                    data, _resp = _download_jsonc(source)
+                    if data and isinstance(data.get('_meta'), dict):
+                        meta = data['_meta']
+                        if not item.get('id', '').strip() and meta.get('id'):
+                            item['id'] = meta['id']
+                        if not item.get('name', '').strip() and meta.get('name'):
+                            item['name'] = meta['name']
+                except Exception:
+                    pass
+                # 用确定的 id/name 正式下载并缓存到 adapters/{id}.{name}/
+                if item.get('id', '').strip() and item.get('name', '').strip():
+                    try:
+                        fetch_subscription(source, name=item['name'], adapter_id=item['id'], force=True)
+                    except Exception:
+                        pass
 
             # id 和 name 均为必填
             if not item.get('id', '').strip():

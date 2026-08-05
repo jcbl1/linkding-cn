@@ -42,7 +42,53 @@ def _ensure_base_dirs():
 
     # 确保 defaults 适配器存在
     _ensure_defaults_adapter(adapters_dir)
+    # 清理磁盘已删除的适配器条目
+    _cleanup_stale_adapters(adapters_dir)
 
+
+def _cleanup_stale_adapters(adapters_dir: str):
+    """清理磁盘上已被删除的适配器条目。
+
+    - 本地适配器：源文件不存在则从 config.jsonc 删除条目
+    - 远程适配器：缓存文件不存在则保留条目（可重新下载）
+    - defaults：文件不存在则由 _ensure_defaults_adapter 重建，此处不处理
+    """
+    from site_adapters.services.subscriptions import is_remote_source, resolve_adapter_path
+    config_path = os.path.join(adapters_dir, 'config.jsonc')
+    if not os.path.exists(config_path):
+        return
+    try:
+        data, text = _load_config()
+    except Exception:
+        return
+    adapters = data.get('_adapters', [])
+    if not isinstance(adapters, list):
+        return
+    cleaned = []
+    changed = False
+    for item in adapters:
+        if not isinstance(item, dict):
+            cleaned.append(item)
+            continue
+        source = item.get('source', '')
+        if not source:
+            continue
+        if is_remote_source(source):
+            # 远程适配器：始终保留
+            cleaned.append(item)
+            continue
+        # 本地适配器：检查文件是否存在
+        try:
+            file_path = resolve_adapter_path(item.get('name', ''), source, adapters_dir)
+            if os.path.exists(file_path):
+                cleaned.append(item)
+            else:
+                logger.info('Removing stale local adapter: %s (%s)', item.get('name', ''), source)
+                changed = True
+        except Exception:
+            cleaned.append(item)
+    if changed:
+        _save_adapters_list(cleaned)
 
 def _ensure_defaults_adapter(adapters_dir: str):
     """首次部署时创建 defaults 适配器和 config.jsonc。"""
@@ -287,11 +333,26 @@ def _adapter_from_post(request) -> dict:
 
     from site_adapters.services.subscriptions import is_remote_source, validate_subscription_url
 
-    # id, name, source 均为必填
-    if not adapter_id:
-        raise ValueError('id is required')
-    if not name:
-        raise ValueError('name is required')
+    # id 和 name 优先从请求获取，其次从本地源文件 _meta 自动检测
+    # 远程源允许缺失（由调用方在下载后补全）
+    if not adapter_id or not name:
+        if not is_remote_source(source):
+            from site_adapters.services.subscriptions import resolve_adapter_path, _read_subscription_file
+            try:
+                file_path = resolve_adapter_path(name or '', source)
+                data = _read_subscription_file(file_path)
+                if data and isinstance(data.get('_meta'), dict):
+                    meta = data['_meta']
+                    if not adapter_id and meta.get('id'):
+                        adapter_id = meta['id']
+                    if not name and meta.get('name'):
+                        name = meta['name']
+            except Exception:
+                pass
+        if not adapter_id and not is_remote_source(source):
+            raise ValueError('id is required')
+        if not name and not is_remote_source(source):
+            raise ValueError('name is required')
     if not source:
         raise ValueError('source is required')
 
@@ -317,10 +378,8 @@ def _adapter_from_post(request) -> dict:
         raise ValueError('update_interval must be positive')
 
     item = {'name': name, 'update_interval': update_interval}
-    if adapter_id:
-        item['id'] = adapter_id
-    if source:
-        item['source'] = source
+    item['id'] = adapter_id
+    item['source'] = source
     return item
 
 
@@ -347,9 +406,11 @@ def _adapter_cache_info(adapter: dict) -> dict:
             file_path = resolved
     cached = os.path.exists(file_path)
     cached_domains = list_cached_domains_from_file(file_path) if cached else []
+    is_remote = source and (source.startswith('https://') or source.startswith('http://'))
     info = {
         'name': name,
         'cached': cached,
+        'cache_missing': is_remote and not cached,
         'domain_count': len(cached_domains),
         'domains': cached_domains,
     }
