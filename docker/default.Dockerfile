@@ -126,9 +126,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
     apt-get update && \
     apt-get -y install nodejs
-# install single-file from fork for now, which contains several hotfixes
+# install single-file from upstream
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install -g https://github.com/sissbruecker/single-file-cli/tarball/4c54b3bc704cfb3e96cec2d24854caca3df0b3b6
+    npm install -g single-file-cli@2.0.83
 # playwright Python package (needed by browser_fallback in chromium mode)
 RUN pip install --no-cache-dir playwright>=1.59.0
 # node_modules for JS runtime scripts (playwright-core)

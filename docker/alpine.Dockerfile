@@ -118,9 +118,9 @@ FROM linkding AS linkding-plus
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     apk update && \
     apk add nodejs npm chromium
-# install single-file from fork for now, which contains several hotfixes
+# install single-file from upstream
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install -g https://github.com/sissbruecker/single-file-cli/tarball/4c54b3bc704cfb3e96cec2d24854caca3df0b3b6
+    npm install -g single-file-cli@2.0.83
 # playwright Python package (needed by browser_fallback in chromium mode)
 RUN pip install --no-cache-dir playwright>=1.59.0
 # node_modules for JS runtime scripts (playwright-core)
