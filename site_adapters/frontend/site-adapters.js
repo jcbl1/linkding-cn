@@ -999,7 +999,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     var matched = r.matched !== false;
     var domainKey = r.domain_key || '';
     var adapter = r.adapter || null;
-    var config = r.config;
+    var config = r.raw_config || r.config;
 
     var summaryValue;
     if (matched && domainKey) {
@@ -1084,7 +1084,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       matched: result.matched !== false,
       domain_key: result.domain_key || '',
       adapter: result.adapter || null,
-      config: (result.merged && Object.keys(result.merged).length) ? result.merged : result.raw_config
+      raw_config: result.raw_config
     };
     h += renderMatchedConfig(matchObj);
     h += '</div>';
@@ -1129,7 +1129,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       }
     }
     if (r.config && Object.keys(r.config).length) {
-      h += renderCollapsible(gettext('Config'), renderConfigJSON(r.config), false);
+      h += renderCollapsible(gettext('Merged Config'), renderConfigJSON(r.merged_config), false);
     }
     if (r.default_config && Object.keys(r.default_config).length) {
       h += renderCollapsible(gettext('Built-in Default Engine Config'), renderConfigJSON(r.default_config), true);
@@ -1168,7 +1168,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       h += '</div>';
     }
     if (r.config && Object.keys(r.config).length) {
-      h += renderCollapsible(gettext('Config'), renderConfigJSON(r.config), false);
+      h += renderCollapsible(gettext('Merged Config'), renderConfigJSON(r.merged_config), false);
     }
     if (r.default_config && Object.keys(r.default_config).length) {
       h += renderCollapsible(gettext('Built-in Default Engine Config'), renderConfigJSON(r.default_config), true);
@@ -1211,7 +1211,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       h += '</div>';
     }
     if (r.config && Object.keys(r.config).length) {
-      h += renderCollapsible(gettext('Config'), renderConfigJSON(r.config), false);
+      h += renderCollapsible(gettext('Merged Config'), renderConfigJSON(r.merged_config), false);
     }
     if (r.default_config && Object.keys(r.default_config).length) {
       h += renderCollapsible(gettext('Built-in Default Engine Config'), renderConfigJSON(r.default_config), true);
@@ -1264,7 +1264,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
         matched: cfg.matched !== false,
         domain_key: cfg.domain_key || '',
         adapter: cfg.adapter || null,
-        config: (cfg.merged && Object.keys(cfg.merged).length) ? cfg.merged : cfg.raw_config
+        raw_config: cfg.raw_config
       };
       h += renderMatchedConfig(pipeCfgMatchObj);
       h += '</div>';

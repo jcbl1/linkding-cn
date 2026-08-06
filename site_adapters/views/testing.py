@@ -182,6 +182,7 @@ def _extract_match_info(config):
 
 def _test_metadata(url, base_dir, username, entries):
     config = get_metadata_config(url, username=username)
+    show_cfg = show_config(url, base_dir)
     no_match = False
     if not config:
         no_match = True
@@ -194,6 +195,8 @@ def _test_metadata(url, base_dir, username, entries):
         'domain_key': match_info['domain_key'],
         'adapter': match_info['adapter'],
         'config': config,
+        'raw_config': show_cfg.get('raw_config'),
+        'merged_config': show_cfg.get('merged'),
         'original_url': url,
         'request_url': config.get('_request_url', url) if config else url,
         'result': metadata.to_dict(),
@@ -206,6 +209,7 @@ def _test_metadata(url, base_dir, username, entries):
 
 def _test_snapshot(url, base_dir, username, entries):
     config = get_snapshot_config(url, username=username)
+    show_cfg = show_config(url, base_dir)
     no_match = False
     if not config:
         no_match = True
@@ -222,6 +226,8 @@ def _test_snapshot(url, base_dir, username, entries):
         'domain_key': match_info['domain_key'],
         'adapter': match_info['adapter'],
         'config': config,
+        'raw_config': show_cfg.get('raw_config'),
+        'merged_config': show_cfg.get('merged'),
         'original_url': url,
         'request_url': config.get('_request_url', url) if config else url,
         'result': {
@@ -237,6 +243,7 @@ def _test_snapshot(url, base_dir, username, entries):
 
 def _test_reader(url, base_dir, username, entries):
     config = get_reader_config(url, username=username)
+    show_cfg = show_config(url, base_dir)
     no_match = False
     if not config:
         no_match = True
@@ -262,6 +269,8 @@ def _test_reader(url, base_dir, username, entries):
         'domain_key': match_info['domain_key'],
         'adapter': match_info['adapter'],
         'config': config,
+        'raw_config': show_cfg.get('raw_config'),
+        'merged_config': show_cfg.get('merged'),
         'original_url': url,
         'request_url': config.get('_request_url', url) if config else url,
         'result': {
@@ -368,6 +377,8 @@ def _test_pipeline(url, base_dir, username, entries):
         'config': config_result,
         'metadata': {
             'config': meta_config,
+            'raw_config': config_result.get('raw_config'),
+            'merged_config': config_result.get('merged'),
             'matched': md_match['matched'],
             'domain_key': md_match['domain_key'],
             'adapter': md_match['adapter'],
@@ -379,6 +390,8 @@ def _test_pipeline(url, base_dir, username, entries):
         },
         'snapshot': {
             'config': snap_config,
+            'raw_config': config_result.get('raw_config'),
+            'merged_config': config_result.get('merged'),
             'matched': snap_match['matched'],
             'domain_key': snap_match['domain_key'],
             'adapter': snap_match['adapter'],
@@ -393,6 +406,8 @@ def _test_pipeline(url, base_dir, username, entries):
         },
         'reader': {
             'config': reader_config,
+            'raw_config': config_result.get('raw_config'),
+            'merged_config': config_result.get('merged'),
             'matched': rd_match['matched'],
             'domain_key': rd_match['domain_key'],
             'adapter': rd_match['adapter'],
