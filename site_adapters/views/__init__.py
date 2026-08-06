@@ -35,6 +35,9 @@ from site_adapters.views.credentials import (
     adapters_page,
     user_credentials,
     snapshot_toggles,
+    shared_credential_list,
+    shared_credential_save,
+    shared_credential_delete,
 )
 from site_adapters.views.snapshot import view_snapshot
 
@@ -45,5 +48,6 @@ __all__ = [
     'all_domains', 'local_domain_toggle',
     'subscription_domain_read', 'subscription_domain_toggle', 'subscription_manage',
     'adapters_page', 'user_credentials', 'snapshot_toggles',
+    'shared_credential_list', 'shared_credential_save', 'shared_credential_delete',
     'view_snapshot',
 ]

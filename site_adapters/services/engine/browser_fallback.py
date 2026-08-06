@@ -103,14 +103,18 @@ def _do_load(url: str, username: str) -> dict | None:
 
 
 def _get_storage_state(username: str, url: str) -> dict | None:
-    """尝试获取用户的 Playwright storage state。"""
+    """尝试获取用户的 Playwright storage state。
+
+    优先使用用户凭据，回退到共享凭据。
+    """
     from urllib.parse import urlparse
 
     from site_adapters.services.auth.cookies import cookie_string_to_playwright_list
-    from site_adapters.services.auth.credentials import get_user_cookie
+    from site_adapters.services.auth.credentials import get_best_cookie
 
     domain = urlparse(url).netloc
-    cookie_str, status = get_user_cookie(username, domain)
+
+    cookie_str, status = get_best_cookie(username, domain)
     if not cookie_str or status != 'ok':
         return None
 

@@ -26,6 +26,9 @@ from site_adapters.views import (
     subscription_manage,
     adapters_page,
     user_credentials,
+    shared_credential_list,
+    shared_credential_save,
+    shared_credential_delete,
     snapshot_toggles,
     view_snapshot,
 )

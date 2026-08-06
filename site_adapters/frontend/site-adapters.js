@@ -41,8 +41,11 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     document.querySelectorAll('[name="view-mode"]').forEach(function (r) { r.checked = r.value === mode; });
     document.getElementById('view-subscriptions').hidden = mode !== 'subscriptions';
     document.getElementById('view-domains').hidden = mode !== 'domains';
+    var credView = document.getElementById('view-credentials');
+    if (credView) credView.hidden = mode !== 'credentials';
     if (mode === 'subscriptions') loadSubscriptions();
     if (mode === 'domains') restoreSearchResults();
+    if (mode === 'credentials') { loadCredentials(); }
   }
   document.querySelectorAll('[name="view-mode"]').forEach(function (r) {
     r.addEventListener('change', function () { switchMode(this.value); });
@@ -1347,4 +1350,185 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
   restoreTestPrefs();
   restoreResult();
   switchMode(MODE);
+
+  // ===== Shared Credentials tab =====
+  var allCredDomains = [];
+  var sharedCreds = [];
+
+  function loadCredentials() {
+    if (!urls.sharedCredList) return;
+    apiGet(urls.sharedCredList).then(function (data) {
+      allCredDomains = data.domains || [];
+      sharedCreds = data.credentials || [];
+      renderCredList();
+    }).catch(function () {
+      document.getElementById('shared-cred-list').innerHTML =
+        '<div style="padding:24px;text-align:center;color:var(--wa-muted);font-size:13px">Load failed</div>';
+    });
+  }
+
+  function renderCredList() {
+    var list = document.getElementById('shared-cred-list');
+    if (!list) return;
+    if (!sharedCreds.length) {
+      list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--wa-muted);font-size:13px">No shared credentials yet.</div>';
+      return;
+    }
+    var html = '';
+    sharedCreds.forEach(function (c) {
+      html += '<div class="wa-cred-row">'
+        + '<span class="wa-col-domain" style="font-weight:500;font-family:monospace;font-size:12px">' + esc(c.domain) + '</span>'
+        + '<span class="wa-col-type"><span class="wa-badge">' + esc(c.type === 'cookie' ? 'Cookie' : c.type === 'token' ? 'Token' : 'Header') + '</span></span>'
+        + '<span class="wa-col-updated" style="font-size:11px;color:var(--wa-muted)">' + esc((c.updated_at || '').slice(0, 10))
+        + (c.status !== 'ok' ? ' <span class="wa-badge wa-badge-warn">key changed</span>' : '') + '</span>'
+        + '<span class="wa-col-actions">'
+        + '<button type="button" class="btn btn-sm js-edit-shared-cred" data-domain="' + esc(c.domain) + '" data-type="' + esc(c.type) + '">Edit</button>'
+        + '<button type="button" class="btn btn-sm btn-error js-del-shared-cred" data-domain="' + esc(c.domain) + '" data-type="' + esc(c.type) + '">Delete</button>'
+        + '</span></div>';
+    });
+    list.innerHTML = html;
+  }
+
+  // Add credential button
+  document.getElementById('btn-add-shared-cred').addEventListener('click', function () {
+    showSharedCredModal('', '');
+  });
+
+  // Edit credential button
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.js-edit-shared-cred');
+    if (!btn) return;
+    showSharedCredModal(btn.dataset.domain, btn.dataset.type);
+  });
+
+  // Delete credential button
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.js-del-shared-cred');
+    if (!btn) return;
+    if (!confirm('Delete shared credential for ' + btn.dataset.domain + '?')) return;
+    apiPost(urls.sharedCredDelete, {
+      domain: btn.dataset.domain,
+      type: btn.dataset.type
+    }).then(function (r) {
+      if (r.success) {
+        toast('Credential deleted', 'info');
+        loadCredentials();
+      } else {
+        toast('Error: ' + (r.error || 'unknown'), 'error');
+      }
+    });
+  });
+
+  // Modal: type change → show/hide fields
+  document.querySelectorAll('input[name="shared-cred-type"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      var t = this.value;
+      document.getElementById('shared-cred-cookie-group').hidden = t !== 'cookie';
+      document.getElementById('shared-cred-header-group').hidden = t !== 'header';
+      document.getElementById('shared-cred-token-group').hidden = t !== 'token';
+    });
+  });
+
+  // Domain autocomplete
+  var domainInput = document.getElementById('shared-cred-domain');
+  var domainDropdown = document.getElementById('shared-cred-domain-dropdown');
+  if (domainInput) {
+    domainInput.addEventListener('input', showDomainDropdown);
+    domainInput.addEventListener('focus', showDomainDropdown);
+    domainInput.addEventListener('blur', function () {
+      setTimeout(function () { domainDropdown.classList.remove('open'); }, 200);
+    });
+  }
+
+  function showDomainDropdown() {
+    if (!domainDropdown) return;
+    var q = domainInput.value.toLowerCase();
+    var filtered = allCredDomains.filter(function (d) {
+      return d.domain.toLowerCase().indexOf(q) >= 0;
+    });
+    domainDropdown.innerHTML = '';
+    if (!filtered.length) { domainDropdown.classList.remove('open'); return; }
+    filtered.forEach(function (d) {
+      var item = document.createElement('div');
+      item.className = 'wa-url-dropdown-item';
+      var labels = [];
+      if (d.needs_cookie) labels.push('Cookie');
+      if (d.needs_headers && d.needs_headers.length) labels.push('Header');
+      if (d.needs_token) labels.push('Token');
+      item.innerHTML = '<span>' + esc(d.domain) + (labels.length ? ' <span class="text-gray" style="font-size:12px">(' + esc(labels.join(' + ')) + ')</span>' : '') + '</span>';
+      item.addEventListener('mousedown', function (ev) {
+        ev.preventDefault();
+        domainInput.value = d.domain;
+        domainDropdown.classList.remove('open');
+      });
+      domainDropdown.appendChild(item);
+    });
+    domainDropdown.classList.add('open');
+  }
+
+  // Modal open/close
+  function showSharedCredModal(domain, type) {
+    var overlay = document.getElementById('shared-cred-modal-overlay');
+    var domainGroup = document.getElementById('shared-cred-domain-group');
+    var editDomain = document.getElementById('shared-cred-edit-domain');
+
+    if (domain) {
+      editDomain.value = domain;
+      domainGroup.hidden = true;
+      // pre-select type
+      if (type) {
+        var radio = document.querySelector('input[name="shared-cred-type"][value="' + type + '"]');
+        if (radio) { radio.checked = true; radio.dispatchEvent(new Event('change', {bubbles: true})); }
+      }
+    } else {
+      editDomain.value = '';
+      domainGroup.hidden = false;
+      document.getElementById('shared-cred-domain').value = '';
+    }
+    // Clear values
+    document.getElementById('shared-cred-value').value = '';
+    document.getElementById('shared-cred-header-name').value = '';
+    document.getElementById('shared-cred-header-value').value = '';
+    document.getElementById('shared-cred-token-value').value = '';
+
+    overlay.hidden = false;
+  }
+
+  document.getElementById('btn-shared-cred-modal-close').addEventListener('click', function () {
+    document.getElementById('shared-cred-modal-overlay').hidden = true;
+  });
+  document.getElementById('btn-shared-cred-modal-cancel').addEventListener('click', function () {
+    document.getElementById('shared-cred-modal-overlay').hidden = true;
+  });
+
+  // Modal save
+  document.getElementById('btn-shared-cred-modal-save').addEventListener('click', function () {
+    var domain = document.getElementById('shared-cred-edit-domain').value || document.getElementById('shared-cred-domain').value.trim();
+    if (!domain) { alert('Please enter a domain'); return; }
+    var typeEl = document.querySelector('input[name="shared-cred-type"]:checked');
+    var type = typeEl ? typeEl.value : 'cookie';
+
+    var data = { domain: domain, type: type };
+    if (type === 'cookie') {
+      data.value = document.getElementById('shared-cred-value').value.trim();
+      if (!data.value) { alert('Please enter cookie value'); return; }
+    } else if (type === 'header') {
+      data.header_name = document.getElementById('shared-cred-header-name').value.trim();
+      data.value = document.getElementById('shared-cred-header-value').value.trim();
+      if (!data.header_name || !data.value) { alert('Please enter header name and value'); return; }
+    } else if (type === 'token') {
+      data.value = document.getElementById('shared-cred-token-value').value.trim();
+      if (!data.value) { alert('Please enter refresh token'); return; }
+    }
+
+    apiPost(urls.sharedCredSave, data).then(function (r) {
+      if (r.success) {
+        toast('Credential saved', 'info');
+        document.getElementById('shared-cred-modal-overlay').hidden = true;
+        loadCredentials();
+      } else {
+        toast('Error: ' + (r.error || 'unknown'), 'error');
+      }
+    });
+  });
 })();

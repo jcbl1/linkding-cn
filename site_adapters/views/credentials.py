@@ -17,12 +17,19 @@ from bookmarks.utils import is_safe_domain_key
 from site_adapters.services.auth.credentials import (
     get_auth_requirements_for_domain_key,
     list_user_credentials,
+    list_shared_credentials,
     save_user_cookie,
     save_user_header,
     save_user_token,
+    save_shared_cookie,
+    save_shared_header,
+    save_shared_token,
     delete_user_cookie,
     delete_user_header,
     delete_user_token,
+    delete_shared_cookie,
+    delete_shared_header,
+    delete_shared_token,
     get_user_preferences,
     save_user_preferences,
     list_domains_with_toggles,
@@ -250,3 +257,83 @@ def snapshot_toggles(request):
     except Exception as e:
         logger.exception('Failed to save toggle preference')
         return JsonResponse({'error': str(e)}, status=500)
+
+
+# ── Shared credential management views ──
+
+@login_required
+@require_http_methods(["GET"])
+def shared_credential_list(request):
+    """List all shared credentials. Returns JSON for the admin page credentials tab."""
+    base_dir = _get_base_dir()
+    domains = _get_domains_needing_auth(base_dir)
+    credentials = list_shared_credentials()
+    return JsonResponse({
+        'credentials': credentials,
+        'domains': [{'domain': d['domain'], 'needs_cookie': d['needs_cookie'],
+                      'needs_headers': d['needs_headers'], 'needs_token': d['needs_token']}
+                     for d in domains],
+    })
+
+
+@login_required
+@require_http_methods(["POST"])
+def shared_credential_save(request):
+    """Save a shared credential. Requires staff/superuser access."""
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+
+    domain = request.POST.get('domain', '').strip()
+    cred_type = request.POST.get('type', 'cookie')
+
+    if not domain or not is_safe_domain_key(domain):
+        return JsonResponse({'error': 'Invalid domain'}, status=400)
+
+    if cred_type == 'cookie':
+        cookie_str = request.POST.get('value', '').strip()
+        if not cookie_str:
+            return JsonResponse({'error': 'Cookie value required'}, status=400)
+        save_shared_cookie(domain, cookie_str)
+    elif cred_type == 'header':
+        header_name = request.POST.get('header_name', '').strip()
+        header_value = request.POST.get('value', '').strip()
+        if not header_name or not header_value:
+            return JsonResponse({'error': 'Header name and value required'}, status=400)
+        save_shared_header(domain, header_name, header_value)
+    elif cred_type == 'token':
+        token_value = request.POST.get('value', '').strip()
+        if not token_value:
+            return JsonResponse({'error': 'Token value required'}, status=400)
+        save_shared_token(domain, token_value)
+    else:
+        return JsonResponse({'error': 'Invalid credential type'}, status=400)
+
+    return JsonResponse({'success': True})
+
+
+@login_required
+@require_http_methods(["POST"])
+def shared_credential_delete(request):
+    """Delete a shared credential. Requires staff/superuser access."""
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied'}, status=403)
+
+    domain = request.POST.get('domain', '').strip()
+    cred_type = request.POST.get('type', 'cookie')
+
+    if not domain or not is_safe_domain_key(domain):
+        return JsonResponse({'error': 'Invalid domain'}, status=400)
+
+    if cred_type == 'cookie':
+        delete_shared_cookie(domain)
+    elif cred_type == 'header':
+        header_name = request.POST.get('header_name', '').strip()
+        if not header_name:
+            return JsonResponse({'error': 'Header name required'}, status=400)
+        delete_shared_header(domain, header_name)
+    elif cred_type == 'token':
+        delete_shared_token(domain)
+    else:
+        return JsonResponse({'error': 'Invalid credential type'}, status=400)
+
+    return JsonResponse({'success': True})

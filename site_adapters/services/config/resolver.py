@@ -24,12 +24,14 @@ from site_adapters.services.auth.cookies import (
     merge_cookie,
 )
 from site_adapters.services.auth.credentials import (
-    get_user_cookie,
-    get_user_header,
+    get_best_cookie,
+    get_best_header,
+    get_best_token,
 )
 from site_adapters.services.auth.tokens import (
     get_token_header,
     get_valid_token,
+    refresh_token as _refresh_token,
 )
 from site_adapters.services.config import (
     apply_request_url,
@@ -177,26 +179,34 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
         logger.warning("%s: auth.cookie and Cookie header coexist, Cookie header ignored", section)
         headers.pop('Cookie', None)
 
-    # Inject user cookie credentials (stored separately, highest priority)
+    # Best cookie: user credential first, shared fallback
     user_cookie_str = None
-    if username and cookie_config.get('file'):
-        user_cookie_str, _ = get_user_cookie(username, hostname)
+    if cookie_config.get('file'):
+        user_cookie_str, _ = get_best_cookie(username, hostname)
 
-    # Inject user header credentials
-    if username and merged_auth.get('headers'):
+    # Best headers: user credential first, shared fallback
+    if merged_auth.get('headers'):
         for header_name in merged_auth['headers']:
             if header_name not in headers:
-                user_header_val, _ = get_user_header(username, hostname, header_name)
-                if user_header_val:
-                    headers[header_name] = user_header_val
+                best_val, _ = get_best_header(username, hostname, header_name)
+                if best_val:
+                    headers[header_name] = best_val
 
-    # Token: auto-inject access_token as header
+    # Token: auto-inject access_token (user first, shared fallback)
     merged_token = merged_auth.get('token', {})
-    if merged_token.get('endpoint') and username:
-        access_token = get_valid_token(merged_token, username, hostname)
-        if access_token:
-            token_headers = get_token_header(merged_token, access_token)
-            headers.update(token_headers)
+    if merged_token.get('endpoint'):
+        if username:
+            access_token = get_valid_token(merged_token, username, hostname)
+            if access_token:
+                token_headers = get_token_header(merged_token, access_token)
+                headers.update(token_headers)
+        else:
+            best_rt, _ = get_best_token(username, hostname)
+            if best_rt:
+                token_result = _refresh_token(merged_token, best_rt)
+                if token_result:
+                    token_headers = get_token_header(merged_token, token_result['access_token'])
+                    headers.update(token_headers)
 
     result = {
         'headers': headers,

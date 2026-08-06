@@ -103,6 +103,10 @@
             <input type="radio" name="view-mode" value="domains">
             <span>{% translate "Domains" %}</span>
           </label>
+          <label class="settings-segmented-option">
+            <input type="radio" name="view-mode" value="credentials">
+            <span>{% translate "Credentials" %}</span>
+          </label>
         </div>
       </div>
 
@@ -192,7 +196,79 @@
         </div>
       </div>
 
-      <!-- Confirm modal for empty search -->
+      <div id="view-credentials" class="settings-section wa-editor-section" hidden>
+        <div class="wa-cred-card">
+          <div class="wa-cred-toolbar">
+            <button type="button" class="btn btn-sm btn-primary" id="btn-add-shared-cred">
+              <svg width="14" height="14" aria-hidden="true"><use href="#ld-icon-plus"></use></svg> {% translate "Add" %}
+            </button>
+            <span class="wa-cred-toolbar-spacer"></span>
+          </div>
+          <div class="wa-table-scroll" style="max-height:500px">
+            <div class="wa-table-head">
+              <span class="wa-col-domain">{% translate "Domain" %}</span>
+              <span class="wa-col-type">{% translate "Type" %}</span>
+              <span class="wa-col-updated">{% translate "Updated" %}</span>
+              <span class="wa-col-actions"></span>
+            </div>
+            <div class="wa-table-body" id="shared-cred-list">
+              <div style="padding:24px;text-align:center;color:var(--wa-muted);font-size:13px">
+                {% translate "Loading..." %}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shared Credential Modal -->
+      <div id="shared-cred-modal-overlay" class="wa-modal-overlay" hidden>
+        <div class="wa-modal" role="dialog" aria-modal="true" aria-labelledby="shared-cred-modal-title">
+          <div class="wa-modal-header">
+            <h3 id="shared-cred-modal-title">{% translate "Shared Credential" %}</h3>
+            <button type="button" class="btn btn-sm wa-icon-btn" id="btn-shared-cred-modal-close" aria-label="{% translate 'Close' %}">
+              <svg width="20" height="20" aria-hidden="true"><use href="#ld-icon-close"></use></svg>
+            </button>
+          </div>
+          <div class="wa-modal-body">
+            <input type="hidden" id="shared-cred-edit-domain" value="">
+            <div class="wa-form-group">
+              <label class="wa-form-label">{% translate "Type" %}</label>
+              <div style="display:flex;gap:12px" id="shared-cred-types">
+                <label><input type="radio" name="shared-cred-type" value="cookie" checked> Cookie</label>
+                <label><input type="radio" name="shared-cred-type" value="header"> Header</label>
+                <label><input type="radio" name="shared-cred-type" value="token"> Token</label>
+              </div>
+            </div>
+            <div class="wa-form-group" id="shared-cred-domain-group">
+              <label class="wa-form-label" for="shared-cred-domain">{% translate "Domain" %} <span class="wa-required">*</span></label>
+              <div style="position:relative">
+                <input type="text" id="shared-cred-domain" class="form-input" placeholder="example.com" autocomplete="off">
+                <div id="shared-cred-domain-dropdown" class="wa-url-dropdown"></div>
+              </div>
+            </div>
+            <div class="wa-form-group" id="shared-cred-cookie-group">
+              <label class="wa-form-label" for="shared-cred-value">Cookie</label>
+              <textarea id="shared-cred-value" class="form-input" rows="3" placeholder="name1=value1; name2=value2"></textarea>
+            </div>
+            <div class="wa-form-group" id="shared-cred-header-group" hidden>
+              <label class="wa-form-label" for="shared-cred-header-name">{% translate "Header Name" %}</label>
+              <input type="text" id="shared-cred-header-name" class="form-input" placeholder="X-Custom-Header">
+              <label class="wa-form-label" for="shared-cred-header-value" style="margin-top:8px">{% translate "Header Value" %}</label>
+              <input type="text" id="shared-cred-header-value" class="form-input" placeholder="value">
+            </div>
+            <div class="wa-form-group" id="shared-cred-token-group" hidden>
+              <label class="wa-form-label" for="shared-cred-token-value">Refresh Token</label>
+              <textarea id="shared-cred-token-value" class="form-input" rows="2" placeholder="Paste refresh_token"></textarea>
+            </div>
+          </div>
+          <div class="wa-modal-footer">
+            <button type="button" class="btn" id="btn-shared-cred-modal-cancel">{% translate "Cancel" %}</button>
+            <button type="button" class="btn btn-primary" id="btn-shared-cred-modal-save">{% translate "Save" %}</button>
+          </div>
+        </div>
+      </div>
+
+      <!--       <!-- Confirm modal for empty search -->
       <div id="domain-confirm-overlay" class="wa-modal-overlay" hidden>
         <div class="wa-modal" role="dialog" aria-modal="true" aria-labelledby="domain-confirm-title">
           <div class="wa-modal-header">
@@ -230,6 +306,9 @@
       subscriptionDomainToggle: "{% url 'linkding:settings.site_adapters.subscription_domain_toggle' %}",
       subscriptionManage: "{% url 'linkding:settings.site_adapters.subscription_manage' %}",
       viewSnapshot: "{% url 'linkding:settings.site_adapters.view_snapshot' %}",
+      sharedCredList: "{% url 'linkding:settings.site_adapters.shared_credential_list' %}",
+      sharedCredSave: "{% url 'linkding:settings.site_adapters.shared_credential_save' %}",
+      sharedCredDelete: "{% url 'linkding:settings.site_adapters.shared_credential_delete' %}",
     };
   </script>
   <script src="{% static 'site-adapters.js' %}?v={{ app_version }}"></script>

@@ -15,9 +15,9 @@ from site_adapters.services.auth.cookies import (
     has_cookie_for_domain,
 )
 from site_adapters.services.auth.credentials import (
-    get_user_cookie,
-    get_user_header,
-    get_user_token,
+    get_best_cookie,
+    get_best_header,
+    get_best_token,
     save_user_cookie,
     save_user_header,
     save_user_token,
@@ -32,6 +32,7 @@ from site_adapters.services.auth.tokens import (
     get_valid_token,
     get_token_header,
     verify_and_refresh_token,
+    refresh_token as _refresh_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,27 +61,37 @@ def get_auth_for_request(url: str, domain_key: str, section: str,
     if not cookie_str:
         cookie_str = get_cookie_for_domain(domain_key)
 
-    # 用户 cookie 覆盖
+    # Best cookie: user first, shared fallback
     if username and cookie_file:
-        user_cookie, _ = get_user_cookie(username, domain_key)
-        if user_cookie:
-            cookie_str = user_cookie
+        best, _ = get_best_cookie(username, domain_key)
+        if best:
+            cookie_str = best
 
-    # User headers
-    if username and merged_auth.get('headers'):
+
+    # Best headers: user first, shared fallback
+    if merged_auth.get('headers'):
         for header_name in merged_auth['headers']:
             if header_name not in headers:
-                user_val, _ = get_user_header(username, domain_key, header_name)
-                if user_val:
-                    headers[header_name] = user_val
+                best_val, _ = get_best_header(username, domain_key, header_name)
+                if best_val:
+                    headers[header_name] = best_val
 
-    # Token
     merged_token = merged_auth.get('token', {})
-    if merged_token.get('endpoint') and username:
-        access_token = get_valid_token(merged_token, username, domain_key)
-        if access_token:
-            token_headers = get_token_header(merged_token, access_token)
-            headers.update(token_headers)
+    # Token: user first, shared fallback
+    merged_token = merged_auth.get('token', {})
+    if merged_token.get('endpoint'):
+        if username:
+            access_token = get_valid_token(merged_token, username, domain_key)
+            if access_token:
+                token_headers = get_token_header(merged_token, access_token)
+                headers.update(token_headers)
+        else:
+            best_rt, _ = get_best_token(username, domain_key)
+            if best_rt:
+                token_result = _refresh_token(merged_token, best_rt)
+                if token_result:
+                    token_headers = get_token_header(merged_token, token_result['access_token'])
+                    headers.update(token_headers)
 
     return {
         'headers': headers,
