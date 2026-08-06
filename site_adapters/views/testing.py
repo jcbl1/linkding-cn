@@ -4,6 +4,7 @@ Test panel: config/metadata/snapshot/reader/cookie/pipeline tests + validation.
 import json
 import logging
 import os
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -281,23 +282,18 @@ def _test_reader(url, base_dir, username, entries):
 def _test_cookie(url, base_dir, username, entries):
     from site_adapters.services.auth.cookies import get_cookie_for_domain
     from site_adapters.services.auth.credentials import get_user_cookie
-    all_config = {}
-    try:
-        all_config = _cache.load(base_dir)
-    except (json.JSONDecodeError, OSError):
-        pass
-    domain_key, _ = match_domain(url, all_config)
-    if not domain_key:
-        return _test_response({'type': 'cookie', 'error': '无匹配域名'}, entries=entries)
+    hostname = urlparse(url).hostname or ''
+    if not hostname:
+        return _test_response({'type': 'cookie', 'error': 'Unable to parse hostname from URL'}, entries=entries)
 
     # 1) Check global cookie (shared across users, from cookies/ directory)
-    global_cookie = get_cookie_for_domain(domain_key)
+    global_cookie = get_cookie_for_domain(hostname)
     has_global_cookie = bool(global_cookie)
 
     # 2) Check user credential cookie (per-user, highest priority)
     user_cookie_str = None
     if username:
-        user_cookie_str, _ = get_user_cookie(username, domain_key)
+        user_cookie_str, _ = get_user_cookie(username, hostname)
     has_user_cookie = bool(user_cookie_str)
 
     # Combined: user credential takes precedence
@@ -305,8 +301,9 @@ def _test_cookie(url, base_dir, username, entries):
     has_cookie = has_global_cookie or has_user_cookie
     cookie_preview = cookie[:50] + '...' if cookie and len(cookie) > 50 else (cookie or '')
 
-    # Get config for refresh info
+    # Get config for refresh info and domain_key display
     metadata_config = get_metadata_config(url, username=username) or {}
+    domain_key = metadata_config.get('_domain_key', hostname) if metadata_config else hostname
     snapshot_config = get_snapshot_config(url, username=username) or {}
     config = metadata_config
     if snapshot_config.get('cookie', {}).get('file') and not metadata_config.get('cookie', {}).get('file'):
@@ -320,9 +317,9 @@ def _test_cookie(url, base_dir, username, entries):
         refreshed = bool(after and after != before)
         if refreshed:
             # Re-read after refresh
-            global_cookie = get_cookie_for_domain(domain_key)
+            global_cookie = get_cookie_for_domain(hostname)
             if username:
-                user_cookie_str, _ = get_user_cookie(username, domain_key)
+                user_cookie_str, _ = get_user_cookie(username, hostname)
             cookie = user_cookie_str if user_cookie_str else global_cookie
             has_cookie = bool(cookie)
             if has_cookie:
@@ -330,6 +327,7 @@ def _test_cookie(url, base_dir, username, entries):
 
     return _test_response({
         'type': 'cookie',
+        'hostname': hostname,
         'domain_key': domain_key,
         'has_cookie': has_cookie,
         'has_global_cookie': has_global_cookie,

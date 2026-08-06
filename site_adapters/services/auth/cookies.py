@@ -68,28 +68,58 @@ def _get_cookies_dir() -> str:
 
 
 # ---------------------------------------------------------------------------
-# 文件操作
+# File operations
 # ---------------------------------------------------------------------------
 
-def _match_cookie_file(domain_key: str, cookies_dir: str) -> str | None:
+def _match_cookie_file(hostname: str, cookies_dir: str) -> str | None:
+    """Find the best matching cookie file for a hostname.
+
+    Multi-level DNS fallback: tries the full hostname first, then strips
+    one subdomain at a time. Handles both real hostnames and wildcard
+    domain keys (e.g. ``*.example.com``).
+    """
     if not os.path.isdir(cookies_dir):
         return None
-    best_wildcard = None
-    best_wildcard_depth = -1
+
+    # Collect stored file keys (filename minus .json)
+    stored = []
     for fname in os.listdir(cookies_dir):
         if not fname.endswith('.json') or fname == 'cookies.json':
             continue
-        file_key = fname[:-5]
-        if file_key == domain_key:
-            return os.path.join(cookies_dir, fname)
-        if file_key.startswith('*.'):
-            suffix = file_key[1:]
-            if domain_key.endswith(suffix):
-                depth = file_key.count('.')
-                if depth > best_wildcard_depth:
-                    best_wildcard = os.path.join(cookies_dir, fname)
-                    best_wildcard_depth = depth
-    return best_wildcard
+        stored.append(fname[:-5])
+
+    if not stored:
+        return None
+
+    # Strip wildcard prefix to get a bare hostname for candidate generation
+    bare_hostname = hostname[2:] if hostname.startswith('*.') else hostname
+
+    # Generate candidate hostnames from most specific to least
+    parts = bare_hostname.split('.')
+    candidates = []
+    for i in range(len(parts) - 1):
+        candidates.append('.'.join(parts[i:]))
+
+    for candidate in candidates:
+        # 1. Exact match
+        if candidate in stored:
+            return os.path.join(cookies_dir, candidate + '.json')
+
+        # 2. Wildcard forward: stored "*.example.com" matches candidate "www.example.com"
+        best_wildcard = None
+        best_depth = -1
+        for key in stored:
+            if key.startswith('*.'):
+                suffix = key[1:]
+                if candidate.endswith(suffix):
+                    depth = key.count('.')
+                    if depth > best_depth:
+                        best_wildcard = key
+                        best_depth = depth
+        if best_wildcard:
+            return os.path.join(cookies_dir, best_wildcard + '.json')
+
+    return None
 
 
 def _load_cookie_data(path: str) -> list | dict | None:
@@ -157,7 +187,7 @@ def _save_cookie_data(path: str, data):
 
 
 # ---------------------------------------------------------------------------
-# 元数据管理（cookies/cookies.json）
+# Metadata management (cookies/cookies.json)
 # ---------------------------------------------------------------------------
 
 def _get_meta_path() -> str:
@@ -191,7 +221,7 @@ def list_all_cookies_meta() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 读取
+# Read
 # ---------------------------------------------------------------------------
 
 def get_cookie_for_domain(domain_key: str) -> str | None:
@@ -215,7 +245,7 @@ def has_cookie_for_domain(domain_key: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 写入
+# Write
 # ---------------------------------------------------------------------------
 
 def save_cookie_for_domain(domain_key: str, cookie_str: str, source: str = "paste"):
@@ -235,7 +265,7 @@ def save_cookie_for_domain(domain_key: str, cookie_str: str, source: str = "past
 
 
 # ---------------------------------------------------------------------------
-# 冷却期（内存）
+# Cooldown (in-memory)
 # ---------------------------------------------------------------------------
 
 def _is_in_cooldown(domain_key: str) -> bool:
@@ -262,7 +292,7 @@ def _clear_cooldown(domain_key: str):
 
 
 # ---------------------------------------------------------------------------
-# 验证（声明式）
+# Verification (declarative)
 # ---------------------------------------------------------------------------
 
 def verify_cookie_declarative(verify_config: dict, context: dict) -> dict:
@@ -319,7 +349,7 @@ def verify_cookie_declarative(verify_config: dict, context: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 刷新
+# Refresh
 # ---------------------------------------------------------------------------
 
 def refresh_cookie_declarative(refresh_config: dict, url: str,
@@ -410,7 +440,7 @@ def refresh_cookie_declarative(refresh_config: dict, url: str,
 
 
 # ---------------------------------------------------------------------------
-# 验证 + 刷新流程（声明式）
+# Verify + refresh flow (declarative)
 # ---------------------------------------------------------------------------
 
 def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
@@ -443,7 +473,7 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
 
     logger.info("Cookie invalid: %s: %s", domain_key, result.get("reason"))
 
-    # 刷新
+    # Refresh
     if cookie_config.get('refresh'):
         if refresh_cookie_declarative(cookie_config['refresh'], url, cookie_file, domain_key):
             return load_cookie_file(cookie_file)
@@ -452,7 +482,7 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
 
 
 # ---------------------------------------------------------------------------
-# 临时文件（供 SingleFile 使用）
+# Temporary files (for SingleFile)
 # ---------------------------------------------------------------------------
 
 def copy_cookie_data_to_temp(data) -> str | None:

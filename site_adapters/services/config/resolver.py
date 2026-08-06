@@ -157,8 +157,11 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
     section_auth = section_data.get('auth', {})
     merged_auth = _merge_auth(top_auth, default_auth, section_auth)
 
-    # Domain key (used by cookie/token/credential lookups below)
+    # Domain key (used for cookie file path derivation)
     domain_key = full_config.get('_domain_key', '')
+    # Hostname from the original URL (used for credential lookups with DNS fallback)
+    from urllib.parse import urlparse
+    hostname = urlparse(full_config.get('_url', '')).hostname or domain_key
 
     # Cookie config from auth
     cookie_config = {}
@@ -177,20 +180,20 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
     # Inject user cookie credentials (stored separately, highest priority)
     user_cookie_str = None
     if username and cookie_config.get('file'):
-        user_cookie_str, _ = get_user_cookie(username, domain_key)
+        user_cookie_str, _ = get_user_cookie(username, hostname)
 
     # Inject user header credentials
     if username and merged_auth.get('headers'):
         for header_name in merged_auth['headers']:
             if header_name not in headers:
-                user_header_val, _ = get_user_header(username, domain_key, header_name)
+                user_header_val, _ = get_user_header(username, hostname, header_name)
                 if user_header_val:
                     headers[header_name] = user_header_val
 
     # Token: auto-inject access_token as header
     merged_token = merged_auth.get('token', {})
     if merged_token.get('endpoint') and username:
-        access_token = get_valid_token(merged_token, username, domain_key)
+        access_token = get_valid_token(merged_token, username, hostname)
         if access_token:
             token_headers = get_token_header(merged_token, access_token)
             headers.update(token_headers)

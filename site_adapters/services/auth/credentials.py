@@ -1,9 +1,9 @@
 """
-用户凭据管理
+User credential management
 
-存储：credentials/cookies/users/{username}/{domain}.json（加密）
-      credentials/headers/users/{username}/{domain}.json（加密）
-元数据：credentials/encryption.meta（key fingerprint + 域名索引）
+Storage: credentials/users/{username}/{domain}/cookie.json (encrypted)
+         credentials/users/{username}/{domain}/header.json (encrypted)
+Metadata: credentials/encryption.meta (key fingerprint + domain index)
 """
 
 import json
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# 路径
+# Path helpers
 # ---------------------------------------------------------------------------
 
 def _get_credentials_dir() -> str:
@@ -31,68 +31,72 @@ def _get_credentials_dir() -> str:
     return os.path.join(_get_base_dir(), 'credentials')
 
 
-def _match_user_domain_dir(username: str, domain_key: str) -> str | None:
-    """在用户凭据目录中查找最佳匹配的域名目录。
-    
-    优先精确匹配，其次选择最具体的通配符匹配。
-    例: domain_key="www.zhihu.com" 时, 优先返回 "www.zhihu.com/",
-        其次 "*.zhihu.com/", 最后 "*.com/"。
+def _credential_path(username: str, domain: str, filename: str) -> str:
+    """Build a credential file path without domain matching."""
+    return os.path.join(_get_credentials_dir(), 'users', username, domain, filename)
+
+
+def _resolve_credential_domain(username: str, hostname: str) -> str | None:
+    """Find the best matching stored domain directory for a hostname.
+
+    Multi-level DNS fallback: tries the full hostname first, then strips
+    one subdomain at a time until only the registered domain remains.
+
+    For each candidate, checks exact match first, then wildcard forward
+    (stored ``*.example.com`` matching candidate ``www.example.com``).
     """
     user_dir = os.path.join(_get_credentials_dir(), 'users', username)
     if not os.path.isdir(user_dir):
         return None
-    
-    best_wildcard = None
-    best_wildcard_depth = -1
-    
+
+    # Collect stored domain entries (directory names only)
+    stored = []
     for entry in os.listdir(user_dir):
         entry_path = os.path.join(user_dir, entry)
-        if not os.path.isdir(entry_path):
-            continue
-        
-        if entry == domain_key:
-            return entry  # Exact match
-        
-        # Stored wildcard (e.g. "*.zhihu.com") matches search domain_key (e.g. "www.zhihu.com")
-        if entry.startswith('*.'):
-            suffix = entry[1:]  # ".zhihu.com"
-            if domain_key.endswith(suffix):
-                depth = entry.count('.')
-                if depth > best_wildcard_depth:
-                    best_wildcard = entry
-                    best_wildcard_depth = depth
-        
-        # Search wildcard (e.g. "*.zhihu.com") matches stored plain domain (e.g. "zhihu.com")
-        if domain_key.startswith('*.'):
-            bare = domain_key[2:]  # "zhihu.com"
-            if entry == bare:
-                # Treat as exact match for wildcard search
-                return entry
+        if os.path.isdir(entry_path):
+            stored.append(entry)
 
-    return best_wildcard
+    if not stored:
+        return None
 
-def _get_user_cookie_path(username: str, domain: str) -> str:
-    matched = _match_user_domain_dir(username, domain)
-    effective_domain = matched if matched else domain
-    return os.path.join(_get_credentials_dir(), 'users', username, effective_domain, 'cookie.json')
+    # Strip the wildcard prefix to get a bare hostname for candidate generation
+    bare_hostname = hostname[2:] if hostname.startswith('*.') else hostname
 
+    # Generate candidate hostnames from most specific to least
+    parts = bare_hostname.split('.')
+    candidates = []
+    for i in range(len(parts) - 1):  # stop before single label (e.g. "com" alone)
+        candidates.append('.'.join(parts[i:]))
 
-def _get_user_header_path(username: str, domain: str) -> str:
-    matched = _match_user_domain_dir(username, domain)
-    effective_domain = matched if matched else domain
-    return os.path.join(_get_credentials_dir(), 'users', username, effective_domain, 'header.json')
+    for candidate in candidates:
+        # 1. Exact match
+        if candidate in stored:
+            return candidate
 
+        # 2. Wildcard forward: stored "*.example.com" matches candidate "www.example.com"
+        best_wildcard = None
+        best_depth = -1
+        for entry in stored:
+            if entry.startswith('*.'):
+                suffix = entry[1:]  # ".example.com"
+                if candidate.endswith(suffix):
+                    depth = entry.count('.')
+                    if depth > best_depth:
+                        best_wildcard = entry
+                        best_depth = depth
+        if best_wildcard:
+            return best_wildcard
 
-def _get_user_token_path(username: str, domain: str) -> str:
-    matched = _match_user_domain_dir(username, domain)
-    effective_domain = matched if matched else domain
-    return os.path.join(_get_credentials_dir(), 'users', username, effective_domain, 'token.json')
+    return None
 
 
-def _get_user_token_cache_path(username: str, domain: str) -> str:
-    matched = _match_user_domain_dir(username, domain)
-    effective_domain = matched if matched else domain
-    return os.path.join(_get_credentials_dir(), 'users', username, effective_domain, 'token_cache.json')
+def _resolve_credential_path(username: str, hostname: str, filename: str) -> str:
+    """Build a credential file path with domain matching for reads."""
+    matched = _resolve_credential_domain(username, hostname)
+    effective_domain = matched if matched else hostname
+    return _credential_path(username, effective_domain, filename)
+
+
 
 
 
@@ -101,7 +105,7 @@ def _get_meta_path() -> str:
 
 
 # ---------------------------------------------------------------------------
-# 元数据
+# Metadata
 # ---------------------------------------------------------------------------
 
 def _load_meta() -> dict:
@@ -126,7 +130,7 @@ def _save_meta(meta: dict):
 
 def _update_meta_entry(cred_type: str, username: str, domain: str, **fields):
     meta = _load_meta()
-    # 确保 fingerprint 是最新的
+    # keep fingerprint current
     meta['key_fingerprint'] = get_key_fingerprint()
     key = f'{cred_type}:{username}:{domain}'
     entry = meta['credentials'].get(key, {})
@@ -140,18 +144,18 @@ def check_key_fingerprint() -> bool:
     meta = _load_meta()
     stored = meta.get('key_fingerprint', '')
     if not stored:
-        return True  # 首次使用，无 fingerprint
+        return True  # first use, no fingerprint
     return stored == get_key_fingerprint()
 
 
 # ---------------------------------------------------------------------------
-# 文件读写（加密层）
+# File I/O (encryption layer)
 # ---------------------------------------------------------------------------
 
 def _read_encrypted_file(path: str) -> tuple[str | None, str]:
     """
-    读取加密文件。返回 (解密后的内容, 状态)。
-    状态: 'ok' | 'key_changed' | 'not_found' | 'error'
+    Read encrypted file. Returns (decrypted_content, status).
+    Status: 'ok' | 'key_changed' | 'not_found' | 'error'
     """
     if not os.path.exists(path):
         return None, 'not_found'
@@ -161,11 +165,11 @@ def _read_encrypted_file(path: str) -> tuple[str | None, str]:
         if not raw.strip():
             return None, 'not_found'
         if not is_encrypted(raw):
-            # 旧版明文，惰性迁移
+            # legacy plaintext, lazy migration
             return raw, 'ok'
         result = decrypt_or_plaintext(raw)
         if result == raw and is_encrypted(raw):
-            # 解密失败且是密文格式 → 密钥变更
+            # decrypt failed, key changed
             return None, 'key_changed'
         return result, 'ok'
     except Exception:
@@ -184,39 +188,47 @@ def _remove_file(path: str):
 
 
 # ---------------------------------------------------------------------------
-# Cookie 凭据
+# Cookie credentials
 # ---------------------------------------------------------------------------
 
-def get_user_cookie(username: str, domain: str) -> tuple[str | None, str]:
+def get_user_cookie(username: str, hostname: str) -> tuple[str | None, str]:
     """
-    获取用户的 cookie 凭据。
-    返回 (cookie 字符串, 状态)。
-    状态: 'ok' | 'key_changed' | 'not_found' | 'error'
+    Get the user's cookie credential for a hostname.
+
+    Uses DNS multi-level fallback: "www.zhihu.com" -> "zhihu.com".
+
+    Returns (cookie_string | None, status).
+    Status: 'ok' | 'key_changed' | 'not_found' | 'error'
     """
-    path = _get_user_cookie_path(username, domain)
+    path = _resolve_credential_path(username, hostname, 'cookie.json')
     content, status = _read_encrypted_file(path)
     if content is None:
         return None, status
-    # content 是 JSON 格式的 Playwright cookie 列表
     cookie_str = _json_cookie_to_header_string(content)
     return cookie_str, status
 
 
-def save_user_cookie(username: str, domain: str, cookie_str: str):
-    """保存用户的 cookie 凭据（加密存储）。"""
-    # 使用共享转换函数（与 cookies 模块保持一致）
+def save_user_cookie(username: str, domain: str, cookie_str: str, exact: bool = True):
+    """Save the user's cookie credential (encrypted storage).
+
+    By default uses exact domain without fallback matching to avoid
+    accidentally overwriting a different domain's credentials.
+    """
     from site_adapters.services.auth.cookies import cookie_string_to_playwright_list
     cookies_list = cookie_string_to_playwright_list(cookie_str, domain)
-    content = json.dumps(cookies_list, ensure_ascii=False)
-    path = _get_user_cookie_path(username, domain)
-    _write_encrypted_file(path, content)
+    cookie_content = json.dumps(cookies_list, ensure_ascii=False)
+    if exact:
+        path = _credential_path(username, domain, 'cookie.json')
+    else:
+        path = _resolve_credential_path(username, domain, 'cookie.json')
+    _write_encrypted_file(path, cookie_content)
     _update_meta_entry('cookies', username, domain,
                        updated_at=_now_iso(), source='paste')
 
 
 def delete_user_cookie(username: str, domain: str):
-    """删除用户的 cookie 凭据。"""
-    path = _get_user_cookie_path(username, domain)
+    """Delete the user's cookie credential."""
+    path = _resolve_credential_path(username, domain, 'cookie.json')
     _remove_file(path)
     meta = _load_meta()
     meta['credentials'].pop(f'cookies:{username}:{domain}', None)
@@ -224,15 +236,15 @@ def delete_user_cookie(username: str, domain: str):
 
 
 # ---------------------------------------------------------------------------
-# Header 凭据
+# Header credentials
 # ---------------------------------------------------------------------------
 
-def get_user_header(username: str, domain: str, header_name: str) -> tuple[str | None, str]:
+def get_user_header(username: str, hostname: str, header_name: str) -> tuple[str | None, str]:
     """
-    获取用户的指定 header 凭据值。
-    返回 (header 值, 状态)。
+    Get a specific header credential for a hostname.
+    Returns (header_value | None, status).
     """
-    path = _get_user_header_path(username, domain)
+    path = _resolve_credential_path(username, hostname, 'header.json')
     content, status = _read_encrypted_file(path)
     if content is None:
         return None, status
@@ -243,12 +255,12 @@ def get_user_header(username: str, domain: str, header_name: str) -> tuple[str |
         return None, 'error'
 
 
-def get_user_headers(username: str, domain: str) -> tuple[dict, str]:
+def get_user_headers(username: str, hostname: str) -> tuple[dict, str]:
     """
-    获取用户的所有 header 凭据。
-    返回 (headers dict, 状态)。
+    Get all header credentials for a hostname.
+    Returns (headers dict, status).
     """
-    path = _get_user_header_path(username, domain)
+    path = _resolve_credential_path(username, hostname, 'header.json')
     content, status = _read_encrypted_file(path)
     if content is None:
         return {}, status
@@ -259,10 +271,11 @@ def get_user_headers(username: str, domain: str) -> tuple[dict, str]:
         return {}, 'error'
 
 
-def save_user_header(username: str, domain: str, header_name: str, value: str):
-    """保存用户的 header 凭据（加密存储）。"""
-    path = _get_user_header_path(username, domain)
-    # 读取现有 headers（可能已有其他 header）
+def save_user_header(username: str, domain: str, header_name: str, value: str, exact: bool = True):
+    """Save a header credential (encrypted storage)."""
+    path = _credential_path(username, domain, 'header.json') if exact \
+        else _resolve_credential_path(username, domain, 'header.json')
+    # read existing headers (may have other headers)
     existing, _ = _read_encrypted_file(path)
     try:
         headers = json.loads(existing) if existing else {}
@@ -278,15 +291,15 @@ def save_user_header(username: str, domain: str, header_name: str, value: str):
 
 
 def delete_user_header(username: str, domain: str, header_name: str = ''):
-    """删除用户的 header 凭据。header_name 为空则删除整个文件。"""
-    path = _get_user_header_path(username, domain)
+    """Delete a header credential. Empty header_name deletes the entire file."""
+    path = _resolve_credential_path(username, domain, 'header.json')
     if not header_name:
         _remove_file(path)
         meta = _load_meta()
         meta['credentials'].pop(f'headers:{username}:{domain}', None)
         _save_meta(meta)
         return
-    # 删除单个 header
+    # delete single header
     existing, _ = _read_encrypted_file(path)
     try:
         headers = json.loads(existing) if existing else {}
@@ -303,62 +316,69 @@ def delete_user_header(username: str, domain: str, header_name: str = ''):
 
 
 # ---------------------------------------------------------------------------
-# 列表
+# Listing
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Token 凭据
+# Token credentials
 # ---------------------------------------------------------------------------
 
-def get_user_token(username: str, domain: str) -> tuple[str | None, str]:
-    """获取用户的 refresh_token。"""
-    path = _get_user_token_path(username, domain)
+def get_user_token(username: str, hostname: str) -> tuple[str | None, str]:
+    """Get the user's refresh_token for a hostname."""
+    path = _resolve_credential_path(username, hostname, 'token.json')
     content, status = _read_encrypted_file(path)
     if content is None:
         return None, status
     try:
         data = json.loads(content)
-        return data.get('refresh_token', content), status
+        return data.get('refresh_token', content) if isinstance(data, dict) else content, status
     except (json.JSONDecodeError, AttributeError):
         return content, status
 
 
-def save_user_token(username: str, domain: str, refresh_token: str):
-    """保存用户的 refresh_token（加密存储）。"""
-    path = _get_user_token_path(username, domain)
-    content = json.dumps({'refresh_token': refresh_token}, ensure_ascii=False)
-    _write_encrypted_file(path, content)
+def save_user_token(username: str, domain: str, refresh_token: str, exact: bool = True):
+    """Save the user's refresh_token (encrypted storage)."""
+    path = _credential_path(username, domain, 'token.json') if exact \
+        else _resolve_credential_path(username, domain, 'token.json')
+    token_content = json.dumps({'refresh_token': refresh_token}, ensure_ascii=False)
+    _write_encrypted_file(path, token_content)
     _update_meta_entry('tokens', username, domain,
                        updated_at=_now_iso(), source='paste')
 
 
 def delete_user_token(username: str, domain: str):
-    """删除用户的 token 凭据。"""
-    path = _get_user_token_path(username, domain)
+    """Delete the user's token credential."""
+    path = _resolve_credential_path(username, domain, 'token.json')
     _remove_file(path)
-    # Also remove cache
-    cache_path = _get_user_token_cache_path(username, domain)
+    cache_path = _resolve_credential_path(username, domain, 'token_cache.json')
     _remove_file(cache_path)
     meta = _load_meta()
     meta['credentials'].pop(f'tokens:{username}:{domain}', None)
     _save_meta(meta)
 
 
-def load_user_token_cache(username: str, domain: str) -> dict | None:
-    """加载 token 缓存（含 access_token + expires_at）。"""
-    path = _get_user_token_cache_path(username, domain)
+def load_user_token_cache(username: str, hostname: str) -> dict | None:
+    """Load token cache (access_token + expires_at) for a hostname."""
+    path = _resolve_credential_path(username, hostname, 'token_cache.json')
     if not os.path.exists(path):
         return None
     try:
         with open(path, encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
     except (json.JSONDecodeError, OSError):
         return None
 
 
 def save_user_token_cache(username: str, domain: str, cache_data: dict):
-    """保存 token 缓存。"""
-    path = _get_user_token_cache_path(username, domain)
+    """Save token cache for a domain.
+
+    Uses exact domain (no fallback) because the cache is always written
+    alongside the token itself in the same domain directory.
+    """
+    matched = _resolve_credential_domain(username, domain)
+    effective_domain = matched if matched else domain
+    path = _credential_path(username, effective_domain, 'token_cache.json')
     atomic_write(path, json.dumps(cache_data, ensure_ascii=False))
 
 
@@ -449,18 +469,17 @@ def list_user_credentials(username: str) -> list[dict]:
     return result
 
 
-def get_auth_requirements_for_domain(domain: str, base_dir: str = '') -> dict:
+def get_auth_requirements_for_domain(hostname: str, base_dir: str = '') -> dict:
     """
-    查询站点的 auth 需求（含本地 + 订阅源）。
-    返回 {'cookie': bool, 'headers': [str], 'token': bool}
+    Query auth requirements for a hostname (local + subscription).
+    Returns {'cookie': bool, 'headers': [str], 'token': bool}
     """
     if not base_dir:
         from site_adapters.services.base import _get_base_dir
         base_dir = _get_base_dir()
 
-    # 使用 engine 的域名匹配，自动覆盖本地 + 订阅源
     from site_adapters.services.config.loader import load_domain_config
-    url = f'https://{domain}'
+    url = f'https://{hostname}'
     config = load_domain_config(url, base_dir)
     if not config:
         return {'cookie': False, 'headers': [], 'token': False}
@@ -473,7 +492,7 @@ def get_auth_requirements_for_domain(domain: str, base_dir: str = '') -> dict:
 
 
 def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') -> dict:
-    """查询已解析 domain key 的 auth 需求。"""
+    """Query auth requirements for a resolved domain key."""
     if not base_dir:
         from site_adapters.services.base import _get_base_dir
         base_dir = _get_base_dir()
@@ -502,11 +521,11 @@ def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') ->
 
 
 # ---------------------------------------------------------------------------
-# 工具函数
+# Utility functions
 # ---------------------------------------------------------------------------
 
 def _json_cookie_to_header_string(data_str: str) -> str | None:
-    """将 Playwright cookie JSON 转为 header 字符串。复用 cookies 模块。"""
+    """Convert Playwright cookie JSON to header string."""
     from site_adapters.services.auth.cookies import _cookie_data_to_string as _convert
     try:
         data = json.loads(data_str)
@@ -520,7 +539,7 @@ def _now_iso() -> str:
 
 
 # ---------------------------------------------------------------------------
-# 用户偏好（toggles）
+# User preferences (toggles)
 # ---------------------------------------------------------------------------
 
 def _get_user_preferences_path(username: str) -> str:
