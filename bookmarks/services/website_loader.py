@@ -18,7 +18,7 @@ from site_adapters.services.auth.cookies import (
     load_cookie_file,
     verify_and_refresh,
 )
-from site_adapters.services.auth.cookies import get_cookie_for_domain
+from site_adapters.services.auth.credentials import get_shared_cookie
 from site_adapters.services.execution_log import log_execution
 from site_adapters.services.config.resolver import get_metadata_config
 from site_adapters.services.engine.script_runner import run_script
@@ -734,5 +734,7 @@ def _cookie_string_from_config(config: dict = None) -> str | None:
         return cookies_str
     domain_key = config.get("_domain_key")
     if domain_key:
-        return get_cookie_for_domain(domain_key)
+        shared, _ = get_shared_cookie(domain_key)
+        if shared:
+            return shared
     return None

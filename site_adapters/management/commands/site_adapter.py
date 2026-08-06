@@ -13,6 +13,7 @@ from site_adapters.services.auth.cookies import (
     load_cookie_file,
     verify_and_refresh,
 )
+from site_adapters.services.auth.credentials import get_shared_cookie
 from site_adapters.services.config import parse_jsonc
 from site_adapters.services.config.loader import show_config
 from site_adapters.services.config.validator import validate_config
@@ -91,7 +92,7 @@ class Command(BaseCommand):
         domain_key = config.get("_domain_key", "")
         cookie_config = config.get("cookie", {})
         cookie_file = cookie_config.get("file", "")
-        before = load_cookie_file(cookie_file) if cookie_file else get_cookie_for_domain(domain_key)
+        before = load_cookie_file(cookie_file) if cookie_file else (get_cookie_for_domain(domain_key) or get_shared_cookie(domain_key)[0])
         after = before
         if cookie_config:
             after = verify_and_refresh(
@@ -103,7 +104,7 @@ class Command(BaseCommand):
         self.stdout.write(json.dumps({
             "domain": domain_key,
             "cookie_file": cookie_file,
-            "has_cookie": bool((load_cookie_file(cookie_file) if cookie_file else None) or has_cookie_for_domain(domain_key)),
+            "has_cookie": bool((load_cookie_file(cookie_file) if cookie_file else None) or has_cookie_for_domain(domain_key) or get_shared_cookie(domain_key)[0]),
             "refreshed": bool(after and after != before),
         }, indent=2, ensure_ascii=False))
 

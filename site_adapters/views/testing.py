@@ -17,9 +17,9 @@ from bookmarks.services.website_loader import (
 from bookmarks.utils import is_safe_domain_key
 from site_adapters.services.auth.cookies import (
     load_cookie_file,
-    save_cookie_for_domain,
     verify_and_refresh,
 )
+from site_adapters.services.auth.credentials import save_shared_cookie
 from site_adapters.services.config.loader import _cache, match_domain, show_config
 from site_adapters.services.config.resolver import (
     get_metadata_config,
@@ -289,15 +289,14 @@ def _test_reader(url, base_dir, username, entries):
 
 
 def _test_cookie(url, base_dir, username, entries):
-    from site_adapters.services.auth.cookies import get_cookie_for_domain
-    from site_adapters.services.auth.credentials import get_user_cookie
+    from site_adapters.services.auth.credentials import get_best_cookie, get_shared_cookie, get_user_cookie
     hostname = urlparse(url).hostname or ''
     if not hostname:
         return _test_response({'type': 'cookie', 'error': 'Unable to parse hostname from URL'}, entries=entries)
 
-    # 1) Check global cookie (shared across users, from cookies/ directory)
-    global_cookie = get_cookie_for_domain(hostname)
-    has_global_cookie = bool(global_cookie)
+    # 1) Check shared credential cookie (credentials/shared/)
+    shared_cookie, _ = get_shared_cookie(hostname)
+    has_global_cookie = bool(shared_cookie)
 
     # 2) Check user credential cookie (per-user, highest priority)
     user_cookie_str = None
@@ -305,9 +304,10 @@ def _test_cookie(url, base_dir, username, entries):
         user_cookie_str, _ = get_user_cookie(username, hostname)
     has_user_cookie = bool(user_cookie_str)
 
-    # Combined: user credential takes precedence
-    cookie = user_cookie_str if user_cookie_str else global_cookie
-    has_cookie = has_global_cookie or has_user_cookie
+    # Combined: get_best_cookie handles user-first, shared-fallback
+    best_cookie, _ = get_best_cookie(username, hostname)
+    cookie = best_cookie
+    has_cookie = bool(cookie)
     cookie_preview = cookie[:50] + '...' if cookie and len(cookie) > 50 else (cookie or '')
 
     # Get config for refresh info and domain_key display
@@ -326,10 +326,13 @@ def _test_cookie(url, base_dir, username, entries):
         refreshed = bool(after and after != before)
         if refreshed:
             # Re-read after refresh
-            global_cookie = get_cookie_for_domain(hostname)
+            shared_cookie, _ = get_shared_cookie(hostname)
+            has_global_cookie = bool(shared_cookie)
             if username:
                 user_cookie_str, _ = get_user_cookie(username, hostname)
-            cookie = user_cookie_str if user_cookie_str else global_cookie
+                has_user_cookie = bool(user_cookie_str)
+            best_cookie, _ = get_best_cookie(username, hostname)
+            cookie = best_cookie
             has_cookie = bool(cookie)
             if has_cookie:
                 cookie_preview = cookie[:50] + '...' if cookie and len(cookie) > 50 else cookie
@@ -461,7 +464,7 @@ def save_cookie(request):
         return JsonResponse({'error': 'domain_key required'}, status=400)
     if not is_safe_domain_key(domain_key):
         return JsonResponse({'error': 'invalid domain key'}, status=400)
-    save_cookie_for_domain(domain_key, cookie_str, source='paste')
+    save_shared_cookie(domain_key, cookie_str)
     return JsonResponse({'success': True})
 
 

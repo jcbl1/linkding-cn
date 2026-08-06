@@ -512,7 +512,7 @@ def build_domain_files_meta() -> list[dict]:
 def build_domain_files() -> list[dict]:
     """Build the full domain list from all enabled adapters, including config,
     disabled state, and shadow info. Reusable by page view and API."""
-    from site_adapters.services.auth.cookies import has_cookie_for_domain
+    from site_adapters.services.auth.credentials import get_shared_cookie
     from site_adapters.services.config import load_jsonc_file
     from site_adapters.services.subscriptions import resolve_adapter_path
     import os
@@ -554,7 +554,8 @@ def build_domain_files() -> list[dict]:
         for domain_key, domain_config in domains.items():
             is_alias = isinstance(domain_config, dict) and domain_config.get('type') == 'alias'
             target = domain_config.get('target', '') if is_alias else ''
-            has_cookie = has_cookie_for_domain(domain_key)
+            shared, _ = get_shared_cookie(domain_key)
+            has_cookie = bool(shared)
             requires_cookie = (
                 not is_alias
                 and isinstance(domain_config, dict)

@@ -18,6 +18,8 @@ import time
 from bookmarks.utils import atomic_write, is_safe_domain_key
 from site_adapters.services.execution_log import log_execution
 
+from site_adapters.services.auth.credentials import get_shared_cookie
+
 logger = logging.getLogger(__name__)
 
 COOLDOWN_SECONDS = 300  # 5 分钟冷却期
@@ -451,7 +453,7 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
     返回 cookie 字符串（可能为 None）。
     """
     cookie_file = cookie_config.get('file', '')
-    cookie_str = load_cookie_file(cookie_file) if cookie_file else get_cookie_for_domain(domain_key)
+    cookie_str = load_cookie_file(cookie_file) if cookie_file else (get_cookie_for_domain(domain_key) or get_shared_cookie(domain_key)[0])
 
     # 没有 cookie 且有 refresh 配置 → 尝试刷新
     if not cookie_str and cookie_config.get('refresh'):
