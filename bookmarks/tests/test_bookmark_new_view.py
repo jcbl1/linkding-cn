@@ -247,17 +247,21 @@ class BookmarkNewViewTestCase(TestCase, BookmarkFactoryMixin):
 
     def test_favicon_image_should_serve_cached_favicon(self):
         """FaviconCache 有成功记录且磁盘文件存在时返回图片。"""
+        import tempfile
         self.user.profile.enable_favicons = True
         self.user.profile.save()
         from bookmarks.models import FaviconCache
         from bookmarks.services import favicon_loader
-        import os
-        # 创建临时 favicon 文件
-        favicon_path = favicon_loader.get_favicon_path('example_com.png')
-        os.makedirs(favicon_path.parent, exist_ok=True)
-        with open(favicon_path, 'wb') as f:
-            f.write(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)  # Minimal PNG header
+
+        # 使用临时目录隔离，避免污染真实 data/favicons
+        temp_dir = tempfile.TemporaryDirectory()
+        override = self.settings(LD_FAVICON_FOLDER=temp_dir.name)
+        override.enable()
         try:
+            favicon_path = favicon_loader.get_favicon_path('example_com.png')
+            favicon_path.parent.mkdir(parents=True, exist_ok=True)
+            favicon_path.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
+
             FaviconCache.objects.create(
                 domain="example.com", favicon_file="example_com.png", status="success"
             )
@@ -266,8 +270,8 @@ class BookmarkNewViewTestCase(TestCase, BookmarkFactoryMixin):
             self.assertIn('Cache-Control', response)
             self.assertIn('max-age=86400', response['Cache-Control'])
         finally:
-            if favicon_path.exists():
-                favicon_path.unlink()
+            override.disable()
+            temp_dir.cleanup()
 
     def test_favicon_image_should_return_default_when_missing(self):
         """FaviconCache 无记录时返回默认 favicon.svg。"""

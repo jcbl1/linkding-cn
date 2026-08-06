@@ -129,6 +129,12 @@ USE_I18N = True
 
 USE_TZ = True
 
+# 同步系统时区与 Django TIME_ZONE，确保 huey crontab (utc=False) 使用正确时区
+import os as _os; _os.environ["TZ"] = TIME_ZONE
+import time as _time
+try: _time.tzset()
+except AttributeError: pass
+
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/2.2/howto/static-files/
 
@@ -171,7 +177,7 @@ HUEY = {
     "immediate": False,
     "results": False,
     "store_none": False,
-    "utc": True,
+    "utc": False,
     "consumer": {
         "workers": 3,
         "worker_type": "thread",

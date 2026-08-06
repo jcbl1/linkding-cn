@@ -303,8 +303,8 @@ def _fetch_domain_favicon_task(user_id: int, domain: str):
             cache.retry_count = 0
             cache.next_retry_at = None
             cache.save()
-            # 缓存已更新 → 安全清理该域名的旧扩展名变体
-            favicon_loader._remove_existing_variants(domain, keep_filename=favicon_file)
+            # 旧变体清理已移至 find_cached_favicon_file（读取时触发），
+            # 避免多 worker 并发写入时 _remove_existing_variants 竞态
         else:
             # MISSING 状态下的重试失败
             if cache.status == FaviconCache.STATUS_MISSING:

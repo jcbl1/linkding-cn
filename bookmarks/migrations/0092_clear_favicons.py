@@ -1,25 +1,11 @@
-# Data migration: clear all cached favicon files so they get re-fetched
-# through the new pipeline (32px preferred, ICO single-frame extraction).
+# This migration previously cleared all cached favicon files.
+# It has been changed to a no-op because:
+# 1. It was already applied (2026-07-23) and won't run again in production.
+# 2. Deleting real files from a data migration is wrong — it wiped the
+#    production data/favicons directory every time tests ran.
+# 3. The favicon refresh pipeline handles stale/missing files automatically.
 
-from pathlib import Path
-
-from django.conf import settings
 from django.db import migrations
-
-
-def clear_favicon_files(apps, schema_editor):
-    favicon_folder = Path(settings.LD_FAVICON_FOLDER)
-    if not favicon_folder.exists():
-        return
-
-    removed = 0
-    for f in favicon_folder.iterdir():
-        if f.is_file() and f.name not in (".DS_Store",):
-            f.unlink()
-            removed += 1
-
-    if removed:
-        print(f"\n  Cleared {removed} cached favicon files")
 
 
 class Migration(migrations.Migration):
@@ -28,5 +14,6 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(clear_favicon_files, migrations.RunPython.noop),
+        # Was: migrations.RunPython(clear_favicon_files, migrations.RunPython.noop)
+        # Now: no-op. The migration record remains so Django doesn't complain.
     ]

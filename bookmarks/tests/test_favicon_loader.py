@@ -46,7 +46,13 @@ class FaviconLoaderTestCase(TestCase):
         with favicon_loader._provider_health._lock:
             favicon_loader._provider_health._initialized = True
 
+        # 全局 mock requests.get，防止测试发出真实 HTTP 请求
+        self._requests_patcher = mock.patch("requests.get")
+        self._mock_requests_get = self._requests_patcher.start()
+        self._mock_requests_get.return_value = self.create_mock_response()
+
     def tearDown(self) -> None:
+        self._requests_patcher.stop()
         self.temp_favicon_folder.cleanup()
         self.favicon_folder_override.disable()
 

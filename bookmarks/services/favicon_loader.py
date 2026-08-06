@@ -230,68 +230,63 @@ def find_cached_favicon_file(domain: str) -> str | None:
     - 新约定：domain_to_filename(domain)（如 example_com）
     - 旧约定：https_{name} / http_{name}（如 https_example_com）
 
-    优先返回 SVG > PNG > JPG > ICO，确保确定性。
+    找到最佳文件后删除该域名的所有其他变体（不同扩展名、旧命名格式），
+    始终只保留一个文件。优先选择 SVG > PNG > JPG > ICO。
+
+    不会在未获得新图标前删除文件——清理只在确认磁盘上有有效文件时进行。
     """
     favicon_folder = Path(settings.LD_FAVICON_FOLDER)
     if not favicon_folder.exists():
         return None
 
     name = domain_to_filename(domain)
-    # 兼容旧命名：带 scheme 前缀
     legacy_names = {f"https_{name}", f"http_{name}"}
 
     ext_priority = {".svg": 0, ".png": 1, ".jpg": 2, ".jpeg": 3, ".ico": 4, ".gif": 5}
-    new_candidates = []  # 新命名（不带 scheme 前缀）
-    legacy_candidates = []  # 旧命名（带 scheme 前缀）
+    all_candidates = []  # (priority, filename, is_new_naming)
 
     for filename in os.listdir(settings.LD_FAVICON_FOLDER):
         base, ext = os.path.splitext(filename)
-        if base != name and base not in legacy_names:
+        is_new = base == name
+        is_legacy = base in legacy_names
+        if not is_new and not is_legacy:
             continue
         path = get_favicon_path(filename)
         if path.exists():
-            # 校验文件内容是否为有效图片（防止残留损坏文件）
-            # 使用渐进式读取：先 32 字节，只有可能是 SVG 时才读 1024 字节
+            # 校验文件内容；跳过无法识别的文件（不主动删除，避免误判）
             if not _detect_image_type_from_file(path):
-                logger.warning(f"Removing corrupted favicon file: {filename}")
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
+                logger.warning(f"Skipping unrecognized favicon file: {filename}")
                 continue
-            entry = (ext_priority.get(ext.lower(), 99), filename)
-            if base == name:
-                new_candidates.append(entry)
-            else:
-                legacy_candidates.append(entry)
+            priority = ext_priority.get(ext.lower(), 99)
+            all_candidates.append((priority, filename, is_new))
 
-    # 新命名优先；找到新命名文件时清理旧命名文件
-    if new_candidates:
-        for _, legacy_file in legacy_candidates:
-            get_favicon_path(legacy_file).unlink(missing_ok=True)
-        new_candidates.sort(key=lambda c: c[0])
-        return new_candidates[0][1]
+    if not all_candidates:
+        return None
 
-    if legacy_candidates:
-        # 迁移：将最佳旧文件重命名为新命名
-        legacy_candidates.sort(key=lambda c: c[0])
-        best_legacy = legacy_candidates[0][1]
-        _, ext = os.path.splitext(best_legacy)
+    # 排序：新命名优先，同命名按扩展名优先级（数字越小越优先）
+    all_candidates.sort(key=lambda c: (not c[2], c[0]))
+    best_priority, best_filename, best_is_new = all_candidates[0]
+
+    # 如果最佳文件是旧命名格式，迁移为新命名
+    if not best_is_new:
+        _, ext = os.path.splitext(best_filename)
         new_filename = f"{name}{ext}"
         new_path = get_favicon_path(new_filename)
-        legacy_path = get_favicon_path(best_legacy)
+        legacy_path = get_favicon_path(best_filename)
         try:
             legacy_path.rename(new_path)
-            logger.info("Migrated favicon: %s -> %s", best_legacy, new_filename)
-            # 清理其余旧文件
-            for _, lf in legacy_candidates:
-                if lf != best_legacy:
-                    get_favicon_path(lf).unlink(missing_ok=True)
-            return new_filename
+            logger.info("Migrated favicon: %s -> %s", best_filename, new_filename)
+            best_filename = new_filename
         except OSError:
-            return best_legacy
+            pass  # rename 失败，保留旧文件名
 
-    return None
+    # 清理该域名的所有其他变体（保留最佳文件）
+    for _, filename, _ in all_candidates:
+        if filename == best_filename:
+            continue
+        get_favicon_path(filename).unlink(missing_ok=True)
+
+    return best_filename
 
 
 
