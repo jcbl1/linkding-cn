@@ -205,8 +205,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--wa-border);
+  padding: 12px 0;
 }
 .wa-cred-toolbar-spacer {
   flex: 1;
@@ -1884,4 +1883,88 @@
     width: calc(100vw - 16px) !important;
     margin: 0 auto;
   }
+}
+
+/* ===================================================================
+ *  Credentials Manage — semantic classes (reusable across pages)
+ * =================================================================== */
+
+/* ── Section layout ── */
+.wa-cred-section-heading { margin-bottom: 12px !important; }
+.wa-cred-label-row { justify-content: space-between; }
+.wa-cred-title-row { display: flex; align-items: center; gap: 4px; }
+
+/* ── Search toolbar ── */
+.wa-cred-toolbar { display: flex; align-items: center; gap: 12px; }
+.wa-cred-search-form { display: flex; align-items: center; gap: 8px; flex: 1; max-width: 400px; }
+.wa-cred-search-input { flex: 1; }
+
+/* ── Table ── */
+.wa-cred-table-scroll { max-height: 400px; }
+.wa-cred-domain-cell { font-weight: 500; font-family: var(--font-mono, monospace); font-size: 12px; }
+.wa-cred-updated-cell { font-size: 11px; color: var(--wa-muted); }
+.wa-cred-header-names { font-size: 11px; color: var(--wa-muted); }
+.wa-cred-empty { padding: 24px; text-align: center; color: var(--wa-muted); font-size: 13px; }
+
+/* ── Modal ── */
+.wa-cred-modal-container { max-width: 90vw; width: 600px; }
+.wa-cred-type-options { display: flex; gap: 12px; }
+
+/* ── Type option states ── */
+.wa-type-option.wa-type-grayed { opacity: 0.4; }
+
+/* ── Credential field panels (Cookie / Header / Token) ── */
+.wa-cred-field-panel[hidden] { display: none; }
+.wa-cred-cookie-hint { margin-top: 4px; }
+
+/* ── Domain group (add vs edit) ── */
+.wa-cred-domain-group[hidden] { display: none; }
+
+/* ── Header rows inside modal ── */
+.wa-header-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.wa-header-row-name {
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+}
+.wa-header-row-name-input {
+  width: 180px;
+}
+.wa-header-row-value {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Header row delete icon button ── */
+.wa-header-row-delete {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--wa-muted, #888);
+  border-radius: 4px;
+  line-height: 0;
+  flex-shrink: 0;
+}
+.wa-header-row-delete:hover {
+  color: var(--wa-danger, #e53935);
+  background: rgba(229, 57, 53, 0.08);
+}
+.wa-header-row-delete svg { display: block; }
+
+/* ── Portal dropdown (avoids modal overflow clipping) ── */
+.wa-url-dropdown-portal {
+  position: fixed;
+  z-index: 10000;
+  overflow-y: auto;
+  background: var(--wa-surface, #fff);
+  border: 1px solid var(--wa-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  display: block;
 }
