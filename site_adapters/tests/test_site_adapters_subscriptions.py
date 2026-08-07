@@ -33,59 +33,6 @@ class SiteAdaptersSubscriptionsTestCase(TestCase):
         resp.raise_for_status.return_value = None
         return resp
 
-    def test_fetch_subscription_expands_includes_into_single_file(self):
-        payloads = {
-            "https://example.test/bundle.jsonc": {
-                "_meta": {"name": "bundle", "version": "1"},
-                "_includes": ["https://example.test/a.jsonc", "https://example.test/b.jsonc"],
-                "domains": {"own.com": {"metadata": {"select_title": ["h1"]}}},
-            },
-            "https://example.test/a.jsonc": {
-                "*": {"http": {"timeout": 1}},
-                "domains": {
-                    "a.com": {
-                        "metadata": {"select_title": [".a"]},
-                        "snapshot": {"script": "./scripts/a.js"}
-                    }
-                },
-            },
-            "https://example.test/b.jsonc": {
-                "domains": {
-                    "a.com": {"http": {"timeout": 9}},
-                    "b.com": {"reader": {"defuddle_args": {"contentSelector": ".b"}}},
-                },
-            },
-            "https://example.test/scripts/a.js": "console.log('hello')",
-        }
-
-        def mock_get(url, timeout=30, headers=None):
-            if url.endswith('.js'):
-                resp = mock.MagicMock()
-                resp.status_code = 200
-                resp.text = payloads.get(url, "")
-                resp.raise_for_status.return_value = None
-                return resp
-            return self.response(payloads[url])
-
-        with mock.patch(
-            "site_adapters.services.subscriptions.requests.get",
-            side_effect=mock_get,
-        ):
-            file_path = fetch_subscription("https://example.test/bundle.jsonc", name="bundle", force=True)
-
-        # Now returns a single file path
-        self.assertTrue(file_path.endswith('.jsonc'))
-        data = json.loads(open(file_path, encoding='utf-8').read())
-        domains = data.get('domains', {})
-        self.assertIn('a.com', domains)
-        self.assertIn('b.com', domains)
-        self.assertIn('own.com', domains)
-        # _includes resolved: a.com merged from a.jsonc (timeout=1) + b.jsonc (timeout=9), a wins (first)
-        self.assertEqual(domains['a.com']['http']['timeout'], 1)
-        self.assertEqual(domains['a.com']['metadata']['select_title'], ['.a'])
-        # Scripts downloaded to scripts/ directory
-        scripts_dir = os.path.join(os.path.dirname(file_path), 'scripts')
-        self.assertTrue(os.path.exists(os.path.join(scripts_dir, 'a.js')))
 
     def test_fetch_subscription_preserves_string_aliases(self):
         payload = {

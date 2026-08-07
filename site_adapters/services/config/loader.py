@@ -74,6 +74,7 @@ class SourceCache:
         self._lock = threading.Lock()
         self._sources: dict[str, tuple[tuple, dict]] = {}
         self._merged: dict | None = None
+        self._base_dir: str = ''
         self._adapter_order: list[str] = []
         self._defaults_cache_key: str | None = None
         self._last_check: float = 0
@@ -188,13 +189,15 @@ class SourceCache:
     def load(self, base_dir: str) -> dict:
         """Load and merge all adapters, returning the full merged config."""
         now = time.monotonic()
+        self._base_dir = base_dir
         with self._lock:
             if self._merged is not None and (now - self._last_check) < self._CHECK_INTERVAL:
                 return self._merged
             self._last_check = now
 
-        adapters_dir = _get_adapters_dir()
+        adapters_dir = os.path.join(base_dir, 'adapters')
         config_path = os.path.join(adapters_dir, _CONFIG_FILE)
+
         changed = False
 
         # 1. Read config.jsonc
@@ -304,7 +307,7 @@ class SourceCache:
         merged_domains = {}
 
         # Build adapter entry lookup: cache_key -> {id, name, description, source, local_path}
-        adapters_dir = _get_adapters_dir()
+        adapters_dir = os.path.join(self._base_dir, 'adapters')
         adapter_entries = {}
         adapters_list = (
             self._sources.get('__config__', ((), {}))[1].get('_adapters', [])
@@ -396,7 +399,7 @@ _cache = SourceCache()
 
 def _get_disabled_domains() -> set[str]:
     """Read the _disabled_domains list from the top level of config.jsonc."""
-    adapters_dir = _get_adapters_dir()
+    adapters_dir = os.path.join(_cache._base_dir, 'adapters') if _cache._base_dir else _get_adapters_dir()
     config_path = os.path.join(adapters_dir, _CONFIG_FILE)
     try:
         if os.path.exists(config_path):
@@ -530,9 +533,9 @@ def show_config(url: str, base_dir: str) -> dict:
     global_override = {}
     if defaults_key:
         defaults_data = _cache._sources.get(defaults_key, (0, {'defaults': {}, 'global_defaults': {}, 'domains': {}}))[1]
-        global_defaults_data = defaults_data.get('global_defaults', {})
-        if isinstance(global_defaults_data, dict):
-            global_override = copy.deepcopy(global_defaults_data)
+        defaults_glob = defaults_data.get('defaults', {})
+        if isinstance(defaults_glob, dict):
+            global_override = copy.deepcopy(defaults_glob)
             global_override.pop('_disabled_domains', None)
 
     domain_key, domain_config = match_domain(url, all_config)

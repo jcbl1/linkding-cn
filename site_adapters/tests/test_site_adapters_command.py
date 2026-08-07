@@ -40,8 +40,14 @@ class SiteAdaptersCommandTestCase(TestCase):
         self.assertIn("site adapters ok", out.getvalue())
 
     def test_show_config_outputs_merged_config(self):
-        self.write("global.jsonc", '{"*": {"http": {"timeout": 9}}}')
-        self.write("domains/example.com.jsonc", '{"http": {"timeout": 1}}')
+        import json as _json
+        self.write("adapters/config.jsonc", _json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults", "source": "./defaults/adapters.jsonc"}]
+        }))
+        self.write("adapters/defaults/adapters.jsonc", _json.dumps({
+            "defaults": {"http": {"timeout": 9}},
+            "domains": {"example.com": {"http": {"timeout": 1}}}
+        }))
         out = StringIO()
 
         call_command("site_adapter", "show-config", "https://example.com/post", "--dir", self.base_dir, stdout=out)
