@@ -198,21 +198,15 @@ class SiteAdaptersViewsTestCase(TestCase):
         self.assertEqual(response.json()["error"], "blocked")
 
     def test_cookie_test_uses_snapshot_cookie_scripts_and_refreshes_status(self):
-        os.makedirs(os.path.join(self.base_dir, "domains"))
-        os.makedirs(os.path.join(self.base_dir, "scripts"))
-        with open(os.path.join(self.base_dir, "domains", "example.com.jsonc"), "w", encoding="utf-8") as f:
-            f.write(
-                '{"auth": {"cookie": {"type": "anon"}},'
-                '"metadata": {"select_title": ["h1"]},'
-                '"snapshot": {}}'
-            )
+        cookie_config = {"type": "anon"}
+        meta_config = {"_domain_key": "example.com", "cookie": cookie_config}
 
         def mock_verify_and_refresh(cookie_config, url, domain_key, verify_context):
-            from site_adapters.services.auth.cookies import save_cookie_for_domain
-            save_cookie_for_domain("example.com", "session=abc", source="test")
+            from site_adapters.services.auth.credentials import save_shared_cookie
+            save_shared_cookie("example.com", "session=abc")
             return "session=abc"
 
-        with mock.patch("site_adapters.views.testing.verify_and_refresh", side_effect=mock_verify_and_refresh):
+        with mock.patch("site_adapters.views.testing.get_metadata_config", return_value=meta_config),              mock.patch("site_adapters.views.testing.get_snapshot_config", return_value={}),              mock.patch("site_adapters.views.testing.verify_and_refresh", side_effect=mock_verify_and_refresh):
             response = self.client.post(
                 reverse("linkding:settings.site_adapters.action"),
                 {"action": "test", "test_type": "cookie", "url": "https://example.com/post"},

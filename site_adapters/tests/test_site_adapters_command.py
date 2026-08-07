@@ -59,20 +59,26 @@ class SiteAdaptersCommandTestCase(TestCase):
         self.assertIn("bad.com alias missing target", out.getvalue())
 
     def test_cookie_command_refreshes_when_cookie_is_missing(self):
-        self.write(
-            "domains/example.com.jsonc",
-            '{"auth": {"cookie": {"type": "anon", "refresh": {"url": "https://example.com/login"}}},'
-            '"snapshot": {}}',
-        )
+        cookie_config = {"type": "anon", "refresh": {"url": "https://example.com/login"}}
+        meta_config = {"_domain_key": "example.com", "cookie": cookie_config}
+        snap_config = {"_domain_key": "example.com", "cookie": cookie_config}
 
         def refresh_cookie_declarative(_refresh_config, _url, cookie_file, _domain_key):
-            os.makedirs(os.path.dirname(cookie_file), exist_ok=True)
-            with open(cookie_file, "w", encoding="utf-8") as f:
-                json.dump([{"name": "session", "value": "abc", "domain": "example.com"}], f)
+            from site_adapters.services.auth.credentials import save_shared_cookie
+            save_shared_cookie("example.com", "session=abc")
             return True
 
         out = StringIO()
-        with mock.patch("site_adapters.services.auth.cookies.refresh_cookie_declarative", side_effect=refresh_cookie_declarative) as refresh:
+        with mock.patch(
+            "site_adapters.management.commands.site_adapter.get_metadata_config",
+            return_value=meta_config,
+        ), mock.patch(
+            "site_adapters.management.commands.site_adapter.get_snapshot_config",
+            return_value=snap_config,
+        ), mock.patch(
+            "site_adapters.services.auth.cookies.refresh_cookie_declarative",
+            side_effect=refresh_cookie_declarative,
+        ) as refresh:
             call_command(
                 "site_adapter",
                 "cookie",

@@ -320,10 +320,10 @@ def _test_cookie(url, base_dir, username, entries):
     cookie_config = config.get('cookie', {})
 
     refreshed = False
-    if cookie_config and cookie:
+    if cookie_config:
         before = cookie
         after = verify_and_refresh(cookie_config, url, domain_key, {'url': url, 'status': 0, 'title': '', 'body_preview': ''})
-        refreshed = bool(after and after != before)
+        refreshed = bool(after and (not before or after != before))
         if refreshed:
             # Re-read after refresh
             shared_cookie, _ = get_shared_cookie(hostname)

@@ -637,10 +637,11 @@ def _list_credentials_in_dir(base_dir: str, meta_prefix: str,
     return result
 
 
-def list_shared_credentials() -> list[dict]:
-    """List all shared credentials (no decrypted values)."""
+def list_shared_credentials(include_values: bool = False) -> list[dict]:
+    """List all shared credentials."""
     return _list_credentials_in_dir(
-        os.path.join(_get_credentials_dir(), 'shared'), 'shared'
+        os.path.join(_get_credentials_dir(), 'shared'), 'shared',
+        include_values=include_values,
     )
 
 

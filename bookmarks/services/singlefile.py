@@ -10,6 +10,7 @@ from contextlib import suppress
 
 from django.conf import settings
 
+from site_adapters.services.auth.credentials import get_shared_cookie
 from site_adapters.services.auth.cookies import (
     copy_cookie_file_to_temp,
     generate_temp_cookies_file,
@@ -145,9 +146,12 @@ def _build_site_adapter_options(config: dict) -> tuple[list[str], list[str]]:
         if cookie_file:
             temp_files.append(cookie_file)
     if not cookie_file and config.get("_domain_key"):
-        cookie_file = generate_temp_cookies_file(config["_domain_key"])
-        if cookie_file:
-            temp_files.append(cookie_file)
+        domain_key = config["_domain_key"]
+        best, _ = get_shared_cookie(domain_key)
+        if best:
+            cookie_file = generate_temp_cookies_file(domain_key, cookie_str=best)
+            if cookie_file:
+                temp_files.append(cookie_file)
     if cookie_file:
         options.append(f"--browser-cookies-file={cookie_file}")
     browser_script = _build_browser_script(config)

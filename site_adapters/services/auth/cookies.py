@@ -1,8 +1,7 @@
 """
-Cookie 生命周期管理（管理员共享 cookie）
+Cookie 文件生命周期管理（per-adapter 配置级 cookie）
 
 存储：per-domain 文件 cookies/*.json（Playwright 标准格式）
-元数据：cookies/cookies.json（updated_at / source）
 冷却期：内存 dict（不持久化）
 验证：auth.cookie.verify（声明式 invalid_patterns / valid_selector）
 刷新：auth.cookie.refresh + 冷却期
@@ -15,7 +14,7 @@ import subprocess
 import tempfile
 import time
 
-from bookmarks.utils import atomic_write, is_safe_domain_key
+from bookmarks.utils import atomic_write
 from site_adapters.services.execution_log import log_execution
 
 from site_adapters.services.auth.credentials import get_shared_cookie
@@ -186,84 +185,6 @@ def load_cookie_file(path: str) -> str | None:
 
 def _save_cookie_data(path: str, data):
     atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False))
-
-
-# ---------------------------------------------------------------------------
-# Metadata management (cookies/cookies.json)
-# ---------------------------------------------------------------------------
-
-def _get_meta_path() -> str:
-    return os.path.join(_get_cookies_dir(), 'cookies.json')
-
-
-def _load_meta() -> dict:
-    path = _get_meta_path()
-    data = _load_cookie_data(path)
-    return data if isinstance(data, dict) else {}
-
-
-def _save_meta(meta: dict):
-    _save_cookie_data(_get_meta_path(), meta)
-
-
-def _update_meta(domain_key: str, **fields):
-    meta = _load_meta()
-    entry = meta.get(domain_key, {})
-    entry.update(fields)
-    meta[domain_key] = entry
-    _save_meta(meta)
-
-
-def get_cookie_meta(domain_key: str) -> dict:
-    return _load_meta().get(domain_key, {})
-
-
-def list_all_cookies_meta() -> dict:
-    return _load_meta()
-
-
-# ---------------------------------------------------------------------------
-# Read
-# ---------------------------------------------------------------------------
-
-def get_cookie_for_domain(domain_key: str) -> str | None:
-    cookies_dir = _get_cookies_dir()
-    path = _match_cookie_file(domain_key, cookies_dir)
-    if not path:
-        return None
-    data = _load_cookie_data(path)
-    if not data:
-        return None
-    return _cookie_data_to_string(data)
-
-
-def get_cookie_file_for_domain(domain_key: str) -> str:
-    cookies_dir = _get_cookies_dir()
-    return _match_cookie_file(domain_key, cookies_dir) or os.path.join(cookies_dir, f'{domain_key}.json')
-
-
-def has_cookie_for_domain(domain_key: str) -> bool:
-    return get_cookie_for_domain(domain_key) is not None
-
-
-# ---------------------------------------------------------------------------
-# Write
-# ---------------------------------------------------------------------------
-
-def save_cookie_for_domain(domain_key: str, cookie_str: str, source: str = "paste"):
-    if not is_safe_domain_key(domain_key):
-        raise ValueError("invalid domain key")
-    cookies_dir = _get_cookies_dir()
-    path = os.path.join(cookies_dir, f'{domain_key}.json')
-
-    # 写入 Playwright 格式（使用共享转换函数）
-    cookies_list = cookie_string_to_playwright_list(cookie_str, domain_key)
-    _save_cookie_data(path, cookies_list)
-
-    # 更新元数据
-    _update_meta(domain_key,
-                 updated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                 source=source)
 
 
 # ---------------------------------------------------------------------------
@@ -453,12 +374,14 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
     返回 cookie 字符串（可能为 None）。
     """
     cookie_file = cookie_config.get('file', '')
-    cookie_str = load_cookie_file(cookie_file) if cookie_file else (get_cookie_for_domain(domain_key) or get_shared_cookie(domain_key)[0])
+    cookie_str = load_cookie_file(cookie_file) if cookie_file else get_shared_cookie(domain_key)[0]
 
     # 没有 cookie 且有 refresh 配置 → 尝试刷新
     if not cookie_str and cookie_config.get('refresh'):
         if refresh_cookie_declarative(cookie_config['refresh'], url, cookie_file, domain_key):
-            return load_cookie_file(cookie_file)
+            if cookie_file:
+                return load_cookie_file(cookie_file)
+            return get_shared_cookie(domain_key)[0]
 
     verify_cfg = cookie_config.get('verify', {})
     invalid_patterns = verify_cfg.get('invalid_patterns', [])
