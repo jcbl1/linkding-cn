@@ -267,7 +267,7 @@ def shared_credential_list(request):
     """List all shared credentials. Returns JSON for the admin page credentials tab."""
     base_dir = _get_base_dir()
     domains = _get_domains_needing_auth(base_dir)
-    credentials = list_shared_credentials()
+    credentials = list_shared_credentials(include_values=True)
     return JsonResponse({
         'credentials': credentials,
         'domains': [{'domain': d['domain'], 'needs_cookie': d['needs_cookie'],

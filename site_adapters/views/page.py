@@ -59,7 +59,7 @@ def site_adapters_page(request):
             pass
 
     # ── Shared credentials context (for credentials_manage.html partial) ──
-    credentials = list_shared_credentials()
+    credentials = list_shared_credentials(include_values=True)
     domains_needing_auth = _get_domains_needing_auth(base_dir)
 
     return render(request, 'site_adapters/site_adapters.html', {
