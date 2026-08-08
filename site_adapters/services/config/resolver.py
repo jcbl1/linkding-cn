@@ -37,7 +37,7 @@ from site_adapters.services.config import (
     apply_request_url,
     apply_rewrite_url,
 )
-from site_adapters.services.config.loader import load_domain_config
+from site_adapters.services.config.loader import load_domain_config, load_builtin_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +228,9 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
         if 'select_image' in section_data:
             result['select_image'] = section_data['select_image']
         result['script'] = section_data.get('script')
+        result['load_full_page'] = section_data.get('load_full_page', True)
+        if 'max_content_limit' in section_data:
+            result['max_content_limit'] = section_data['max_content_limit']
 
     elif section == 'snapshot':
         if 'process_lazy_images' in section_data:
@@ -270,7 +273,7 @@ def get_metadata_config(url: str, username: str = '') -> dict | None:
         return None
     config = load_domain_config(url, base_dir)
     if not config:
-        return None
+        return load_builtin_metadata(base_dir)
     config['_url'] = url
     return _build_section_config(config, 'metadata', base_dir, username)
 

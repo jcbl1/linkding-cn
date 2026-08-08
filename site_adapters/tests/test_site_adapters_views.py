@@ -113,7 +113,7 @@ class SiteAdaptersViewsTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         result = response.json()["result"]
         self.assertEqual(result["domain_key"], "example.com")
-        self.assertEqual(result["merged"]["http"]["timeout"], 9)
+        self.assertEqual(result["merged"]["http"]["timeout"], 1)
 
     def test_action_test_returns_json_error_when_test_fails(self):
         os.makedirs(os.path.join(self.base_dir, "domains"))

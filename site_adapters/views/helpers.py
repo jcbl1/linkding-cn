@@ -115,7 +115,7 @@ def _ensure_defaults_adapter(adapters_dir: str):
 
     # 创建 defaults/adapters.jsonc（如果不存在）
     if not os.path.exists(defaults_file):
-        default_data = {'_meta': {'id': 'defaults', 'name': 'defaults', 'description': 'Built-in system adapter with the highest priority. Fields defined in the global_defaults section will populate or override fields of the same name in the defaults section of all adapters.'}, 'defaults': {}, 'global_defaults': {}, 'domains': {}}
+        default_data = {'_meta': {'id': 'defaults', 'name': 'defaults', 'description': 'Built-in system adapter with the highest priority. Fields defined in the _builtin section serve as the fallback when no domain adapter matches.'}, 'defaults': {}, '_builtin': {}, 'domains': {}}
         os.makedirs(defaults_dir, exist_ok=True)
         atomic_write(defaults_file, json.dumps(default_data, indent=2, ensure_ascii=False))
 

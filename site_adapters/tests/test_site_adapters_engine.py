@@ -70,13 +70,13 @@ class SiteAdaptersEngineTestCase(TestCase):
 
         self.assertEqual(load_domain_config("https://example.com", self.base_dir)["http"]["timeout"], 2)
 
-    def test_local_global_defaults_have_highest_priority(self):
+    def test_domain_config_overrides_adapter_defaults(self):
         self.setup_adapter("example.com", {"http": {"timeout": 1}},
                            default_config={"http": {"timeout": 9}})
 
         config = load_domain_config("https://example.com", self.base_dir)
 
-        self.assertEqual(config["http"]["timeout"], 9)
+        self.assertEqual(config["http"]["timeout"], 1)
 
     # test_subscriptions_follow_global_order removed: old _subscriptions format
     # is replaced by _adapters in config.jsonc. Subscription ordering is tested

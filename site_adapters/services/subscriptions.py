@@ -228,7 +228,7 @@ def _domain_map(data: dict) -> dict:
         return data['domains']
     return {
         key: value for key, value in data.items()
-        if key not in ('defaults', 'global_defaults', 'domains') and not key.startswith('_')
+        if key not in ('defaults', '_builtin', 'domains') and not key.startswith('_')
     }
 
 
@@ -240,7 +240,7 @@ def _normalize_domain_config(value):
 
 def _materialize_domains(data: dict) -> dict:
     defaults = data.get('defaults', {})
-    # global_defaults 仅由 defaults 适配器使用，不在适配器内合并
+    # _builtin 仅由 defaults 适配器使用，不在适配器内合并
     domains = {}
     for domain_key, config in _domain_map(data).items():
         config = _normalize_domain_config(config)

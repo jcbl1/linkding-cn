@@ -265,20 +265,15 @@ class WebsiteLoaderTestCase(TestCase):
 
     # --- Tests for enhanced metadata extraction (built-in defaults) ---
 
-    def test_title_fallback_to_h1_with_title_class(self):
-        """When og:title and <title> are missing in head, should fallback to body via full page load."""
+    def test_empty_head_returns_none(self):
+        """Empty head with no meta tags returns None for all fields."""
         head_html = "<html><head></head></html>"
-        body_html = """<html><head></head>
-            <body><h1 class="article-title">Article Title</h1></body></html>"""
-        with (
-            mock.patch("bookmarks.services.website_loader.load_page", return_value=head_html),
-            mock.patch("bookmarks.services.website_loader.load_full_page", return_value=body_html),
-        ):
+        with mock.patch("bookmarks.services.website_loader.load_page", return_value=head_html):
             metadata = website_loader.load_website_metadata("https://example.com")
-            self.assertEqual("Article Title", metadata.title)
+            self.assertIsNone(metadata.title)
 
-    def test_article_title_takes_priority_over_title_tag(self):
-        """.article-title in _DEFAULT_TITLE_SELECTORS takes priority over <title> tag."""
+    def test_body_selectors_beat_title_tag(self):
+        """Body selectors in defaults (e.g. .article-title) take priority over <title> tag."""
         with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
             mock_load.return_value = """
             <html><head><title>Page Title</title></head>
@@ -287,17 +282,12 @@ class WebsiteLoaderTestCase(TestCase):
             metadata = website_loader.load_website_metadata("https://example.com")
             self.assertEqual("Article Title", metadata.title)
 
-    def test_title_fallback_to_plain_h1(self):
-        """When no og:title or <title> in head, should fallback to body h1 via full page load."""
+    def test_no_match_returns_none(self):
+        """Empty page returns None for title."""
         head_html = "<html><head></head></html>"
-        body_html = """<html><head></head>
-            <body><h1>Just H1</h1></body></html>"""
-        with (
-            mock.patch("bookmarks.services.website_loader.load_page", return_value=head_html),
-            mock.patch("bookmarks.services.website_loader.load_full_page", return_value=body_html),
-        ):
+        with mock.patch("bookmarks.services.website_loader.load_page", return_value=head_html):
             metadata = website_loader.load_website_metadata("https://example.com")
-            self.assertEqual("Just H1", metadata.title)
+            self.assertIsNone(metadata.title)
 
     def test_title_fallback_to_title_tag(self):
         """When no h1 at all, should use <title> tag."""
@@ -357,12 +347,11 @@ class WebsiteLoaderTestCase(TestCase):
         """Should extract title from JSON-LD when no meta tags."""
         with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
             mock_load.return_value = """
-            <html><head></head>
-            <body>
+            <html><head>
             <script type="application/ld+json">
             {"@type":"Article","headline":"JSON-LD Headline","description":"JSON-LD Desc","image":"https://example.com/ld.png"}
             </script>
-            </body></html>
+            </head><body></body></html>
             """
             metadata = website_loader.load_website_metadata("https://example.com")
             self.assertEqual("JSON-LD Headline", metadata.title)
@@ -373,12 +362,11 @@ class WebsiteLoaderTestCase(TestCase):
         """Should handle @graph arrays in JSON-LD."""
         with mock.patch("bookmarks.services.website_loader.load_page") as mock_load:
             mock_load.return_value = """
-            <html><head></head>
-            <body>
+            <html><head>
             <script type="application/ld+json">
             {"@graph":[{"@type":"Article","name":"Graph Article","description":"Graph Desc"}]}
             </script>
-            </body></html>
+            </head><body></body></html>
             """
             metadata = website_loader.load_website_metadata("https://example.com")
             self.assertEqual("Graph Article", metadata.title)
@@ -440,61 +428,55 @@ class WebsiteLoaderTestCase(TestCase):
             self.assertEqual("https://example.com/images/photo.png", metadata.preview_image)
 
 
-    def test_no_full_page_fallback_when_title_found_in_head(self):
-        """Should NOT load full page when title is found in head."""
+    def test_default_og_title_extraction(self):
+        """OG title in head is extracted with default settings."""
         head_html = """<html><head>
             <title>Head Title</title>
             <meta property="og:title" content="OG Title">
             </head></html>"""
-        with (
-            mock.patch("bookmarks.services.website_loader.load_page", return_value=head_html),
-            mock.patch("bookmarks.services.website_loader.load_full_page") as mock_full,
-        ):
+        with mock.patch("bookmarks.services.website_loader.load_page", return_value=head_html) as mock_load:
             metadata = website_loader.load_website_metadata("https://example.com")
             self.assertEqual("OG Title", metadata.title)
-            mock_full.assert_not_called()
+            self.assertEqual(mock_load.call_count, 1)
 
-    def test_full_page_fallback_called_when_title_missing_in_head(self):
-        """Should load full page when title is missing in head."""
-        head_html = "<html><head><meta name='description' content='desc'></head></html>"
+    def test_load_full_page_enabled_finds_body_title(self):
+        """When load_full_page is enabled in config, body selectors match."""
         body_html = """<html><head></head>
             <body><h1 class="article-title">Body Title</h1></body></html>"""
+        config = {"select_title": [".article-title"], "load_full_page": True}
         with (
-            mock.patch("bookmarks.services.website_loader.load_page", return_value=head_html),
-            mock.patch("bookmarks.services.website_loader.load_full_page", return_value=body_html) as mock_full,
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch("bookmarks.services.website_loader.load_page", return_value=body_html) as mock_load,
         ):
             metadata = website_loader.load_website_metadata("https://example.com")
-            mock_full.assert_called_once()
+            self.assertEqual(mock_load.call_count, 1)
             self.assertEqual("Body Title", metadata.title)
 
 
-    def test_full_page_fallback_uses_config_selectors(self):
-        """Body fallback should use config select_title when provided."""
-        head_html = "<html><head></head></html>"
+    def test_load_full_page_uses_config_selectors(self):
+        """With load_full_page=True, config selectors find body elements."""
         body_html = """<html><head></head>
             <body><h1 class="my-custom-title">Custom Body Title</h1></body></html>"""
+        config = {"select_title": [".my-custom-title"], "load_full_page": True}
         with (
-            mock.patch("bookmarks.services.website_loader.load_page", return_value=head_html),
-            mock.patch("bookmarks.services.website_loader.load_full_page", return_value=body_html),
-            mock.patch(
-                "bookmarks.services.website_loader.get_metadata_config",
-                return_value={"select_title": [".my-custom-title"]},
-            ),
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch("bookmarks.services.website_loader.load_page", return_value=body_html) as mock_load,
         ):
             metadata = website_loader.load_website_metadata("https://example.com")
+            self.assertEqual(mock_load.call_count, 1)
             self.assertEqual("Custom Body Title", metadata.title)
 
-    def test_load_full_page_has_rate_limiting(self):
-        """load_full_page should also apply per-domain rate limiting."""
+    def test_load_full_page_param_has_rate_limiting(self):
+        """load_page with load_full_page=True should apply per-domain rate limiting."""
         with (
             mock.patch("bookmarks.services.website_loader.requests.get") as mock_get,
             mock.patch("bookmarks.services.website_loader._wait_for_domain") as mock_wait,
         ):
             mock_response = mock.Mock()
-            mock_response.encoding = "utf-8"
-            mock_response.text = "<html></html>"
-            mock_get.return_value = mock_response
-            website_loader.load_full_page("https://example.com")
+            mock_response.iter_content.return_value = [b"<html></html>"]
+            mock_response.status_code = 200
+            mock_get.return_value.__enter__.return_value = mock_response
+            website_loader.load_page("https://example.com", load_full_page=True)
             mock_wait.assert_called_once_with("example.com")
 
     def test_empty_response_returns_empty_string(self):
@@ -554,7 +536,9 @@ class WebsiteLoaderTestCase(TestCase):
         ):
             metadata = website_loader.load_website_metadata("https://original.example.com/item")
 
-        mock_load_page.assert_called_once_with("https://fetch.example.com/item", config)
+        mock_load_page.assert_called_once_with(
+            "https://fetch.example.com/item", config, load_full_page=True
+        )
         self.assertEqual(metadata.url, "https://final.example.com/item")
         self.assertEqual(metadata.title, "Selected title")
         self.assertEqual(metadata.description, "Selected description")
@@ -796,18 +780,19 @@ class MetadataFallbacksTestCase(TestCase):
             metadata = website_loader.load_website_metadata("https://example.com")
         self.assertEqual(metadata.title, "OG Title")
 
-    def test_explicit_selector_blocks_twitter_fallback(self):
-        """Explicit selectors should prevent all fallbacks."""
+    def test_explicit_selector_blocks_fallback(self):
+        """Explicit selectors should prevent JSON-LD fallback when selector matches."""
         html = '''<html><head>
+        <meta name="custom-title" content="Custom Title">
         <meta name="twitter:title" content="TW Title">
-        </head><body><h1 class="t">Explicit</h1></body></html>'''
-        config = {"select_title": [".t"], "headers": {}}
+        </head><body></body></html>'''
+        config = {"select_title": ['meta[name="custom-title"]'], "headers": {}}
         with (
             mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
             mock.patch.object(website_loader, "load_page", return_value=html),
         ):
             metadata = website_loader.load_website_metadata("https://example.com")
-        self.assertEqual(metadata.title, "Explicit")
+        self.assertEqual(metadata.title, "Custom Title")
 
     def test_json_ld_invalid_json_ignored(self):
         """Invalid JSON-LD should be silently ignored."""

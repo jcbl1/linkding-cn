@@ -32,20 +32,6 @@ _domain_last_request: dict[str, float] = {}
 
 _JSON_LD_SKIP_TYPES = frozenset({"WebSite", "Organization", "BreadcrumbList"})
 
-# Default title selectors derived from fivefilters/ftr-site-config patterns (2034 domains).
-# Tried in order when no domain-specific config provides select_title.
-_DEFAULT_TITLE_SELECTORS = [
-    'meta[property="og:title"]',
-    'h1[class*="title"]',
-    'h1[class*="Title"]',
-    '.article-title',
-    '.post-title',
-    '.entry-title',
-    '.ArticleTitle',
-    '.post__title',
-    'h1',
-]
-
 _domain_rate_lock = threading.Lock()
 _DOMAIN_RATE_MAX_SIZE = 1000  # Prevent unbounded growth
 
@@ -135,7 +121,8 @@ def load_website_metadata(url: str, ignore_cache: bool = False, username: str = 
         if loader_file:
             loader_path = loader_file  # site_adapters engine resolved to absolute path
             if loader_path and os.path.exists(loader_path):
-                body = load_page(url, config)
+                load_full = config.get("load_full_page", True) if config else True
+                body = load_page(url, config, load_full_page=load_full)
                 if loader_path.endswith(".js"):
                     result = run_script(loader_path, url=url, config=config, html_content=body)
                     if result and isinstance(result, dict):
@@ -197,13 +184,14 @@ _METADATA_RETRY_BASE_DELAY = 1.0  # seconds, doubles each attempt
 
 def _load_website_metadata(url: str, config: dict = None, username: str = ''):
     fetch_url = config.get("_request_url", url) if config else url
+    load_full = config.get("load_full_page", True) if config else True
     page_text = None
     last_exc = None
 
     for attempt in range(_METADATA_MAX_RETRIES + 1):
         try:
             start = timezone.now()
-            page_text = load_page(fetch_url, config)
+            page_text = load_page(fetch_url, config, load_full_page=load_full)
             end = timezone.now()
             logger.debug("Load duration: %s", end - start)
             last_exc = None
@@ -253,7 +241,7 @@ def _load_website_metadata(url: str, config: dict = None, username: str = ''):
             after = verify_and_refresh(cookie_config, fetch_url, domain_key, verify_context)
             if after and after != before:
                 retry_config = dict(config)
-                page_text = load_page(fetch_url, retry_config)
+                page_text = load_page(fetch_url, retry_config, load_full_page=load_full)
                 soup = BeautifulSoup(page_text, "html.parser")
                 title, description, preview_image = _parse_metadata_from_soup(
                     soup, fetch_url, retry_config
@@ -264,22 +252,6 @@ def _load_website_metadata(url: str, config: dict = None, username: str = ''):
     except Exception as exc:
         logger.error("Unexpected metadata parsing failure. url=%s", url, exc_info=exc)
         return _empty_metadata(url)
-
-    # Fallback: if title not found in head, try loading full page for body selectors
-    if title is None:
-        try:
-            logger.debug("Title not found in head, loading full page for body: %s", url)
-            full_page_text = load_full_page(fetch_url, config)
-            full_soup = BeautifulSoup(full_page_text, "html.parser")
-            body_title, body_desc, body_image = _parse_metadata_from_soup(full_soup, fetch_url, config)
-            title = body_title
-            # Only use body results if head didn't provide them
-            if description is None:
-                description = body_desc
-            if preview_image is None:
-                preview_image = body_image
-        except Exception as exc:
-            logger.debug("Full page fallback failed for %s: %s", url, exc)
 
     return WebsiteMetadata(
         url=(config.get("_rewrite_url") if config else None) or url,
@@ -321,7 +293,7 @@ def _extract_json_ld(soup) -> dict:
                 continue
             result = {}
             # title
-            title = item.get("headline") or item.get("name")
+            title = item.get("headline") or item.get("name") or item.get("title")
             if title and isinstance(title, str):
                 result["title"] = title.strip()
             # description
@@ -329,7 +301,7 @@ def _extract_json_ld(soup) -> dict:
             if desc and isinstance(desc, str):
                 result["description"] = desc.strip()
             # image
-            img = item.get("image")
+            img = item.get("image") or item.get("thumbnailUrl")
             if img:
                 if isinstance(img, str):
                     result["image"] = img.strip()
@@ -357,85 +329,38 @@ def _parse_metadata_from_soup(soup, url: str, config: dict | None = None, includ
     json_ld = None
 
     title_selectors = config.get("select_title") if config else None
-    title_explicit = config is not None and "select_title" in config
     title, source = _extract_with_selector_source(
         soup, title_selectors or [], url, "title"
     )
-    if title is None and not title_explicit:
-        # Enhanced fallback chain (fivefilters-informed):
-        # og:title → h1[class*=title] → .article-title/.post-title/.entry-title → h1 → <title> → twitter:title → JSON-LD
-        title, source = _extract_with_selector_source(
-            soup, _DEFAULT_TITLE_SELECTORS, url, "title"
-        )
-        if not title:
-            if soup.title and soup.title.string:
-                title = soup.title.string.strip()
-                source = "title"
-        if not title:
-            tw = soup.find("meta", attrs={"name": "twitter:title"})
-            title = tw["content"].strip() if tw and tw.get("content") else None
-            source = "meta[name=twitter:title]" if title else None
-        if not title:
-            if json_ld is None:
-                json_ld = _extract_json_ld(soup)
-            title = json_ld.get("title")
-            source = "json-ld" if title else None
     sources["title"] = {"value": title, "selector": source}
 
     desc_selectors = config.get("select_description") if config else None
-    desc_explicit = config is not None and "select_description" in config
     description, source = _extract_with_selector_source(
         soup, desc_selectors or [], url, "description"
     )
-    if description is None and not desc_explicit:
-        # Enhanced fallback: og:description → meta[name=description] → twitter:description → JSON-LD
-        og_desc = soup.find("meta", attrs={"property": "og:description"})
-        description = og_desc["content"].strip() if og_desc and og_desc.get("content") else None
-        source = "meta[property=og:description]" if description else None
-        if not description:
-            description_tag = soup.find("meta", attrs={"name": "description"})
-            description = description_tag["content"].strip() if description_tag and description_tag.get("content") else None
-            source = "meta[name=description]" if description else None
-        if not description:
-            tw = soup.find("meta", attrs={"name": "twitter:description"})
-            description = tw["content"].strip() if tw and tw.get("content") else None
-            source = "meta[name=twitter:description]" if description else None
-        if not description:
-            if json_ld is None:
-                json_ld = _extract_json_ld(soup)
-            description = json_ld.get("description")
-            source = "json-ld" if description else None
     sources["description"] = {"value": description, "selector": source}
 
     image_selectors = config.get("select_image") if config else None
-    image_explicit = config is not None and "select_image" in config
     preview_image, source = _extract_with_selector_source(
         soup, image_selectors or [], url, "image"
     )
-    if preview_image is None and not image_explicit:
-        # Fallback: og:image → twitter:image → JSON-LD → link[rel=preload]
-        image_tag_meta = soup.find("meta", attrs={"property": "og:image"}) or soup.find(
-            "meta", attrs={"name": "og:image"}
-        )
-        if image_tag_meta:
-            preview_image = image_tag_meta["content"].strip()
-            source = "meta[property=og:image]"
-        if not preview_image:
-            tw = soup.find("meta", attrs={"name": "twitter:image"}) or soup.find(
-                "meta", attrs={"property": "twitter:image"}
-            )
-            preview_image = tw["content"].strip() if tw and tw.get("content") else None
-            source = "meta[name=twitter:image]" if preview_image else None
-        if not preview_image:
-            if json_ld is None:
-                json_ld = _extract_json_ld(soup)
+    sources["preview_image"] = {"value": preview_image, "selector": source}
+
+    # JSON-LD as universal fallback for any missing fields
+    if title is None or description is None or preview_image is None:
+        json_ld = _extract_json_ld(soup)
+        if title is None:
+            title = json_ld.get("title")
+            if title:
+                sources["title"] = {"value": title, "selector": "json-ld"}
+        if description is None:
+            description = json_ld.get("description")
+            if description:
+                sources["description"] = {"value": description, "selector": "json-ld"}
+        if preview_image is None:
             preview_image = json_ld.get("image")
-            source = "json-ld" if preview_image else None
-        if not preview_image:
-            image_tag_link = soup.find("link", attrs={"rel": "preload", "as": "image"})
-            if image_tag_link:
-                preview_image = image_tag_link["href"].strip()
-                source = "link[rel=preload][as=image]"
+            if preview_image:
+                sources["preview_image"] = {"value": preview_image, "selector": "json-ld"}
 
     if (
         preview_image
@@ -443,7 +368,7 @@ def _parse_metadata_from_soup(soup, url: str, config: dict | None = None, includ
         and not preview_image.startswith("https://")
     ):
         preview_image = urljoin(url, preview_image)
-    sources["preview_image"] = {"value": preview_image, "selector": source}
+    sources["preview_image"] = {"value": preview_image, "selector": sources["preview_image"]["selector"]}
 
     if include_sources:
         return title, description, preview_image, sources
@@ -479,7 +404,8 @@ def load_website_metadata_for_test(url: str, username: str = ''):
     config = get_metadata_config(url, username=username)
     if config and config.get("script"):
         script_path = config["script"]
-        body = load_page(config.get("_request_url", url), config)
+        load_full = config.get("load_full_page", True) if config else True
+        body = load_page(config.get("_request_url", url), config, load_full_page=load_full)
         result = run_script(script_path, url=url, config=config, html_content=body)
         if result and isinstance(result, dict):
             metadata = WebsiteMetadata(
@@ -493,8 +419,10 @@ def load_website_metadata_for_test(url: str, username: str = ''):
         return metadata, {"script": script_path}, config
 
     fetch_url = config.get("_request_url", url) if config else url
-    page_text = load_page(fetch_url, config)
+    load_full = config.get("load_full_page", True) if config else True
+    page_text = load_page(fetch_url, config, load_full_page=load_full)
     soup = BeautifulSoup(page_text, "html.parser")
+
     title, description, preview_image, sources = _parse_metadata_from_soup(
         soup, fetch_url, config, include_sources=True
     )
@@ -507,7 +435,7 @@ def load_website_metadata_for_test(url: str, username: str = ''):
     return metadata, sources, config
 
 
-def load_page(url: str, config: dict = None):
+def load_page(url: str, config: dict = None, load_full_page: bool = False):
     # Per-domain rate limiting
     domain = get_registrable_domain(url)
     if domain:
@@ -527,6 +455,7 @@ def load_page(url: str, config: dict = None):
     curl_cmd.append(url)
     _page_start = time.monotonic()
 
+    # Unit: KB
     CHUNK_SIZE = config.get("chunk_size", 50 * 1024) if config else 50 * 1024
     MAX_CONTENT_LIMIT = (
         config.get("max_content_limit", 5000 * 1024) if config else 5000 * 1024
@@ -567,12 +496,13 @@ def load_page(url: str, config: dict = None):
                     "Loaded chunk (iteration=%d, total=%.1fKB)", iteration, size / 1024
                 )
 
-                # Stop reading if we have parsed end of head tag
-                end_of_head = b"</head>"
-                if end_of_head in content:
-                    logger.debug("Found closing head tag after %d bytes", size)
-                    content = content.split(end_of_head)[0] + end_of_head
-                    break
+                # Stop reading at </head> unless loading full page
+                if not load_full_page:
+                    end_of_head = b"</head>"
+                    if end_of_head in content:
+                        logger.debug("Found closing head tag after %d bytes", size)
+                        content = content.split(end_of_head)[0] + end_of_head
+                        break
                 # Stop reading if we exceed limit
                 if size > MAX_CONTENT_LIMIT:
                     logger.debug("Cancel reading document after %d bytes", size)
@@ -605,37 +535,6 @@ def load_page(url: str, config: dict = None):
     return str(results.best())
 
 
-_FULL_PAGE_MAX_SIZE = 20 * 1024 * 1024  # 20MB safeguard
-
-
-def load_full_page(url: str, config: dict = None):
-    """Download full page content for reader mode."""
-    # Per-domain rate limiting
-    domain = get_registrable_domain(url)
-    if domain:
-        _wait_for_domain(domain)
-    headers = build_request_headers(config)
-    cookies = build_request_cookies(config)
-    timeout = config.get("timeout", 30) if config else 30
-    proxies = config.get("proxy") if config else None
-
-    try:
-        response = requests.get(
-            url, timeout=timeout, headers=headers, cookies=cookies, proxies=proxies
-        )
-        response.raise_for_status()
-        # Fix encoding: let requests detect actual encoding instead of relying
-        # on potentially incorrect Content-Type header (common with Chinese sites)
-        if response.encoding and response.encoding.lower() == "iso-8859-1":
-            response.encoding = response.apparent_encoding
-        content = response.text
-        if len(content) > _FULL_PAGE_MAX_SIZE:
-            logger.warning("Full page content truncated from %d to %d bytes: %s", len(content), _FULL_PAGE_MAX_SIZE, url)
-            content = content[:_FULL_PAGE_MAX_SIZE]
-        return content
-    except requests.exceptions.RequestException as exc:
-        logger.error("Failed to load page %s: %s", url, exc)
-        raise
 
 
 def get_request_config(url: str) -> dict | None:

@@ -571,11 +571,11 @@ def validate_config(base_dir: str, domain_filename: str = '') -> list[str]:
                             label = f"{name}/{domain_key}"
                             _validate_domain_config(issues, label, domain_config, os.path.dirname(file_path))
                     glob_defaults = data.get('defaults')
-                    global_defaults_data = data.get('global_defaults')
+                    global_defaults_data = data.get('_builtin')
                     if glob_defaults and isinstance(glob_defaults, dict):
                         _validate_domain_config(issues, f"{name}.defaults", glob_defaults, os.path.dirname(file_path))
                     if global_defaults_data and isinstance(global_defaults_data, dict):
-                        _validate_domain_config(issues, f"{name}.global_defaults", global_defaults_data, os.path.dirname(file_path))
+                        _validate_domain_config(issues, f"{name}._builtin", global_defaults_data, os.path.dirname(file_path))
                 except json.JSONDecodeError as e:
                     issues.append(f"ERROR: {name} 解析失败: {e}")
     else:

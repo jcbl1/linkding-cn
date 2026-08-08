@@ -146,21 +146,21 @@ class SourceCache:
                     break
             if file_path is None:
                 logger.warning("Adapter file not found in: %s", dir_path)
-                return {'defaults': {}, 'global_defaults': {}, 'domains': {}}
+                return {'defaults': {}, '_builtin': {}, 'domains': {}}
         try:
             data = load_jsonc_file(file_path)
         except (json.JSONDecodeError, OSError) as e:
             logger.error("Failed to parse adapter file: %s: %s", file_path, e)
-            return {'defaults': {}, 'global_defaults': {}, 'domains': {}}
+            return {'defaults': {}, '_builtin': {}, 'domains': {}}
         if not isinstance(data, dict):
             logger.error("Adapter file top-level must be an object: %s", file_path)
-            return {'defaults': {}, 'global_defaults': {}, 'domains': {}}
+            return {'defaults': {}, '_builtin': {}, 'domains': {}}
 
-        # extract defaults, global_defaults, and domains
+        # extract defaults, _builtin, and domains
         glob_defaults = data.get('defaults', {})
         if not isinstance(glob_defaults, dict):
             glob_defaults = {}
-        global_defaults = data.get('global_defaults', {})
+        global_defaults = data.get('_builtin', {})
         if not isinstance(global_defaults, dict):
             global_defaults = {}
 
@@ -171,7 +171,7 @@ class SourceCache:
             # compat: when no "domains" key, treat all non-meta keys as domains
             domains = {
                 k: v for k, v in data.items()
-                if k not in ('defaults', 'global_defaults', 'domains', '_meta') and not k.startswith('_')
+                if k not in ('defaults', '_builtin', 'domains', '_meta') and not k.startswith('_')
             }
 
         # resolve script relative paths
@@ -182,7 +182,7 @@ class SourceCache:
         }
 
         meta = data.get('_meta', {}) if isinstance(data, dict) else {}
-        return {'defaults': glob_defaults, 'global_defaults': global_defaults, 'domains': domains, '_meta': meta}
+        return {'defaults': glob_defaults, '_builtin': global_defaults, 'domains': domains, '_meta': meta}
 
     _CHECK_INTERVAL = 5.0
 
@@ -302,7 +302,7 @@ class SourceCache:
         1. _adapters order = priority (first is highest)
         2. Within the same adapter: domain config overrides "*" ("*" is the internal baseline)
         3. Across adapters: earlier overrides later
-        4. The defaults adapter (id="defaults") global_defaults acts as a global override (applied to all domains via load_domain_config)
+        4. The defaults adapter (id="defaults") _builtin acts as the fallback config (applied to all domains via load_domain_config)
         """
         merged_domains = {}
 
@@ -347,14 +347,18 @@ class SourceCache:
             }
 
         _adapter_map = {}
+        _raw_domain_configs = {}
 
         # merge from back to front (earlier overrides later)
         for cache_key in reversed(self._adapter_order):
-            adapter_data = self._sources.get(cache_key, (0, {'defaults': {}, 'global_defaults': {}, 'domains': {}}))[1]
+            adapter_data = self._sources.get(cache_key, (0, {'defaults': {}, '_builtin': {}, 'domains': {}}))[1]
             glob_defaults = adapter_data.get('defaults', {})
             domains = adapter_data.get('domains', {})
 
             for domain_key, domain_config in domains.items():
+                # Preserve pre-merge domain config for raw display
+                if isinstance(domain_config, dict):
+                    _raw_domain_configs[domain_key] = copy.deepcopy(domain_config)
                 if not isinstance(domain_config, dict):
                     merged_domains[domain_key] = domain_config
                 # within the same adapter: domain overrides "*"
@@ -379,6 +383,7 @@ class SourceCache:
             ],
             '_defaults_cache_key': self._defaults_cache_key,
             '_adapter_map': _adapter_map,
+            '_raw_domain_configs': _raw_domain_configs,
             **merged_domains,
         }
 
@@ -475,6 +480,9 @@ def load_domain_config(url: str, base_dir: str) -> dict | None:
     """
     Load the domain config for a URL.
 
+    Domain configs are pre-merged with their adapter's defaults in _merge_all.
+    Adapter priority is determined by declaration order (first is highest).
+
     Returns:
     {
         'auth': {...},
@@ -488,16 +496,6 @@ def load_domain_config(url: str, base_dir: str) -> dict | None:
     """
     all_config = _cache.load(base_dir)
 
-    # get defaults adapter "*" as global override
-    defaults_key = all_config.get('_defaults_cache_key')
-    global_override = {}
-    if defaults_key:
-        defaults_data = _cache._sources.get(defaults_key, (0, {'defaults': {}, 'global_defaults': {}, 'domains': {}}))[1]
-        defaults_glob = defaults_data.get('defaults', {})
-        if isinstance(defaults_glob, dict):
-            global_override = copy.deepcopy(defaults_glob)
-            global_override.pop('_disabled_domains', None)
-
     domain_key, domain_config = match_domain(url, all_config)
     if domain_config is None:
         return None
@@ -507,12 +505,9 @@ def load_domain_config(url: str, base_dir: str) -> dict | None:
     if domain_key in disabled_domains:
         return None
 
-    # merge: global override (defaults adapter "*") > domain-specific config
-    merged = deep_merge(domain_config, global_override) if global_override else copy.deepcopy(domain_config)
-
-    result = copy.deepcopy(merged)
+    result = copy.deepcopy(domain_config)
     result['_domain_key'] = domain_key
-    result['_raw'] = copy.deepcopy(domain_config)
+    result['_raw'] = copy.deepcopy(all_config.get('_raw_domain_configs', {}).get(domain_key, domain_config))
     adapter_map = all_config.get('_adapter_map', {})
     adapter = adapter_map.get(domain_key)
     if adapter:
@@ -529,15 +524,6 @@ def load_domain_config(url: str, base_dir: str) -> dict | None:
 def show_config(url: str, base_dir: str) -> dict:
     all_config = _cache.load(base_dir)
 
-    defaults_key = all_config.get('_defaults_cache_key')
-    global_override = {}
-    if defaults_key:
-        defaults_data = _cache._sources.get(defaults_key, (0, {'defaults': {}, 'global_defaults': {}, 'domains': {}}))[1]
-        defaults_glob = defaults_data.get('defaults', {})
-        if isinstance(defaults_glob, dict):
-            global_override = copy.deepcopy(defaults_glob)
-            global_override.pop('_disabled_domains', None)
-
     domain_key, domain_config = match_domain(url, all_config)
     if domain_config is None:
         return {'matched': False, 'error': f'No matching domain config: {url}', 'domain': _get_domain(url)}
@@ -547,17 +533,42 @@ def show_config(url: str, base_dir: str) -> dict:
     if domain_key in disabled_domains:
         return {'matched': False, 'domain_key': domain_key, 'error': f'Domain is disabled: {domain_key}', 'domain': _get_domain(url)}
 
-    merged = deep_merge(domain_config, global_override) if global_override else copy.deepcopy(domain_config)
     adapter_map = all_config.get('_adapter_map', {})
     adapter = adapter_map.get(domain_key)
+    raw_config = all_config.get('_raw_domain_configs', {}).get(domain_key, domain_config)
     result = {
         'url': url,
         'domain': _get_domain(url),
         'domain_key': domain_key,
         'matched': True,
         'adapter': adapter,
-        'defaults': global_override,
-        'raw_config': domain_config,
-        'merged': merged,
+        'raw_config': raw_config,
+        'merged': copy.deepcopy(domain_config),
     }
     return result
+
+
+def load_builtin_metadata(base_dir: str) -> dict | None:
+    """Return metadata selectors from _builtin of the defaults adapter.
+
+    Used as fallback config when no domain-specific adapter matches a URL.
+    """
+    all_config = _cache.load(base_dir)
+    defaults_key = all_config.get('_defaults_cache_key')
+    if not defaults_key:
+        return None
+    defaults_data = _cache._sources.get(
+        defaults_key,
+        (0, {'defaults': {}, '_builtin': {}, 'domains': {}}),
+    )[1]
+    global_defaults = defaults_data.get('_builtin', {})
+    if not isinstance(global_defaults, dict):
+        return None
+    metadata = global_defaults.get('metadata', {})
+    if not isinstance(metadata, dict) or not metadata:
+        return None
+    result = {}
+    for key in ('select_title', 'select_description', 'select_image', 'load_full_page', 'max_content_limit'):
+        if key in metadata:
+            result[key] = metadata[key]
+    return result if result else None

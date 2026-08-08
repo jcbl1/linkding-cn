@@ -565,7 +565,7 @@
     "defaults": {
       "$ref": "#/definitions/domain_config"
     },
-    "global_defaults": {
+    "_builtin": {
       "$ref": "#/definitions/domain_config",
       "description": "全局覆盖配置，仅 defaults 适配器生效，覆盖所有适配器的所有域名"
     },

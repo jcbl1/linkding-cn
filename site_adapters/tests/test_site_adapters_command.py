@@ -54,7 +54,7 @@ class SiteAdaptersCommandTestCase(TestCase):
 
         result = json.loads(out.getvalue())
         self.assertEqual(result["domain_key"], "example.com")
-        self.assertEqual(result["merged"]["http"]["timeout"], 9)
+        self.assertEqual(result["merged"]["http"]["timeout"], 1)
 
     def test_validate_subscription_reports_local_file_errors(self):
         path = self.write("bundle.jsonc", '{"domains": {"bad.com": {"type": "alias"}}}')
