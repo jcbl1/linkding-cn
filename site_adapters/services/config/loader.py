@@ -548,10 +548,12 @@ def show_config(url: str, base_dir: str) -> dict:
     return result
 
 
-def load_builtin_metadata(base_dir: str) -> dict | None:
-    """Return metadata selectors from _builtin of the defaults adapter.
+def load_builtin_config(base_dir: str) -> dict | None:
+    """Return the entire _builtin block from the defaults adapter.
 
-    Used as fallback config when no domain-specific adapter matches a URL.
+    Serves as the system-wide baseline config, merged before any
+    domain-specific adapter config.  Structure mirrors a domain config
+    (default, metadata, snapshot, reader sections).
     """
     all_config = _cache.load(base_dir)
     defaults_key = all_config.get('_defaults_cache_key')
@@ -561,14 +563,7 @@ def load_builtin_metadata(base_dir: str) -> dict | None:
         defaults_key,
         (0, {'defaults': {}, '_builtin': {}, 'domains': {}}),
     )[1]
-    global_defaults = defaults_data.get('_builtin', {})
-    if not isinstance(global_defaults, dict):
+    builtin = defaults_data.get('_builtin', {})
+    if not isinstance(builtin, dict) or not builtin:
         return None
-    metadata = global_defaults.get('metadata', {})
-    if not isinstance(metadata, dict) or not metadata:
-        return None
-    result = {}
-    for key in ('select_title', 'select_description', 'select_image', 'load_full_page', 'max_content_limit'):
-        if key in metadata:
-            result[key] = metadata[key]
-    return result if result else None
+    return copy.deepcopy(builtin)

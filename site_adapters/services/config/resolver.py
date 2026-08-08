@@ -36,8 +36,12 @@ from site_adapters.services.auth.tokens import (
 from site_adapters.services.config import (
     apply_request_url,
     apply_rewrite_url,
+    deep_merge,
 )
-from site_adapters.services.config.loader import load_domain_config, load_builtin_metadata
+from site_adapters.services.config.loader import (
+    load_builtin_config,
+    load_domain_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -271,9 +275,11 @@ def get_metadata_config(url: str, username: str = '') -> dict | None:
     base_dir = _get_base_dir()
     if not base_dir or not os.path.isdir(base_dir):
         return None
-    config = load_domain_config(url, base_dir)
+    builtin = load_builtin_config(base_dir) or {}
+    domain = load_domain_config(url, base_dir)
+    config = deep_merge(builtin, domain) if domain else builtin
     if not config:
-        return load_builtin_metadata(base_dir)
+        return None
     config['_url'] = url
     return _build_section_config(config, 'metadata', base_dir, username)
 
@@ -282,7 +288,9 @@ def get_snapshot_config(url: str, username: str = '') -> dict | None:
     base_dir = _get_base_dir()
     if not base_dir or not os.path.isdir(base_dir):
         return None
-    config = load_domain_config(url, base_dir)
+    builtin = load_builtin_config(base_dir) or {}
+    domain = load_domain_config(url, base_dir)
+    config = deep_merge(builtin, domain) if domain else builtin
     if not config:
         return None
     config['_url'] = url
@@ -293,7 +301,9 @@ def get_reader_config(url: str, username: str = '') -> dict | None:
     base_dir = _get_base_dir()
     if not base_dir or not os.path.isdir(base_dir):
         return None
-    config = load_domain_config(url, base_dir)
+    builtin = load_builtin_config(base_dir) or {}
+    domain = load_domain_config(url, base_dir)
+    config = deep_merge(builtin, domain) if domain else builtin
     if not config:
         return None
     config['_url'] = url
