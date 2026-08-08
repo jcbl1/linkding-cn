@@ -227,7 +227,7 @@ def create_snapshot(url: str, filepath: str, config: dict = None):
             os.remove(filepath)
         # Use start_new_session=True to create a new process group
         process = subprocess.Popen(args, start_new_session=True)
-        process.wait(timeout=settings.LD_SINGLEFILE_TIMEOUT_SEC)
+        process.wait(timeout=(config.get("timeout") if config else None) or settings.LD_SINGLEFILE_TIMEOUT_SEC)
 
         if not os.path.exists(filepath):
             raise SingleFileError("Failed to create snapshot")

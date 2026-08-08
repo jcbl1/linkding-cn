@@ -548,22 +548,55 @@ def show_config(url: str, base_dir: str) -> dict:
     return result
 
 
-def load_builtin_config(base_dir: str) -> dict | None:
-    """Return the entire _builtin block from the defaults adapter.
+# Path to the source defaults adapter template (bundled in the Python package).
+# Used only by _ensure_defaults_adapter at startup to seed / update the runtime copy.
+_DEFAULTS_SOURCE_DIR = os.path.join(os.path.dirname(__file__), 'adapters', 'defaults')
+_DEFAULTS_SOURCE_FILE = os.path.join(_DEFAULTS_SOURCE_DIR, 'adapters.jsonc')
 
-    Serves as the system-wide baseline config, merged before any
-    domain-specific adapter config.  Structure mirrors a domain config
-    (default, metadata, snapshot, reader sections).
+
+def _read_builtin_source() -> dict:
+    """Read the _builtin block from the source template file.
+
+    Only used during startup sync; runtime reads go through the data/ copy.
     """
-    all_config = _cache.load(base_dir)
-    defaults_key = all_config.get('_defaults_cache_key')
-    if not defaults_key:
+    try:
+        data = load_jsonc_file(_DEFAULTS_SOURCE_FILE)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.error('Failed to read builtin source file: %s: %s', _DEFAULTS_SOURCE_FILE, exc)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    builtin = data.get('_builtin', {})
+    return builtin if isinstance(builtin, dict) else {}
+
+
+def _read_runtime_defaults(base_dir: str) -> dict | None:
+    """Read the runtime defaults adapter file from data/."""
+    runtime_path = os.path.join(base_dir, 'adapters', 'defaults', 'adapters.jsonc')
+    if not os.path.exists(runtime_path):
         return None
-    defaults_data = _cache._sources.get(
-        defaults_key,
-        (0, {'defaults': {}, '_builtin': {}, 'domains': {}}),
-    )[1]
-    builtin = defaults_data.get('_builtin', {})
+    try:
+        data = load_jsonc_file(runtime_path)
+    except (json.JSONDecodeError, OSError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def load_builtin_config(base_dir: str) -> dict | None:
+    """Return the merged system-wide baseline config.
+
+    Reads _builtin and _builtin_overrides from the runtime defaults adapter
+    (data/site_adapters/adapters/defaults/adapters.jsonc).  The _builtin
+    block in that file is kept in sync with the source template at startup
+    via AppConfig.ready().
+    """
+    runtime = _read_runtime_defaults(base_dir)
+    if not runtime:
+        return None
+    builtin = runtime.get('_builtin', {})
     if not isinstance(builtin, dict) or not builtin:
         return None
+    overrides = runtime.get('_builtin_overrides', {})
+    if isinstance(overrides, dict) and overrides:
+        return deep_merge(copy.deepcopy(builtin), overrides)
     return copy.deepcopy(builtin)

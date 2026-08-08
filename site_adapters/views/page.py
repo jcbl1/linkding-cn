@@ -11,7 +11,6 @@ from site_adapters.views.helpers import (
     get_http_headers_descs,
     get_http_headers_set,
     get_singlefile_args_set,
-    _ensure_base_dirs,
     _get_adapters_dir,
     _get_base_dir,
     _schema_section_fields,
@@ -46,7 +45,6 @@ def _get_domains_needing_auth(base_dir):
 def site_adapters_page(request):
     base_dir = _get_base_dir()
     adapters_dir = _get_adapters_dir()
-    _ensure_base_dirs()
 
     # 读取 config.jsonc 内容
     config_content = ''

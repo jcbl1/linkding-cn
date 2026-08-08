@@ -41,17 +41,11 @@ def _defaults_file_path() -> str:
 
 
 def _ensure_defaults_file():
-    """确保 defaults 适配器文件存在。"""
-    from site_adapters.views.helpers import _ensure_base_dirs
-    _ensure_base_dirs()
-    file_path = _defaults_file_path()
-    if not os.path.exists(file_path):
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        content = '{\n  "*": {},\n  "domains": {}\n}\n'
-        atomic_write(file_path, content)
-    return file_path
+    """Return the path to the runtime defaults adapter file.
 
-
+    File creation is handled by AppConfig.ready() on startup.
+    """
+    return _defaults_file_path()
 def _read_domain_from_adapter(domain_key: str, adapter_name: str = '') -> tuple[str | None, str | None, dict | None]:
     """在所有适配器中查找域名，返回 (file_path, domain_key, config)。
     如果指定 adapter_name，只查找该适配器。"""
