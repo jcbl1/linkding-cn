@@ -430,7 +430,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     }
     var parts = { defaults: '', rest: '' };
     subData.forEach(function (s, i) {
-      var label = s.source_name || s.name || (s.id ? s.id : '');
+      var label = s.display_name || s.name || s.source_name || (s.id ? s.id : '');
       var remote = s.source && (s.source.startsWith('https://') || s.source.startsWith('http://'));
       var enabled = s.enabled !== false;
       var version = s.version || '';
@@ -463,8 +463,8 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       parts[key] += '</div>';
       if (!enabled) parts[key] += '<span class="wa-badge wa-badge-warn wa-sub-disabled-badge">' + gettext('disabled') + '</span>';
       parts[key] += '<div class="wa-sub-actions">';
-      parts[key] += '<button class="btn btn-sm js-sub-edit" data-index="' + i + '" title="' + gettext('Edit') + '" aria-label="' + gettext('Edit') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-edit"></use></svg></button>';
       if (remote) parts[key] += '<button class="btn btn-sm js-sub-update" data-index="' + i + '" title="' + gettext('Update') + '" aria-label="' + gettext('Update') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-refresh"></use></svg></button>';
+      parts[key] += '<button class="btn btn-sm js-sub-edit" data-index="' + i + '" title="' + gettext('Edit') + '" aria-label="' + gettext('Edit') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-edit"></use></svg></button>';
       parts[key] += '<button class="btn btn-sm btn-error js-sub-delete" data-index="' + i + '" title="' + gettext('Delete') + '" aria-label="' + gettext('Delete') + '" ld-confirm-question="' + gettext('Delete') + ' ' + esc(label) + '?" ld-confirm-danger=""><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-delete"></use></svg></button>';
       parts[key] += '<button class="btn btn-sm js-sub-expand" data-index="' + i + '" title="' + gettext('Details') + '" aria-label="' + gettext('Details') + '"><svg width="16" height="16" aria-hidden="true" class="wa-sub-chevron"><use href="#ld-icon-chevron-down"></use></svg></button>';
       parts[key] += '</div>';
@@ -573,15 +573,38 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       form.elements['action'].value = 'save';
       form.elements['index'].value = index;
       form.elements['id'].value = subData[index].id || '';
-      form.elements['name'].value = subData[index].source_name || subData[index].name || '';
+      form.elements['display_name'].value = subData[index].display_name || '';
+      form.elements['name'].value = subData[index].name || '';
       form.elements['source'].value = subData[index].source || '';
       form.elements['update_interval'].value = subData[index].update_interval || 86400;
+      // display_name placeholder 显示订阅源原始 name
+      var dispEl = form.elements['display_name'];
+      var canonicalName = subData[index].source_name || subData[index].name || '';
+      if (canonicalName && !dispEl.value) {
+        dispEl.placeholder = canonicalName;
+      }
+      // 本地源隐藏 Update Interval
+      var sourceVal = form.elements['source'].value;
+      var intervalGroup = document.getElementById('sub-interval-group');
+      intervalGroup.hidden = sourceVal && !(sourceVal.startsWith('https://') || sourceVal.startsWith('http://'));
+      // 显示订阅源描述
+      var descEl = document.getElementById('sub-modal-description');
+      var descText = document.getElementById('sub-modal-desc-text');
+      if (subData[index].description) {
+        descText.textContent = subData[index].description;
+        descEl.hidden = false;
+      } else {
+        descEl.hidden = true;
+      }
     } else {
       title.textContent = gettext('Add Subscription');
       form.elements['action'].value = 'add';
       form.index.value = '';
       form.reset();
       form.elements['update_interval'].value = 86400;
+      form.elements['display_name'].placeholder = '';
+      document.getElementById('sub-modal-description').hidden = true;
+      document.getElementById('sub-interval-group').hidden = false;
     }
   }
 
@@ -604,6 +627,8 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     if (idVal) data.id = idVal;
     var nameVal = form.elements['name'].value.trim();
     if (nameVal) data.name = nameVal;
+    var displayNameVal = form.elements['display_name'].value.trim();
+    data.display_name = displayNameVal;
     if (form.elements['index'].value) data.index = form.elements['index'].value;
 
     apiPost(urls.subscriptionManage, data).then(function (r) {
@@ -620,29 +645,32 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     });
   }
 
-  // Auto-detect name from source on blur in add mode
+  // Auto-detect id/name from source on blur in add mode
   document.getElementById('sub-source').addEventListener('blur', function () {
     if ('add' === document.getElementById('sub-modal-form').elements.action.value) {
       var src = this.value.trim();
       var nameEl = document.getElementById('sub-name');
       var idEl = document.getElementById('sub-id');
+      var displayNameEl = document.getElementById('sub-display-name');
       if (src) {
         var parts = src.replace(/\\/g, '/').replace(/\/$/, '').split('/');
         var fname = (parts[parts.length - 1] || '').replace(/\.(jsonc|json)$/i, '');
         if (!fname || fname === 'adapters') fname = parts.length > 1 ? parts[parts.length - 2] : '';
         if (fname) {
-          fname = fname.replace(/[-_]/g, ' ').replace(/\b\w/g, function (m) { return m.toUpperCase(); });
-          nameEl.placeholder = fname;
-        } else { nameEl.placeholder = ''; }
+          displayNameEl.placeholder = fname;
+        } else { displayNameEl.placeholder = ''; }
         if (src.startsWith('./') || src.startsWith('../') || src.startsWith('/')) {
           apiGet(urls.subscriptionManage + '?action=detect_id&source=' + encodeURIComponent(src)).then(function (r) {
             if (r) {
               if (r.id) { idEl.value = r.id; }
-              if (r.name && !nameEl.value) { nameEl.value = r.name; nameEl.placeholder = ''; }
+              if (r.name) { nameEl.value = r.name; }
             }
           }).catch(function () {});
         }
-      } else { nameEl.placeholder = ''; idEl.value = ''; }
+      } else { displayNameEl.placeholder = ''; idEl.value = ''; nameEl.value = ''; }
+      // 根据 source 是否为远程切换 interval 显示
+      var intervalGroup = document.getElementById('sub-interval-group');
+      intervalGroup.hidden = src && !(src.startsWith('https://') || src.startsWith('http://'));
     }
   });
   document.getElementById('btn-add-subscription').addEventListener('click', function () { openModal('add'); });

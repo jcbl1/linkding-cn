@@ -417,7 +417,7 @@ def is_allowed_script_path(script_path: str, base_dir: str) -> bool:
 # 单个订阅下载
 # ---------------------------------------------------------------------------
 
-def fetch_subscription(url: str, name: str = '', adapter_id: str = '', force: bool = False) -> str | None:
+def fetch_subscription(url: str, name: str = '', adapter_id: str = '', force: bool = False, update_interval: int = 86400) -> str | None:
     """
     下载远程订阅源并缓存为 adapters/{adapter_id}.{name}/adapters.jsonc
 
@@ -445,10 +445,12 @@ def fetch_subscription(url: str, name: str = '', adapter_id: str = '', force: bo
 
     file_meta = _get_file_meta(file_path)
 
+    if update_interval == 0:
+        return file_path
+
     if not force:
         last_fetch = file_meta.get('last_fetch')
-        interval = meta.get(url, {}).get('update_interval', 86400)
-        if last_fetch and time.time() - last_fetch < interval:
+        if last_fetch and time.time() - last_fetch < update_interval:
             return file_path
 
     try:
@@ -503,8 +505,7 @@ def fetch_subscription(url: str, name: str = '', adapter_id: str = '', force: bo
         _save_meta(meta)
 
         cache_key = (url, name)
-        interval = meta.get(url, {}).get('update_interval', 86400)
-        _last_fetch_cache[cache_key] = (time.time(), interval)
+        _last_fetch_cache[cache_key] = (time.time(), update_interval)
 
         logger.info("Subscription updated: %s", url)
         return file_path
@@ -551,6 +552,9 @@ def _needs_fetch(sub: dict) -> bool:
     now = time.time()
     name = sub.get('name', '')
     interval = sub.get('update_interval', 86400)
+    # update_interval 为 0 表示禁用自动更新
+    if interval == 0:
+        return False
     cache_key = (url, name)
 
     cached = _last_fetch_cache.get(cache_key)
@@ -578,19 +582,6 @@ def fetch_all_subscriptions(subscriptions: list[dict]) -> list[str]:
         return []
 
     paths = []
-    meta = _load_meta()
-
-    changed = False
-    for sub in subscriptions:
-        url = (sub.get('url') or '') if isinstance(sub, dict) else ''
-        if url:
-            interval = sub.get('update_interval', 86400) if isinstance(sub, dict) else 86400
-            if meta.get(url, {}).get('update_interval') != interval:
-                meta.setdefault(url, {})['update_interval'] = interval
-                changed = True
-    if changed:
-        _save_meta(meta)
-
     for sub in subscriptions:
         if sub.get('enabled') is False:
             continue
@@ -598,8 +589,9 @@ def fetch_all_subscriptions(subscriptions: list[dict]) -> list[str]:
         if not url:
             continue
         name = sub.get('name', '')
+        interval = sub.get('update_interval', 86400) if isinstance(sub, dict) else 86400
 
-        path = fetch_subscription(url, name=name, adapter_id=sub.get('id', ''))
+        path = fetch_subscription(url, name=name, adapter_id=sub.get('id', ''), update_interval=interval)
         if path:
             paths.append(path)
 

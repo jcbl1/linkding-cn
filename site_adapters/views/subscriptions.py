@@ -70,23 +70,23 @@ def subscription_manage(request):
             source = item.get('source', '')
             from site_adapters.services.subscriptions import is_remote_source
             if is_remote_source(source) and (not item.get('id', '').strip() or not item.get('name', '').strip()):
-                from site_adapters.services.subscriptions import _download_jsonc, fetch_subscription
+                from site_adapters.services.subscriptions import _download_jsonc
+                download_error = None
                 try:
                     data, _resp = _download_jsonc(source)
                     if data and isinstance(data.get('_meta'), dict):
                         meta = data['_meta']
-                        if not item.get('id', '').strip() and meta.get('id'):
-                            item['id'] = meta['id']
-                        if not item.get('name', '').strip() and meta.get('name'):
-                            item['name'] = meta['name']
-                except Exception:
-                    pass
-                # 用确定的 id/name 正式下载并缓存到 adapters/{id}.{name}/
-                if item.get('id', '').strip() and item.get('name', '').strip():
-                    try:
-                        fetch_subscription(source, name=item['name'], adapter_id=item['id'], force=True)
-                    except Exception:
-                        pass
+                        if not item.get('id', '').strip():
+                            item['id'] = meta.get('id', '')
+                        if not item.get('name', '').strip():
+                            item['name'] = meta.get('name', '')
+                except Exception as e:
+                    logger.exception('Failed to download subscription for auto-detect: %s', source)
+                    download_error = str(e)
+
+                if download_error and not item.get('id', '').strip():
+                    return JsonResponse({'error': 'Unable to auto-detect adapter id/name from URL. Please enter id and name manually. ' + download_error},
+                                        status=400)
 
             # id 和 name 均为必填
             if not item.get('id', '').strip():
@@ -94,6 +94,9 @@ def subscription_manage(request):
             if not item.get('name', '').strip():
                 return JsonResponse({'error': 'name is required'}, status=400)
 
+            # 不保存空的 display_name
+            if not item.get('display_name', '').strip():
+                item.pop('display_name', None)
             if _has_adapter_conflict(adapters, item):
                 return JsonResponse({'error': 'adapter already exists'}, status=409)
             adapters.append(item)
@@ -108,12 +111,18 @@ def subscription_manage(request):
                 item['id'] = old.get('id', '')
             if not item.get('name', '').strip():
                 item['name'] = old.get('name', '')
+            # display_name: 保留旧值（如果未提供），允许设为空（传空字符串表示清除）
+            if 'display_name' not in item and old.get('display_name'):
+                item['display_name'] = old['display_name']
             if not item.get('id', '').strip():
                 return JsonResponse({'error': 'id is required'}, status=400)
             if not item.get('name', '').strip():
                 return JsonResponse({'error': 'name is required'}, status=400)
             if _has_adapter_conflict(adapters, item, ignore_index=index):
                 return JsonResponse({'error': 'adapter already exists'}, status=409)
+            # 不保存空的 display_name
+            if not item.get('display_name', '').strip():
+                item.pop('display_name', None)
             adapters[index] = item
             _save_adapters_list(adapters)
 
@@ -173,7 +182,8 @@ def subscription_manage(request):
             if not source:
                 return JsonResponse({'error': 'no source for adapter'}, status=400)
             from site_adapters.services.subscriptions import fetch_subscription, _read_subscription_file, resolve_adapter_path
-            path = fetch_subscription(source, name=name, adapter_id=adapter.get('id', ''), force=request.POST.get('force') == '1')
+            interval = adapter.get('update_interval', 86400) if isinstance(adapter, dict) else 86400
+            path = fetch_subscription(source, name=name, adapter_id=adapter.get('id', ''), force=request.POST.get('force') == '1', update_interval=interval)
             if path:
                 # Sync _meta.name from fetched file to config name
                 data = _read_subscription_file(path)

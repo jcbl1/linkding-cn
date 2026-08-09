@@ -1021,6 +1021,15 @@
   gap: 16px;
 }
 
+
+.wa-modal-desc-text {
+  font-size: 13px;
+  color: var(--ld-foreground-secondary, #666);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
 .wa-modal-footer {
   display: flex;
   justify-content: flex-end;

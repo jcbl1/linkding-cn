@@ -393,6 +393,8 @@ def _adapter_from_post(request) -> dict:
     adapter_id = request.POST.get('id', '').strip()
     interval_raw = request.POST.get('update_interval', '').strip()
 
+    display_name = request.POST.get('display_name', '').strip()
+
     from site_adapters.services.subscriptions import is_remote_source, validate_subscription_url
 
     # id 和 name 优先从请求获取，其次从本地源文件 _meta 自动检测
@@ -442,6 +444,7 @@ def _adapter_from_post(request) -> dict:
     item = {'name': name, 'update_interval': update_interval}
     item['id'] = adapter_id
     item['source'] = source
+    item['display_name'] = display_name
     return item
 
 

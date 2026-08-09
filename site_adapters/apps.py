@@ -16,3 +16,9 @@ class SiteAdaptersConfig(AppConfig):
             _ensure_base_dirs()
         except Exception:
             logger.exception("Failed to ensure site adapters base directories")
+
+        # 注册 huey periodic task
+        try:
+            import site_adapters.tasks  # noqa: F401
+        except Exception:
+            logger.exception("Failed to register site adapters periodic tasks")
