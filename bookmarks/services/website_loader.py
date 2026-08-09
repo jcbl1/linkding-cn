@@ -187,7 +187,7 @@ _METADATA_MAX_RETRIES = 3
 _METADATA_RETRY_BASE_DELAY = 1.0  # seconds, doubles each attempt
 
 
-def _load_website_metadata(url: str, config: dict = None, username: str = ''):
+def _load_website_metadata(url: str, config: dict = None, username: str = '', include_sources: bool = False):
     fetch_url = config.get("_request_url", url) if config else url
     load_full = config.get("load_full_page", True) if config else True
     page_text = None
@@ -229,8 +229,8 @@ def _load_website_metadata(url: str, config: dict = None, username: str = ''):
     try:
         start = timezone.now()
         soup = BeautifulSoup(page_text, "html.parser")
-        title, description, preview_image = _parse_metadata_from_soup(
-            soup, fetch_url, config
+        title, description, preview_image, sources = _parse_metadata_from_soup(
+            soup, fetch_url, config, include_sources=True
         )
 
         cookie_config = config.get("cookie") if config else {}
@@ -248,14 +248,16 @@ def _load_website_metadata(url: str, config: dict = None, username: str = ''):
                 retry_config = dict(config)
                 page_text = load_page(fetch_url, retry_config, load_full_page=load_full)
                 soup = BeautifulSoup(page_text, "html.parser")
-                title, description, preview_image = _parse_metadata_from_soup(
-                    soup, fetch_url, retry_config
+                title, description, preview_image, sources = _parse_metadata_from_soup(
+                    soup, fetch_url, retry_config, include_sources=True
                 )
 
         end = timezone.now()
         logger.debug("Parsing duration: %s", end - start)
     except Exception as exc:
         logger.error("Unexpected metadata parsing failure. url=%s", url, exc_info=exc)
+        if include_sources:
+            return _empty_metadata(url), {}
         return _empty_metadata(url)
 
     if config:
@@ -263,12 +265,15 @@ def _load_website_metadata(url: str, config: dict = None, username: str = ''):
         description = apply_rewrite(description, config.get('rewrite_description'))
         preview_image = apply_rewrite(preview_image, config.get('rewrite_image'))
 
-    return WebsiteMetadata(
+    metadata = WebsiteMetadata(
         url=(config.get("_rewrite_url") if config else None) or url,
         title=title,
         description=description,
         preview_image=preview_image,
     )
+    if include_sources:
+        return metadata, sources
+    return metadata
 
 
 def _extract_json_ld(soup) -> dict:
@@ -428,24 +433,7 @@ def load_website_metadata_for_test(url: str, username: str = ''):
             metadata = _empty_metadata(url)
         return metadata, {"script": script_path}, config
 
-    fetch_url = config.get("_request_url", url) if config else url
-    load_full = config.get("load_full_page", True) if config else True
-    page_text = load_page(fetch_url, config, load_full_page=load_full)
-    soup = BeautifulSoup(page_text, "html.parser")
-
-    title, description, preview_image, sources = _parse_metadata_from_soup(
-        soup, fetch_url, config, include_sources=True
-    )
-    if config:
-        title = apply_rewrite(title, config.get('rewrite_title'))
-        description = apply_rewrite(description, config.get('rewrite_description'))
-        preview_image = apply_rewrite(preview_image, config.get('rewrite_image'))
-    metadata = WebsiteMetadata(
-        url=(config.get("_rewrite_url") if config else None) or url,
-        title=title,
-        description=description,
-        preview_image=preview_image,
-    )
+    metadata, sources = _load_website_metadata(url, config, username, include_sources=True)
     return metadata, sources, config
 
 
