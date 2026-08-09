@@ -56,6 +56,7 @@ def _get_domains_needing_auth(base_dir):
                 'needs_cookie': auth['cookie'],
                 'needs_headers': auth['headers'],
                 'needs_token': auth['token'],
+                'cookie_type': auth.get('cookie_type', 'anon'),
             })
     return domains
 
@@ -153,7 +154,7 @@ def adapters_page(request):
     # Domains needing auth (for add credential modal autocomplete)
     domains_needing_auth = _get_domains_needing_auth(base_dir)
     ctx['auth_domains_json'] = json.dumps([
-        {'d': d['domain'], 'c': d['needs_cookie'], 'h': d['needs_headers'], 't': d['needs_token']}
+        {'d': d['domain'], 'c': d['needs_cookie'], 'h': d['needs_headers'], 't': d['needs_token'], 'ct': d.get('cookie_type', 'anon')}
         for d in domains_needing_auth
     ])
 
@@ -234,7 +235,8 @@ def user_credentials(request):
     domains = _get_domains_needing_auth(base_dir)
     return JsonResponse({
         'domains': [{'domain': d['domain'], 'needs_cookie': d['needs_cookie'],
-                      'needs_headers': d['needs_headers'], 'needs_token': d['needs_token']}
+                      'needs_headers': d['needs_headers'], 'needs_token': d['needs_token'],
+                      'cookie_type': d.get('cookie_type', 'anon')}
                      for d in domains],
     })
 
@@ -271,7 +273,8 @@ def shared_credential_list(request):
     return JsonResponse({
         'credentials': credentials,
         'domains': [{'domain': d['domain'], 'needs_cookie': d['needs_cookie'],
-                      'needs_headers': d['needs_headers'], 'needs_token': d['needs_token']}
+                      'needs_headers': d['needs_headers'], 'needs_token': d['needs_token'],
+                      'cookie_type': d.get('cookie_type', 'anon')}
                      for d in domains],
     })
 

@@ -47,7 +47,14 @@ if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
 function findChromium() {
   const cfgPath = chromium_path || process.env.CHROMIUM_PATH || "";
-  const candidates = [cfgPath, "/usr/bin/chromium", "/usr/bin/chromium-browser", "/opt/homebrew/bin/chromium"].filter(Boolean);
+  const candidates = [
+    cfgPath,
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/opt/homebrew/bin/chromium",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  ].filter(Boolean);
   for (const p of candidates) {
     if (existsSync(p)) return p;
   }

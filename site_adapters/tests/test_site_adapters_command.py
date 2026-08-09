@@ -69,10 +69,10 @@ class SiteAdaptersCommandTestCase(TestCase):
         meta_config = {"_domain_key": "example.com", "cookie": cookie_config}
         snap_config = {"_domain_key": "example.com", "cookie": cookie_config}
 
-        def refresh_cookie_declarative(_refresh_config, _url, cookie_file, _domain_key):
+        def refresh_cookie_declarative(_refresh_config, _url, _domain_key):
             from site_adapters.services.auth.credentials import save_shared_cookie
             save_shared_cookie("example.com", "session=abc")
-            return True
+            return [{"name": "session", "value": "abc", "domain": ".example.com", "path": "/"}]
 
         out = StringIO()
         with mock.patch(

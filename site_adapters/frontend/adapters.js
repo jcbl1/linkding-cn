@@ -526,7 +526,7 @@ function initAdapters() {
           var item = document.createElement('div');
           item.className = 'wa-url-dropdown-item';
           var labels = [];
-          if (d.c || d.needs_cookie) labels.push('Cookie');
+          if (d.c || d.needs_cookie) { var cookieLabel = (d.ct === 'login') ? 'Cookie' : 'Cookie (auto)'; labels.push(cookieLabel); }
           if ((d.h && d.h.length) || (d.needs_headers && d.needs_headers.length)) labels.push('Header');
           if (d.t || d.needs_token) labels.push('Token');
           item.innerHTML = '<span>' + escapeHtml(d.d || d.domain) + (labels.length ? ' <span class="text-gray" style="font-size:12px">(' + escapeHtml(labels.join(' + ')) + ')</span>' : '') + '</span>';

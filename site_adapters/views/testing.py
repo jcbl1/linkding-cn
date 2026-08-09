@@ -1,5 +1,5 @@
 """
-Test panel: config/metadata/snapshot/reader/cookie/pipeline tests + validation.
+Test panel: config/metadata/snapshot/reader/credential/pipeline tests + validation.
 """
 import json
 import logging
@@ -16,7 +16,6 @@ from bookmarks.services.website_loader import (
 )
 from bookmarks.utils import is_safe_domain_key
 from site_adapters.services.auth.cookies import (
-    load_cookie_file,
     verify_and_refresh,
 )
 from site_adapters.services.auth.credentials import save_shared_cookie
@@ -79,7 +78,7 @@ def _handle_validate(request) -> JsonResponse:
 
 
 # ---------------------------------------------------------------------------
-# Test/verification (metadata, snapshot, reader, cookie, pipeline)
+# Test/verification (metadata, snapshot, reader, credential, pipeline)
 # ---------------------------------------------------------------------------
 
 def _test_response(data, entries=None, **kwargs):
@@ -104,7 +103,7 @@ def _handle_test(request) -> JsonResponse:
         'metadata': _test_metadata,
         'snapshot': _test_snapshot,
         'reader': _test_reader,
-        'cookie': _test_cookie,
+        'credential': _test_credential,
         'pipeline': _test_pipeline,
     }
     handler = handlers.get(test_type)
@@ -165,15 +164,149 @@ def _make_default_reader_config():
     }
 
 
+# ---------------------------------------------------------------------------
+# Credential source tracking (before/after diff)
+# ---------------------------------------------------------------------------
+
+def _snapshot_credential_state(config: dict, username: str, hostname: str) -> dict:
+    """Capture current credential values before a test operation.
+
+    Returns a dict with cookie/headers/token keys, each containing the
+    best available value and its source (user/shared/http_header/none).
+    Only captures credential types that are configured for the domain.
+    """
+    from site_adapters.services.auth.credentials import (
+        get_user_cookie, get_shared_cookie, get_best_cookie,
+        get_user_headers, get_shared_headers, get_best_header,
+        get_user_token, get_shared_token, get_best_token,
+        get_auth_requirements_for_domain,
+    )
+
+    state = {}
+    auth_req = get_auth_requirements_for_domain(hostname)
+
+    # Cookie
+    if auth_req.get('cookie'):
+        best, _ = get_best_cookie(username, hostname)
+        user_val, _ = get_user_cookie(username, hostname) if username else (None, '')
+        shared_val, _ = get_shared_cookie(hostname)
+        http_val = (config.get('headers', {}) or {}).get('Cookie') if config else None
+        source = 'none'
+        if user_val:
+            source = 'user'
+        elif shared_val:
+            source = 'shared'
+        elif http_val:
+            source = 'http_header'
+        state['cookie'] = {'value': best, 'source': source}
+
+    # Headers
+    header_names = auth_req.get('headers', [])
+    if header_names:
+        header_state = {}
+        for h in header_names:
+            best, _ = get_best_header(username, hostname, h)
+            user_h, _ = get_user_header(username, hostname, h) if username else (None, '')
+            shared_h, _ = get_shared_header(hostname, h)
+            source = 'none'
+            if user_h:
+                source = 'user'
+            elif shared_h:
+                source = 'shared'
+            header_state[h] = {'value': best, 'source': source}
+        state['headers'] = header_state
+
+    # Token
+    if auth_req.get('token'):
+        best, _ = get_best_token(username, hostname)
+        user_val, _ = get_user_token(username, hostname) if username else (None, '')
+        shared_val, _ = get_shared_token(hostname)
+        source = 'none'
+        if user_val:
+            source = 'user'
+        elif shared_val:
+            source = 'shared'
+        state['token'] = {'value': best, 'source': source}
+
+    return state
+
+
+def _build_credential_entry(cred_type: str, entry, before_entry) -> dict:
+    """Build a single credential source + status entry.
+
+    Handles both scalar (cookie/token) and dict (headers) values.
+    """
+    if cred_type == 'headers':
+        # entry is dict of {header_name: {value, source}}
+        sources = {v.get('source', 'none') for v in entry.values()} if entry else set()
+        if 'user' in sources:
+            source = 'user'
+        elif 'shared' in sources:
+            source = 'shared'
+        else:
+            source = 'none'
+
+        has_before = bool(before_entry) if before_entry else False
+        has_after = bool(entry)
+        if not has_before and has_after:
+            status = 'acquired'
+        elif has_before and has_after:
+            changed = False
+            if before_entry:
+                for k, v in entry.items():
+                    bv = before_entry.get(k, {})
+                    if v.get('value') != bv.get('value'):
+                        changed = True
+                        break
+            status = 'refreshed' if changed else 'existing'
+        else:
+            status = 'none'
+
+        return {'source': source, 'status': status}
+
+    # Scalar: cookie or token
+    source = entry.get('source', 'none') if entry else 'none'
+    has_before = bool(before_entry and before_entry.get('value')) if before_entry else False
+    has_after = bool(entry and entry.get('value'))
+
+    if not has_before and has_after:
+        status = 'acquired'
+    elif has_before and has_after:
+        changed = entry.get('value') != before_entry.get('value')
+        status = 'refreshed' if changed else 'existing'
+    else:
+        status = 'none'
+
+    return {'source': source, 'status': status}
+
+
+def _compute_credential_sources(config: dict, username: str, hostname: str,
+                                before: dict) -> dict:
+    """Compare before/after credential state to produce source + status.
+
+    Returns {cred_type: {source: str, status: str}} for each configured type.
+    status values: 'existing' | 'refreshed' | 'acquired' | 'none'
+    """
+    after = _snapshot_credential_state(config, username, hostname)
+    result = {}
+    for cred_type in ('cookie', 'headers', 'token'):
+        before_entry = before.get(cred_type)
+        after_entry = after.get(cred_type)
+        if not before_entry and not after_entry:
+            continue
+        entry = after_entry or before_entry
+        result[cred_type] = _build_credential_entry(cred_type, entry, before_entry)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Test handlers
+# ---------------------------------------------------------------------------
 
 def _extract_match_info(config):
     """从 config 中提取匹配信息。"""
     if not config:
-        return {
-            'matched': False,
-            'domain_key': None,
-            'adapter': None,
-        }
+        return {'matched': False, 'domain_key': None, 'adapter': None}
     return {
         'matched': True,
         'domain_key': config.get('_domain_key'),
@@ -182,13 +315,19 @@ def _extract_match_info(config):
 
 
 def _test_metadata(url, base_dir, username, entries):
+    hostname = urlparse(url).hostname or ''
     config = get_metadata_config(url, username=username)
+    before = _snapshot_credential_state(config, username, hostname) if config else {}
+
     show_cfg = show_config(url, base_dir)
     no_match = False
     if not config:
         no_match = True
     metadata, sources, config = load_website_metadata_for_test(url, username=username)
     match_info = _extract_match_info(config)
+
+    credential_sources = _compute_credential_sources(config, username, hostname, before)
+
     result = {
         'type': 'metadata',
         'no_match': no_match,
@@ -202,6 +341,7 @@ def _test_metadata(url, base_dir, username, entries):
         'request_url': config.get('_request_url', url) if config else url,
         'result': metadata.to_dict(),
         'sources': sources,
+        'credential_sources': credential_sources,
     }
     if no_match:
         result['default_config'] = _make_default_metadata_config()
@@ -209,7 +349,10 @@ def _test_metadata(url, base_dir, username, entries):
 
 
 def _test_snapshot(url, base_dir, username, entries):
+    hostname = urlparse(url).hostname or ''
     config = get_snapshot_config(url, username=username)
+    before = _snapshot_credential_state(config, username, hostname) if config else {}
+
     show_cfg = show_config(url, base_dir)
     no_match = False
     if not config:
@@ -219,6 +362,9 @@ def _test_snapshot(url, base_dir, username, entries):
     filename = 'snapshot_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
     out_path = os.path.join(TEST_ASSETS_DIR, filename)
     create_snapshot(url, out_path, username=username)
+
+    credential_sources = _compute_credential_sources(config, username, hostname, before)
+
     match_info = _extract_match_info(config)
     result = {
         'type': 'snapshot',
@@ -231,6 +377,7 @@ def _test_snapshot(url, base_dir, username, entries):
         'merged_config': show_cfg.get('merged'),
         'original_url': url,
         'request_url': config.get('_request_url', url) if config else url,
+        'credential_sources': credential_sources,
         'result': {
             'file': filename,
             'size': os.path.getsize(out_path),
@@ -243,7 +390,10 @@ def _test_snapshot(url, base_dir, username, entries):
 
 
 def _test_reader(url, base_dir, username, entries):
+    hostname = urlparse(url).hostname or ''
     config = get_reader_config(url, username=username)
+    before = _snapshot_credential_state(config, username, hostname) if config else {}
+
     show_cfg = show_config(url, base_dir)
     no_match = False
     if not config:
@@ -262,6 +412,9 @@ def _test_reader(url, base_dir, username, entries):
     reader_path = os.path.join(TEST_ASSETS_DIR, reader_filename)
     with open(reader_path, 'w', encoding='utf-8') as f:
         f.write(reader_html)
+
+    credential_sources = _compute_credential_sources(config, username, hostname, before)
+
     match_info = _extract_match_info(config)
     result_data = {
         'type': 'reader',
@@ -274,6 +427,7 @@ def _test_reader(url, base_dir, username, entries):
         'merged_config': show_cfg.get('merged'),
         'original_url': url,
         'request_url': config.get('_request_url', url) if config else url,
+        'credential_sources': credential_sources,
         'result': {
             'title': result.get('title', ''),
             'word_count': result.get('wordCount', 0),
@@ -289,75 +443,161 @@ def _test_reader(url, base_dir, username, entries):
     return _test_response(result_data, entries=entries)
 
 
-def _test_cookie(url, base_dir, username, entries):
-    from site_adapters.services.auth.credentials import get_best_cookie, get_shared_cookie, get_user_cookie
+def _test_credential(url, base_dir, username, entries):
+    """Test and display credential state for a URL (cookie + headers + token)."""
+    from site_adapters.services.auth.credentials import (
+        get_best_cookie, get_shared_cookie, get_user_cookie,
+        get_best_header, get_user_header, get_shared_header,
+        get_best_token, get_user_token, get_shared_token,
+        get_auth_requirements_for_domain,
+    )
     hostname = urlparse(url).hostname or ''
     if not hostname:
-        return _test_response({'type': 'cookie', 'error': 'Unable to parse hostname from URL'}, entries=entries)
+        return _test_response({'type': 'credential', 'error': 'Unable to parse hostname from URL'}, entries=entries)
 
-    # 1) Check shared credential cookie (credentials/shared/)
-    shared_cookie, _ = get_shared_cookie(hostname)
-    has_global_cookie = bool(shared_cookie)
+    auth_req = get_auth_requirements_for_domain(hostname)
 
-    # 2) Check user credential cookie (per-user, highest priority)
-    user_cookie_str = None
-    if username:
-        user_cookie_str, _ = get_user_cookie(username, hostname)
-    has_user_cookie = bool(user_cookie_str)
-
-    # Combined: get_best_cookie handles user-first, shared-fallback
-    best_cookie, _ = get_best_cookie(username, hostname)
-    cookie = best_cookie
-    has_cookie = bool(cookie)
-    cookie_preview = cookie[:50] + '...' if cookie and len(cookie) > 50 else (cookie or '')
-
-    # Get config for refresh info and domain_key display
+    # Get config for domain_key display and refresh
     metadata_config = get_metadata_config(url, username=username) or {}
     domain_key = metadata_config.get('_domain_key', hostname) if metadata_config else hostname
-    snapshot_config = get_snapshot_config(url, username=username) or {}
     config = metadata_config
-    if snapshot_config.get('cookie', {}).get('file') and not metadata_config.get('cookie', {}).get('file'):
-        config = snapshot_config
-    cookie_config = config.get('cookie', {})
 
-    refreshed = False
-    if cookie_config:
-        before = cookie
-        after = verify_and_refresh(cookie_config, url, domain_key, {'url': url, 'status': 0, 'title': '', 'body_preview': ''})
+    # --- Cookie ---
+    cookie_info = None
+    if auth_req.get('cookie'):
+        cookie_type = auth_req.get('cookie_type', 'anon')
+
+        # Before state
+        before_user, _ = get_user_cookie(username, hostname) if username else (None, '')
+        before_shared, _ = get_shared_cookie(hostname)
+        before_best, _ = get_best_cookie(username, hostname)
+
+        has_user_before = bool(before_user)
+        has_shared_before = bool(before_shared)
+
+        # Refresh
+        cookie_config = config.get('cookie', {}) if config else {}
+        before = before_best
+        after = verify_and_refresh(cookie_config, url, domain_key,
+                                   {'url': url, 'status': 0, 'title': '', 'body_preview': ''},
+                                   username=username) if cookie_config else None
         refreshed = bool(after and (not before or after != before))
-        if refreshed:
-            # Re-read after refresh
-            shared_cookie, _ = get_shared_cookie(hostname)
-            has_global_cookie = bool(shared_cookie)
-            if username:
-                user_cookie_str, _ = get_user_cookie(username, hostname)
-                has_user_cookie = bool(user_cookie_str)
-            best_cookie, _ = get_best_cookie(username, hostname)
-            cookie = best_cookie
-            has_cookie = bool(cookie)
-            if has_cookie:
-                cookie_preview = cookie[:50] + '...' if cookie and len(cookie) > 50 else cookie
 
-    return _test_response({
-        'type': 'cookie',
+        # After state
+        after_user, _ = get_user_cookie(username, hostname) if username else (None, '')
+        after_shared, _ = get_shared_cookie(hostname)
+        after_best, _ = get_best_cookie(username, hostname)
+
+        has_cookie = bool(after_best)
+        cookie_preview = after_best[:50] + '...' if after_best and len(after_best) > 50 else (after_best or '')
+
+        # Source
+        if after_user:
+            cookie_source = 'user'
+        elif after_shared:
+            cookie_source = 'shared'
+        elif after_best:
+            cookie_source = 'http_header'
+        else:
+            cookie_source = 'none'
+
+        # Status
+        had_any_before = has_user_before or has_shared_before
+        if refreshed:
+            cookie_status = 'acquired' if not had_any_before else 'refreshed'
+        else:
+            cookie_status = 'existing' if has_cookie else 'none'
+
+        cookie_info = {
+            'has_value': has_cookie,
+            'has_user': bool(after_user),
+            'has_shared': bool(after_shared),
+            'preview': cookie_preview,
+            'source': cookie_source,
+            'status': cookie_status,
+            'cookie_type': cookie_type,
+        }
+
+    # --- Headers ---
+    headers_info = None
+    header_names = auth_req.get('headers', [])
+    if header_names:
+        header_list = []
+        for h in header_names:
+            best, _ = get_best_header(username, hostname, h)
+            user_h, _ = get_user_header(username, hostname, h) if username else (None, '')
+            shared_h, _ = get_shared_header(hostname, h)
+            source = 'none'
+            if user_h:
+                source = 'user'
+            elif shared_h:
+                source = 'shared'
+            header_list.append({
+                'name': h,
+                'has_value': bool(best),
+                'source': source,
+            })
+        h_sources = {h['source'] for h in header_list}
+        if 'user' in h_sources:
+            h_source = 'user'
+        elif 'shared' in h_sources:
+            h_source = 'shared'
+        else:
+            h_source = 'none'
+        headers_info = {
+            'headers': header_list,
+            'source': h_source,
+            'status': 'existing' if h_source != 'none' else 'none',
+        }
+
+    # --- Token ---
+    token_info = None
+    if auth_req.get('token'):
+        best, _ = get_best_token(username, hostname)
+        user_val, _ = get_user_token(username, hostname) if username else (None, '')
+        shared_val, _ = get_shared_token(hostname)
+        source = 'none'
+        if user_val:
+            source = 'user'
+        elif shared_val:
+            source = 'shared'
+        token_info = {
+            'has_value': bool(best),
+            'source': source,
+            'status': 'existing' if source != 'none' else 'none',
+        }
+
+    result = {
+        'type': 'credential',
         'hostname': hostname,
         'domain_key': domain_key,
-        'has_cookie': has_cookie,
-        'has_global_cookie': has_global_cookie,
-        'has_user_cookie': has_user_cookie,
-        'cookie_preview': cookie_preview,
-        'refreshed': refreshed,
-    }, entries=entries)
+    }
+    if cookie_info:
+        result['cookie'] = cookie_info
+    if headers_info:
+        result['headers'] = headers_info
+    if token_info:
+        result['token'] = token_info
+
+    return _test_response(result, entries=entries)
 
 
 def _test_pipeline(url, base_dir, username, entries):
     from bookmarks.services import reader_processor
     from bookmarks.services.snapshot_processor import create_snapshot
+    hostname = urlparse(url).hostname or ''
     config_result = show_config(url, base_dir)
     meta_config = get_metadata_config(url, username=username)
+    before_meta = _snapshot_credential_state(meta_config, username, hostname) if meta_config else {}
     snap_config = get_snapshot_config(url, username=username)
+    before_snap = _snapshot_credential_state(snap_config, username, hostname) if snap_config else {}
     reader_config = get_reader_config(url, username=username)
+    before_reader = _snapshot_credential_state(reader_config, username, hostname) if reader_config else {}
+
     metadata, sources, _ = load_website_metadata_for_test(url, username=username)
+
+    credential_sources_meta = _compute_credential_sources(meta_config, username, hostname, before_meta)
+
     os.makedirs(TEST_ASSETS_DIR, exist_ok=True)
     snap_filename = 'snapshot_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
     snap_path = os.path.join(TEST_ASSETS_DIR, snap_filename)
@@ -374,6 +614,10 @@ def _test_pipeline(url, base_dir, username, entries):
     snapshot_no_match = not snap_config
     reader_no_match = not reader_config
     md_match = _extract_match_info(meta_config)
+
+    credential_sources_snap = _compute_credential_sources(snap_config, username, hostname, before_snap)
+    credential_sources_reader = _compute_credential_sources(reader_config, username, hostname, before_reader)
+
     snap_match = _extract_match_info(snap_config)
     rd_match = _extract_match_info(reader_config)
     result = {
@@ -386,6 +630,7 @@ def _test_pipeline(url, base_dir, username, entries):
             'matched': md_match['matched'],
             'domain_key': md_match['domain_key'],
             'adapter': md_match['adapter'],
+            'credential_sources': credential_sources_meta,
             'no_match': metadata_no_match,
             'original_url': url,
             'request_url': meta_config.get('_request_url', url) if meta_config else url,
@@ -398,6 +643,7 @@ def _test_pipeline(url, base_dir, username, entries):
             'merged_config': config_result.get('merged'),
             'matched': snap_match['matched'],
             'domain_key': snap_match['domain_key'],
+            'credential_sources': credential_sources_snap,
             'adapter': snap_match['adapter'],
             'no_match': snapshot_no_match,
             'original_url': url,
@@ -414,6 +660,7 @@ def _test_pipeline(url, base_dir, username, entries):
             'merged_config': config_result.get('merged'),
             'matched': rd_match['matched'],
             'domain_key': rd_match['domain_key'],
+            'credential_sources': credential_sources_reader,
             'adapter': rd_match['adapter'],
             'no_match': reader_no_match,
             'original_url': url,
@@ -467,5 +714,3 @@ def save_cookie(request):
         return JsonResponse({'error': 'invalid domain key'}, status=400)
     save_shared_cookie(domain_key, cookie_str)
     return JsonResponse({'success': True})
-
-

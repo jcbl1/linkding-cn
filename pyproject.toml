@@ -20,6 +20,7 @@ dependencies = [
     "uwsgi>=2.0.31",
     "waybackpy>=3.0.6",
     "cryptography>=41.0.0",
+    "publicsuffixlist>=1.0.2.20260726",
 ]
 
 [dependency-groups]

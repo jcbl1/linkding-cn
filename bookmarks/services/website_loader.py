@@ -15,7 +15,6 @@ from django.conf import settings
 from django.utils import timezone
 
 from site_adapters.services.auth.cookies import (
-    load_cookie_file,
     verify_and_refresh,
 )
 from site_adapters.services.auth.credentials import get_shared_cookie
@@ -193,6 +192,27 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
     page_text = None
     last_exc = None
 
+    # Pre-flight: for anon-type cookie sites without cookies, acquire via browser first.
+    try:
+        cookie_config = config.get("cookie") if config else {}
+        if cookie_config and cookie_config.get("type") == "anon":
+            cookie_str = _cookie_string_from_config(config)
+            if not cookie_str and cookie_config.get("refresh"):
+                domain_key = config.get("_domain_key")
+                logger.info("No cookie for anon site %s, acquiring via browser refresh", domain_key)
+                new_cookie = verify_and_refresh(
+                    cookie_config, fetch_url, domain_key,
+                    {"url": fetch_url, "status": 0, "title": "", "body_preview": ""},
+                    username=username,
+                )
+                if new_cookie:
+                    config["_user_cookie"] = new_cookie
+                    logger.info("Pre-flight acquired cookie for %s, proceeding with request", domain_key)
+                else:
+                    logger.warning("Pre-flight failed to acquire cookie for %s", domain_key)
+    except Exception as e:
+        logger.error("Pre-flight cookie acquisition error for %s: %s", url, e)
+
     for attempt in range(_METADATA_MAX_RETRIES + 1):
         try:
             start = timezone.now()
@@ -217,13 +237,19 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
                 )
         except NonRetryableMetadataError as exc:
             logger.info("Metadata request failed without retry. url=%s", exc_info=exc)
+            if include_sources:
+                return _empty_metadata(url), {}
             return _empty_metadata(url)
         except Exception as exc:
             logger.error("Unexpected metadata request failure. url=%s", exc_info=exc)
+            if include_sources:
+                return _empty_metadata(url), {}
             return _empty_metadata(url)
 
     if last_exc is not None:
         logger.warning("All %d retries exhausted, returning empty metadata. url=%s", _METADATA_MAX_RETRIES, url)
+        if include_sources:
+            return _empty_metadata(url), {}
         return _empty_metadata(url)
 
     try:
@@ -234,7 +260,7 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
         )
 
         cookie_config = config.get("cookie") if config else {}
-        if cookie_config and cookie_config.get("file") and not config.get("_user_cookie"):
+        if cookie_config:
             domain_key = config.get("_domain_key")
             verify_context = {
                 "url": fetch_url,
@@ -243,9 +269,11 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
                 "body_preview": (page_text or "")[:2000],
             }
             before = _cookie_string_from_config(config)
-            after = verify_and_refresh(cookie_config, fetch_url, domain_key, verify_context)
+            after = verify_and_refresh(cookie_config, fetch_url, domain_key, verify_context, username=username)
             if after and after != before:
                 retry_config = dict(config)
+                # 刷新成功后更新 _user_cookie 为新的 cookie 字符串
+                retry_config["_user_cookie"] = after
                 page_text = load_page(fetch_url, retry_config, load_full_page=load_full)
                 soup = BeautifulSoup(page_text, "html.parser")
                 title, description, preview_image, sources = _parse_metadata_from_soup(
@@ -622,20 +650,16 @@ def build_request_cookies(config: dict = None) -> dict:
 def _cookie_string_from_config(config: dict = None) -> str | None:
     if not config:
         return None
-    # Priority: user credentials > cookie file (shared) > Cookie header (http config) > shared cookie
+    # Priority: user credentials > shared credentials > Cookie header (http config)
     user_cookie = config.get("_user_cookie")
     if user_cookie:
         return user_cookie
-    cookie_config = config.get("cookie", {})
-    cookie_file = cookie_config.get("file") if cookie_config else None
-    if cookie_file:
-        return load_cookie_file(cookie_file)
-    cookies_str = config.get("headers", {}).get("Cookie")
-    if cookies_str:
-        return cookies_str
     domain_key = config.get("_domain_key")
     if domain_key:
         shared, _ = get_shared_cookie(domain_key)
         if shared:
             return shared
+    cookies_str = config.get("headers", {}).get("Cookie")
+    if cookies_str:
+        return cookies_str
     return None

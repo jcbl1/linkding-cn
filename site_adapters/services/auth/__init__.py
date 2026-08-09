@@ -8,7 +8,6 @@ Unified authentication API — 轻量统一层
 import logging
 
 from site_adapters.services.auth.cookies import (
-    load_cookie_file,
     verify_and_refresh,
 )
 from site_adapters.services.auth.credentials import (
@@ -45,20 +44,15 @@ def get_auth_for_request(url: str, domain_key: str, section: str,
     {
         'headers': dict,        # 要注入的 HTTP headers（含 token header）
         'cookie_str': str|None, # cookie 字符串
-        'cookie_file': str,     # cookie 文件路径
     }
     """
     headers = dict(merged_http)
 
-    # Cookie: config file first, then credential-driven (user → shared)
+    # Cookie: user credential first, shared credential fallback
     cookie_str = None
-    cookie_file = cookie_config.get('file', '')
-    if cookie_file:
-        cookie_str = load_cookie_file(cookie_file)
-    if not cookie_str:
-        best, _ = get_best_cookie(username, domain_key)
-        if best:
-            cookie_str = best
+    best, _ = get_best_cookie(username, domain_key)
+    if best:
+        cookie_str = best
 
 
     # Best headers: user first, shared fallback
@@ -88,5 +82,4 @@ def get_auth_for_request(url: str, domain_key: str, section: str,
     return {
         'headers': headers,
         'cookie_str': cookie_str,
-        'cookie_file': cookie_file,
     }

@@ -1011,7 +1011,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       'metadata': renderMetadataResult,
       'snapshot': renderSnapshotResult,
       'reader': renderReaderResult,
-      'cookie': renderCookieResult,
+      'credential': renderCredentialResult,
       'pipeline': renderPipelineResult
     };
     var fn = handlers[r.type];
@@ -1140,6 +1140,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     }
     h += renderSummaryRows(metaUrlRows);
     h += renderMatchedConfig(r);
+    h += renderCredentialSources(r.credential_sources);
     h += renderCommandInfo(filterExecutions(r.executions, ['metadata', 'metadata_script']));
     h += '</div>';
     if (r.result) {
@@ -1180,6 +1181,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     }
     h += renderSummaryRows(snapUrlRows);
     h += renderMatchedConfig(r);
+    h += renderCredentialSources(r.credential_sources);
     h += renderCommandInfo(filterExecutions(r.executions, ['snapshot', 'snapshot_script']));
     h += '</div>';
     if (r.result) {
@@ -1219,6 +1221,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     }
     h += renderSummaryRows(readerUrlRows);
     h += renderMatchedConfig(r);
+    h += renderCredentialSources(r.credential_sources);
     h += renderCommandInfo(filterExecutions(r.executions, ['reader']));
     h += '</div>';
     if (r.result) {
@@ -1251,25 +1254,70 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     return h;
   }
 
-  function renderCookieResult(r) {
+  function renderCredentialSources(cs) {
+    if (!cs || !Object.keys(cs).length) return '';
+    var parts = [];
+    if (cs.cookie) parts.push('cookie · ' + cs.cookie.source + ' · ' + cs.cookie.status);
+    if (cs.headers) parts.push('headers · ' + cs.headers.source + ' · ' + cs.headers.status);
+    if (cs.token) parts.push('token · ' + cs.token.source + ' · ' + cs.token.status);
+    return renderSummaryRows([{label: 'credential_sources', value: parts.join('; ')}]);
+  }
+
+  function renderCredentialResult(r) {
     var h = '<div class="wa-result-section">';
     h += '<div class="wa-result-block">';
     h += '<h3 class="wa-result-heading">' + gettext('Summary') + '</h3>';
     h += renderSummaryRows([
       {label: 'domain_key', value: r.domain_key}
     ]);
+    if (r.cookie) {
+      var c = r.cookie;
+      var label = c.source + ' \u00b7 ' + c.status;
+      if (c.cookie_type === 'anon') label += ' (auto)';
+      h += renderSummaryRows([{label: 'cookie', value: label}]);
+    }
+    if (r.headers) {
+      h += renderSummaryRows([{label: 'headers', value: r.headers.source + ' \u00b7 ' + r.headers.status}]);
+    }
+    if (r.token) {
+      h += renderSummaryRows([{label: 'token', value: r.token.source + ' \u00b7 ' + r.token.status}]);
+    }
     h += renderCommandInfo(filterExecutions(r.executions, ['cookie_refresh', 'cookie_verify']));
     h += '</div>';
-    h += '<div class="wa-result-block">';
-    h += '<h3 class="wa-result-heading">' + gettext('Result') + '</h3>';
-    h += renderResultRows({
-      'has_global_cookie': r.has_global_cookie,
-      'has_user_cookie': r.has_user_cookie,
-      'has_cookie': r.has_cookie,
-      'cookie_preview': r.cookie_preview,
-      'refreshed': r.refreshed
-    });
-    h += '</div>';
+    // Cookie detail
+    if (r.cookie) {
+      h += '<div class="wa-result-block">';
+      h += '<h3 class="wa-result-heading">Cookie</h3>';
+      h += renderResultRows({
+        'source': r.cookie.source,
+        'status': r.cookie.status,
+        'has_value': r.cookie.has_value,
+        'preview': r.cookie.preview
+      });
+      h += '</div>';
+    }
+    // Headers detail
+    if (r.headers && r.headers.headers) {
+      h += '<div class="wa-result-block">';
+      h += '<h3 class="wa-result-heading">Headers</h3>';
+      var hrows = {};
+      r.headers.headers.forEach(function(hdr) {
+        hrows[hdr.name] = (hdr.has_value ? (hdr.source + ' \u00b7 existing') : 'none');
+      });
+      h += renderResultRows(hrows);
+      h += '</div>';
+    }
+    // Token detail
+    if (r.token) {
+      h += '<div class="wa-result-block">';
+      h += '<h3 class="wa-result-heading">Token</h3>';
+      h += renderResultRows({
+        'source': r.token.source,
+        'status': r.token.status,
+        'has_value': r.token.has_value
+      });
+      h += '</div>';
+    }
     if (r.executions && r.executions.length) {
       h += renderCollapsible(gettext('Execution Log'), renderExecutionLog(r.executions), false);
     }
@@ -1308,6 +1356,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       }
       h += renderSummaryRows(pipeMetaUrlRows);
       h += renderMatchedConfig(m);
+      h += renderCredentialSources(m.credential_sources);
       if (m.result) {
         var orderedKeys = ['title', 'description', 'preview_image'];
         var restKeys = Object.keys(m.result).filter(function (k) { return orderedKeys.indexOf(k) < 0 && k !== 'url'; });
@@ -1330,6 +1379,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       }
       h += renderSummaryRows(pipeSnapUrlRows);
       h += renderMatchedConfig(s);
+      h += renderCredentialSources(s.credential_sources);
       if (s.result) {
         var pipeSnapFields = {};
         Object.keys(s.result).forEach(function (k) {
@@ -1353,6 +1403,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       }
       h += renderSummaryRows(pipeReaderUrlRows);
       h += renderMatchedConfig(rd);
+      h += renderCredentialSources(rd.credential_sources);
       if (rd.result) {
         h += renderResultRows({
           'title': rd.result.title,

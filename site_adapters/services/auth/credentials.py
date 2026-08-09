@@ -693,13 +693,14 @@ def get_auth_requirements_for_domain(hostname: str, base_dir: str = '') -> dict:
     url = f'https://{hostname}'
     config = load_domain_config(url, base_dir)
     if not config:
-        return {'cookie': False, 'headers': [], 'token': False}
+        return {'cookie': False, 'headers': [], 'token': False, 'cookie_type': ''}
 
     auth = config.get('auth', {})
     has_cookie = bool(auth.get('cookie'))
     headers = list(auth.get('headers', {}).keys()) if isinstance(auth.get('headers'), dict) else []
     has_token = bool(auth.get('token', {}).get('endpoint'))
-    return {'cookie': has_cookie, 'headers': headers, 'token': has_token}
+    cookie_type = auth.get('cookie', {}).get('type', 'anon') if isinstance(auth.get('cookie'), dict) else 'anon'
+    return {'cookie': has_cookie, 'headers': headers, 'token': has_token, 'cookie_type': cookie_type}
 
 
 def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') -> dict:
@@ -708,7 +709,7 @@ def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') ->
         from site_adapters.services.base import _get_base_dir
         base_dir = _get_base_dir()
     if not domain_key:
-        return {'cookie': False, 'headers': [], 'token': False}
+        return {'cookie': False, 'headers': [], 'token': False, 'cookie_type': ''}
 
     from site_adapters.services.config import deep_merge
     from site_adapters.services.config.loader import _cache, _resolve_alias
@@ -717,18 +718,19 @@ def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') ->
     defaults = all_config.get('defaults', {})
     raw_config = all_config.get(domain_key)
     if raw_config is None:
-        return {'cookie': False, 'headers': [], 'token': False}
+        return {'cookie': False, 'headers': [], 'token': False, 'cookie_type': ''}
 
     resolved = _resolve_alias(raw_config, all_config) if isinstance(raw_config, dict) else raw_config
     if not isinstance(resolved, dict):
-        return {'cookie': False, 'headers': [], 'token': False}
+        return {'cookie': False, 'headers': [], 'token': False, 'cookie_type': ''}
 
     merged = deep_merge(resolved, defaults) if defaults else resolved
     auth = merged.get('auth', {})
     has_cookie = bool(auth.get('cookie'))
     headers = sorted(auth.get('headers', {}).keys()) if isinstance(auth.get('headers'), dict) else []
     has_token = bool(auth.get('token', {}).get('endpoint'))
-    return {'cookie': has_cookie, 'headers': headers, 'token': has_token}
+    cookie_type = auth.get('cookie', {}).get('type', 'anon') if isinstance(auth.get('cookie'), dict) else 'anon'
+    return {'cookie': has_cookie, 'headers': headers, 'token': has_token, 'cookie_type': cookie_type}
 
 
 # ---------------------------------------------------------------------------

@@ -37,7 +37,7 @@
           <button type="button" class="settings-help-button" data-settings-help-button aria-label="{% translate 'More info' %}" aria-expanded="false">
             <svg width="20" height="20" aria-hidden="true"><use href="#ld-icon-info"></use></svg>
           </button>
-          <span class="settings-help-popover" role="tooltip"><span class="form-input-hint">{% translate "Test merged config, metadata, snapshot, reader, cookie, or full pipeline behavior for one URL." %}</span></span>
+          <span class="settings-help-popover" role="tooltip"><span class="form-input-hint">{% translate "Test merged config, metadata, snapshot, reader, credential, or full pipeline behavior for one URL." %}</span></span>
         </span>
         <div class="wa-toolbar-spacer"></div>
         <button type="button" class="btn btn-sm" id="btn-clean-test-files">{% translate "Clean test files" %}</button>
@@ -59,7 +59,7 @@
                 <option value="metadata">{% translate "Metadata" %}</option>
                 <option value="snapshot">{% translate "Snapshot" %}</option>
                 <option value="reader">{% translate "Reader" %}</option>
-                <option value="cookie">{% translate "Cookie" %}</option>
+                <option value="credential">{% translate "Credential" %}</option>
                 <option value="pipeline">{% translate "Full Pipeline" %}</option>
               </select>
               <input type="text" name="test_username" class="form-input" placeholder="{% translate 'Test as user (optional)' %}" style="width:160px" autocomplete="off">

@@ -51,6 +51,8 @@ def _find_chromium_path() -> str:
         '/usr/bin/chromium-browser',
         '/usr/bin/google-chrome',
         '/usr/bin/google-chrome-stable',
+        '/Applications/Chromium.app/Contents/MacOS/Chromium',
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     ]:
         if os.path.isfile(path) and os.access(path, os.X_OK):
             return path

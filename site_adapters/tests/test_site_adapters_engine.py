@@ -143,8 +143,6 @@ class SiteAdaptersEngineTestCase(TestCase):
             config = get_metadata_config("https://example.com/post/123")
 
         self.assertEqual(config["timeout"], 5)
-        # Cookie file is auto-derived from domain key
-        self.assertEqual(config["cookie"]["file"], os.path.join(self.base_dir, "cookies", "example.com.json"))
         self.assertNotIn("Cookie", config["headers"])
         self.assertEqual(config["headers"]["X-Test"], "section")
         self.assertEqual(config["headers"]["Accept"], "text/html")

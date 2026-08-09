@@ -20,7 +20,6 @@ import os
 
 from site_adapters.services.auth.cookies import (
     COOKIE_DEFAULTS,
-    derive_cookie_file,
     merge_cookie,
 )
 from site_adapters.services.auth.credentials import (
@@ -176,16 +175,15 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
         for key, value in COOKIE_DEFAULTS.items():
             if key not in cookie_config:
                 cookie_config[key] = value
-        cookie_config['file'] = derive_cookie_file(domain_key)
 
     # cookie and http Cookie header cannot coexist
-    if cookie_config.get('file') and 'Cookie' in headers:
+    if cookie_config and 'Cookie' in headers:
         logger.warning("%s: auth.cookie and Cookie header coexist, Cookie header ignored", section)
         headers.pop('Cookie', None)
 
     # Best cookie: user credential first, shared fallback
     user_cookie_str = None
-    if cookie_config.get('file'):
+    if cookie_config:
         user_cookie_str, _ = get_best_cookie(username, hostname)
 
     # Best headers: user credential first, shared fallback

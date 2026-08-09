@@ -135,14 +135,9 @@ def _build_site_adapter_options(config: dict) -> tuple[list[str], list[str]]:
     if config.get("proxy"):
         options.append(f"--http-proxy-server={config['proxy']}")
     user_cookie = config.get("_user_cookie")
-    cookie_config = config.get("cookie", {})
-    cookie_file = cookie_config.get("file") if cookie_config else None
+    cookie_file = None
     if user_cookie:
         cookie_file = generate_temp_cookies_file(config.get("_domain_key", ""), cookie_str=user_cookie)
-        if cookie_file:
-            temp_files.append(cookie_file)
-    elif cookie_file:
-        cookie_file = copy_cookie_file_to_temp(cookie_file)
         if cookie_file:
             temp_files.append(cookie_file)
     if not cookie_file and config.get("_domain_key"):

@@ -133,26 +133,30 @@ class SiteAdaptersViewsTestCase(TestCase):
         self.assertEqual(response.json()["type"], "metadata")
         self.assertEqual(response.json()["error"], "blocked")
 
-    def test_cookie_test_uses_snapshot_cookie_scripts_and_refreshes_status(self):
+    def test_credential_test_uses_snapshot_cookie_scripts_and_refreshes_status(self):
         cookie_config = {"type": "anon"}
         meta_config = {"_domain_key": "example.com", "cookie": cookie_config}
 
-        def mock_verify_and_refresh(cookie_config, url, domain_key, verify_context):
+        def mock_verify_and_refresh(cookie_config, url, domain_key, verify_context, username=""):
             from site_adapters.services.auth.credentials import save_shared_cookie
             save_shared_cookie("example.com", "session=abc")
             return "session=abc"
 
-        with mock.patch("site_adapters.views.testing.get_metadata_config", return_value=meta_config),              mock.patch("site_adapters.views.testing.get_snapshot_config", return_value={}),              mock.patch("site_adapters.views.testing.verify_and_refresh", side_effect=mock_verify_and_refresh):
+        auth_req = {"cookie": True, "headers": [], "token": False, "cookie_type": "anon"}
+        with mock.patch("site_adapters.views.testing.get_metadata_config", return_value=meta_config), \
+             mock.patch("site_adapters.views.testing.get_snapshot_config", return_value={}), \
+             mock.patch("site_adapters.services.auth.credentials.get_auth_requirements_for_domain", return_value=auth_req), \
+             mock.patch("site_adapters.views.testing.verify_and_refresh", side_effect=mock_verify_and_refresh):
             response = self.client.post(
                 reverse("linkding:settings.site_adapters.action"),
-                {"action": "test", "test_type": "cookie", "url": "https://example.com/post"},
+                {"action": "test", "test_type": "credential", "url": "https://example.com/post"},
             )
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertTrue(data["has_cookie"])
-        self.assertTrue(data["refreshed"])
-        self.assertEqual(data["cookie_preview"], "session=abc")
+        self.assertTrue(data["cookie"]["has_value"])
+        self.assertTrue(data["cookie"]["status"] in ("refreshed", "acquired"))
+        self.assertEqual(data["cookie"]["preview"], "session=abc")
 
     def test_view_snapshot_rejects_path_outside_test_assets(self):
         response = self.client.get(
