@@ -105,6 +105,30 @@ def _resolve_all_paths(node, base_dir: str):
 # URL 重写
 # ---------------------------------------------------------------------------
 
+def apply_rewrite(value: str | None, rules) -> str | None:
+    """
+    对字符串逐条应用 rewrite 规则。
+
+    rules: [pattern, replacement] 或 [[pattern, replacement], ...]
+    None 输入视为空字符串进行 rewrite，最终空字符串返回 None。
+    """
+    if not rules:
+        return value
+    if isinstance(rules[0], str):
+        rules = [rules]
+    result = value or ""
+    for rule in rules:
+        if not isinstance(rule, list) or len(rule) < 2:
+            continue
+        pattern, replacement = rule[0], rule[1]
+        try:
+            result = re.sub(pattern, replacement, result)
+        except re.error as exc:
+            logger.warning("Invalid rewrite pattern %r: %s", pattern, exc)
+
+            continue
+    return result if result else None
+
 def apply_rewrite_url(url: str, rules) -> str | None:
     """
     rewrite_url: [pattern, replacement] 或 [[pattern, replacement], ...]

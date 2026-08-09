@@ -46,6 +46,8 @@ DEFAULT_FIELDS = frozenset({
 
 METADATA_FIELDS = frozenset({
     "select_title", "select_description", "select_image",
+    "rewrite_title", "rewrite_description", "rewrite_image",
+    "load_full_page", "max_content_limit",
     "script",
     "timeout", "proxy",
     "request_url", "rewrite_url",

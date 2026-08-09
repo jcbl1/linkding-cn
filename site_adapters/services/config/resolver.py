@@ -231,6 +231,12 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
             result['select_description'] = section_data['select_description']
         if 'select_image' in section_data:
             result['select_image'] = section_data['select_image']
+        if 'rewrite_title' in section_data:
+            result['rewrite_title'] = section_data['rewrite_title']
+        if 'rewrite_description' in section_data:
+            result['rewrite_description'] = section_data['rewrite_description']
+        if 'rewrite_image' in section_data:
+            result['rewrite_image'] = section_data['rewrite_image']
         result['script'] = section_data.get('script')
         result['load_full_page'] = section_data.get('load_full_page', True)
         if 'max_content_limit' in section_data:

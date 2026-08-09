@@ -20,6 +20,7 @@ from site_adapters.services.auth.cookies import (
 )
 from site_adapters.services.auth.credentials import get_shared_cookie
 from site_adapters.services.execution_log import log_execution
+from site_adapters.services.config import apply_rewrite
 from site_adapters.services.config.resolver import get_metadata_config
 from site_adapters.services.engine.script_runner import run_script
 from site_adapters.services.engine.browser_fallback import load_metadata_via_browser
@@ -128,13 +129,17 @@ def load_website_metadata(url: str, ignore_cache: bool = False, username: str = 
                     if result and isinstance(result, dict):
                         return WebsiteMetadata(
                             url=result.get('url') or url,
-                            title=result.get('title'),
-                            description=result.get('description'),
-                            preview_image=result.get('preview_image'),
+                            title=apply_rewrite(result.get('title'), config.get('rewrite_title')),
+                            description=apply_rewrite(result.get('description'), config.get('rewrite_description')),
+                            preview_image=apply_rewrite(result.get('preview_image'), config.get('rewrite_image')),
                         )
                     return _empty_metadata(url)
                 result = run_script(loader_path, url=url, config=config, html_content=body)
                 if result:
+                    if isinstance(result, dict):
+                        result['title'] = apply_rewrite(result.get('title'), config.get('rewrite_title'))
+                        result['description'] = apply_rewrite(result.get('description'), config.get('rewrite_description'))
+                        result['image'] = apply_rewrite(result.get('image'), config.get('rewrite_image'))
                     return _normalize_metadata_result(url, result, source=loader_path)
                 return _empty_metadata(url)
         else:
@@ -252,6 +257,11 @@ def _load_website_metadata(url: str, config: dict = None, username: str = ''):
     except Exception as exc:
         logger.error("Unexpected metadata parsing failure. url=%s", url, exc_info=exc)
         return _empty_metadata(url)
+
+    if config:
+        title = apply_rewrite(title, config.get('rewrite_title'))
+        description = apply_rewrite(description, config.get('rewrite_description'))
+        preview_image = apply_rewrite(preview_image, config.get('rewrite_image'))
 
     return WebsiteMetadata(
         url=(config.get("_rewrite_url") if config else None) or url,
@@ -410,9 +420,9 @@ def load_website_metadata_for_test(url: str, username: str = ''):
         if result and isinstance(result, dict):
             metadata = WebsiteMetadata(
                 url=result.get('url') or url,
-                title=result.get('title'),
-                description=result.get('description'),
-                preview_image=result.get('preview_image'),
+                title=apply_rewrite(result.get('title'), config.get('rewrite_title')),
+                description=apply_rewrite(result.get('description'), config.get('rewrite_description')),
+                preview_image=apply_rewrite(result.get('preview_image'), config.get('rewrite_image')),
             )
         else:
             metadata = _empty_metadata(url)
@@ -426,6 +436,10 @@ def load_website_metadata_for_test(url: str, username: str = ''):
     title, description, preview_image, sources = _parse_metadata_from_soup(
         soup, fetch_url, config, include_sources=True
     )
+    if config:
+        title = apply_rewrite(title, config.get('rewrite_title'))
+        description = apply_rewrite(description, config.get('rewrite_description'))
+        preview_image = apply_rewrite(preview_image, config.get('rewrite_image'))
     metadata = WebsiteMetadata(
         url=(config.get("_rewrite_url") if config else None) or url,
         title=title,
