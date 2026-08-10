@@ -369,6 +369,36 @@ function initAdapters() {
       panel.hidden = t !== fieldType;
     });
   }
+  // ===================================================================
+  //  Update help text for the selected domain + type
+  // ===================================================================
+  function updateHelpText(modal, domainInfo, activeType) {
+    var helpArea = modal.querySelector('[data-cred-help]');
+    var helpText = modal.querySelector('.wa-cred-help-text');
+    if (!helpArea || !helpText) return;
+    var helpKey = { cookie: 'c', header: 'h', oauth2: 't', basic_auth: 'b' }[activeType] || '';
+    if (!helpKey) { helpArea.hidden = true; return; }
+    var help = '';
+    if (domainInfo) {
+      if (domainInfo.help && domainInfo.help[helpKey]) {
+        help = domainInfo.help[helpKey];
+      } else if (helpKey === 'c' && domainInfo.cookie_help) {
+        help = domainInfo.cookie_help;
+      } else if (helpKey === 'h' && domainInfo.headers_help) {
+        help = domainInfo.headers_help;
+      } else if (helpKey === 't' && domainInfo.oauth2_help) {
+        help = domainInfo.oauth2_help;
+      } else if (helpKey === 'b' && domainInfo.basic_help) {
+        help = domainInfo.basic_help;
+      }
+    }
+    if (help) {
+      helpText.textContent = "How to get it: " + help;
+      helpArea.hidden = false;
+    } else {
+      helpArea.hidden = true;
+    }
+  }
 
   // ===================================================================
   //  Update type radios for a domain
@@ -475,6 +505,7 @@ function initAdapters() {
     });
 
     showFieldPanel(modal, selectedType);
+    updateHelpText(modal, info, selectedType);
 
     var domainGroup = modal.querySelector('[data-cred-domain-group]');
     var domainHidden = modal.querySelector('[data-cred-domain-hidden]');
@@ -516,6 +547,7 @@ function initAdapters() {
     modal.querySelectorAll('input[name="dlg-type"]').forEach(function(r) {
       r.addEventListener('change', function() {
         showFieldPanel(modal, this.value);
+        updateHelpText(modal, info, this.value);
       });
     });
 
@@ -547,6 +579,9 @@ function initAdapters() {
             portalDropdown.style.display = 'none';
             var inf = updateTypesForDomain(modal, d.d || d.domain);
             buildHeaderRows(modal, inf, existingCred);
+            var activeRadio = modal.querySelector('input[name="dlg-type"]:checked');
+            var activeType = activeRadio ? activeRadio.value : 'cookie';
+            updateHelpText(modal, inf, activeType);
           });
           portalDropdown.appendChild(item);
         });

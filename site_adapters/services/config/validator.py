@@ -375,7 +375,7 @@ def _validate_cookie_block(issues: list[str], label: str, cookie: dict, file_dir
             issues.append(f"ERROR: {label}.refresh.interval must be a positive number")
     # warn about unknown keys at cookie level
     for key in cookie:
-        if key not in ("enabled", "type", "verify", "refresh"):
+        if key not in ("enabled", "type", "verify", "refresh", "help"):
             issues.append(f"WARN: {label}.{key} is unknown, will be ignored")
 
 
@@ -395,6 +395,8 @@ def _validate_auth_block(issues: list[str], label: str, auth: dict, file_dir: st
             issues.append(f"ERROR: {label}.headers must be an object")
         else:
             for name, config in headers.items():
+                if name == "help":
+                    continue
                 if not isinstance(name, str):
                     issues.append(f"ERROR: {label}.headers key must be a string")
                 if config and not isinstance(config, dict):

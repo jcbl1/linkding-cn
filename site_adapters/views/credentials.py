@@ -61,6 +61,10 @@ def _get_domains_needing_auth(base_dir):
                 'needs_headers': auth['headers'],
                 'needs_oauth2': auth.get('oauth2', auth.get('token', False)),
                 'needs_basic_auth': bool(auth.get('basic_auth')),
+                'cookie_help': auth.get('cookie_help', ''),
+                'headers_help': auth.get('headers_help', ''),
+                'oauth2_help': auth.get('oauth2_help', ''),
+                'basic_help': auth.get('basic_help', ''),
                 'cookie_type': auth.get('cookie_type', 'auto'),
             })
     return domains
@@ -169,7 +173,7 @@ def adapters_page(request):
     # Domains needing auth (for add credential modal autocomplete)
     domains_needing_auth = _get_domains_needing_auth(base_dir)
     ctx['auth_domains_json'] = json.dumps([
-        {'d': d['domain'], 'c': d['needs_cookie'], 'h': d['needs_headers'], 't': d['needs_oauth2'], 'b': d.get('needs_basic_auth', False), 'ct': d.get('cookie_type', 'anon')}
+        {'d': d['domain'], 'c': d['needs_cookie'], 'h': d['needs_headers'], 't': d['needs_oauth2'], 'b': d.get('needs_basic_auth', False), 'ct': d.get('cookie_type', 'anon'), 'help': {'c': d.get('cookie_help', ''), 'h': d.get('headers_help', ''), 't': d.get('oauth2_help', ''), 'b': d.get('basic_help', '')}}
         for d in domains_needing_auth
     ])
 
@@ -251,7 +255,7 @@ def user_credentials(request):
     return JsonResponse({
         'domains': [{'domain': d['domain'], 'needs_cookie': d['needs_cookie'],
                       'needs_headers': d['needs_headers'], 'needs_token': d['needs_oauth2'],
-                      'needs_basic_auth': d.get('needs_basic_auth', False), 'cookie_type': d.get('cookie_type', 'anon')}
+                      'needs_basic_auth': d.get('needs_basic_auth', False), 'cookie_help': d.get('cookie_help', ''), 'headers_help': d.get('headers_help', ''), 'oauth2_help': d.get('oauth2_help', ''), 'basic_help': d.get('basic_help', ''), 'cookie_type': d.get('cookie_type', 'anon')}
                      for d in domains],
     })
 
@@ -289,7 +293,7 @@ def shared_credential_list(request):
         'credentials': credentials,
         'domains': [{'domain': d['domain'], 'needs_cookie': d['needs_cookie'],
                       'needs_headers': d['needs_headers'], 'needs_token': d['needs_oauth2'],
-                      'needs_basic_auth': d.get('needs_basic_auth', False), 'cookie_type': d.get('cookie_type', 'anon')}
+                      'needs_basic_auth': d.get('needs_basic_auth', False), 'cookie_help': d.get('cookie_help', ''), 'headers_help': d.get('headers_help', ''), 'oauth2_help': d.get('oauth2_help', ''), 'basic_help': d.get('basic_help', ''), 'cookie_type': d.get('cookie_type', 'anon')}
                      for d in domains],
     })
 

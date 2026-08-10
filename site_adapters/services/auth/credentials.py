@@ -793,8 +793,16 @@ def get_auth_requirements_for_domain(hostname: str, base_dir: str = '') -> dict:
     headers = list(auth.get('headers', {}).keys()) if isinstance(auth.get('headers'), dict) else []
     has_oauth2 = bool(auth.get('oauth2', {}).get('endpoint'))
     cookie_type = auth.get('cookie', {}).get('type', 'auto') if isinstance(auth.get('cookie'), dict) else 'auto'
+    cookie_cfg = auth.get('cookie', {})
+    headers_cfg = auth.get('headers', {})
+    oauth2_cfg = auth.get('oauth2', {})
+    basic_cfg = auth.get('basic_auth', {})
+    cookie_help = cookie_cfg.get('help', '') if isinstance(cookie_cfg, dict) else ''
+    headers_help = headers_cfg.get('help', '') if isinstance(headers_cfg, dict) else ''
+    oauth2_help = oauth2_cfg.get('help', '') if isinstance(oauth2_cfg, dict) else ''
+    basic_help = basic_cfg.get('help', '') if isinstance(basic_cfg, dict) else ''
     has_basic_auth = bool(auth.get('basic_auth'))
-    return {'cookie': has_cookie, 'headers': headers, 'oauth2': has_oauth2, 'token': has_oauth2, 'basic_auth': has_basic_auth, 'cookie_type': cookie_type}
+    return {'cookie': has_cookie, 'headers': headers, 'oauth2': has_oauth2, 'token': has_oauth2, 'basic_auth': has_basic_auth, 'cookie_help': cookie_help, 'headers_help': headers_help, 'oauth2_help': oauth2_help, 'basic_help': basic_help, 'cookie_type': cookie_type}
 
 
 def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') -> dict:
@@ -824,8 +832,16 @@ def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') ->
     headers = sorted(auth.get('headers', {}).keys()) if isinstance(auth.get('headers'), dict) else []
     has_oauth2 = bool(auth.get('oauth2', {}).get('endpoint'))
     cookie_type = auth.get('cookie', {}).get('type', 'auto') if isinstance(auth.get('cookie'), dict) else 'auto'
+    cookie_cfg = auth.get('cookie', {})
+    headers_cfg = auth.get('headers', {})
+    oauth2_cfg = auth.get('oauth2', {})
+    basic_cfg = auth.get('basic_auth', {})
+    cookie_help = cookie_cfg.get('help', '') if isinstance(cookie_cfg, dict) else ''
+    headers_help = headers_cfg.get('help', '') if isinstance(headers_cfg, dict) else ''
+    oauth2_help = oauth2_cfg.get('help', '') if isinstance(oauth2_cfg, dict) else ''
+    basic_help = basic_cfg.get('help', '') if isinstance(basic_cfg, dict) else ''
     has_basic_auth = bool(auth.get('basic_auth'))
-    return {'cookie': has_cookie, 'headers': headers, 'oauth2': has_oauth2, 'token': has_oauth2, 'basic_auth': has_basic_auth, 'cookie_type': cookie_type}
+    return {'cookie': has_cookie, 'headers': headers, 'oauth2': has_oauth2, 'token': has_oauth2, 'basic_auth': has_basic_auth, 'cookie_help': cookie_help, 'headers_help': headers_help, 'oauth2_help': oauth2_help, 'basic_help': basic_help, 'cookie_type': cookie_type}
 
 
 # ---------------------------------------------------------------------------

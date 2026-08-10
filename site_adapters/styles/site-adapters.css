@@ -1977,3 +1977,17 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   display: block;
 }
+
+/* ── Credential help hint in modal ── */
+.wa-cred-help {
+  padding: 8px 24px;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+}
+
+.wa-cred-help[hidden] {
+  display: none;
+}
+
+.wa-cred-help-text {
+  white-space: pre-line;
+}
