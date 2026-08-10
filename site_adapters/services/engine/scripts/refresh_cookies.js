@@ -104,15 +104,23 @@ async function getLauncher() {
   try {
     await page.goto(url, { waitUntil: "networkidle", timeout });
 
-    if (waitForCookie) {
+    if (waitForCookies.length > 0) {
       const deadline = Date.now() + timeout;
-      let found = false;
+      const targetSet = new Set(waitForCookies);
+      let allFound = false;
       while (Date.now() < deadline) {
         const cookies = await context.cookies();
-        if (cookies.some(c => c.name === waitForCookie)) { found = true; break; }
+        const foundNames = new Set(cookies.map(c => c.name));
+        const all = [...targetSet].every(n => foundNames.has(n));
+        if (all) { allFound = true; break; }
         await new Promise(r => setTimeout(r, 1000));
       }
-      if (!found) console.error(`Cookie "${waitForCookie}" not found within timeout`);
+      if (!allFound) {
+        const cookies = await context.cookies();
+        const foundNames = new Set(cookies.map(c => c.name));
+        const missing = [...targetSet].filter(n => !foundNames.has(n));
+        console.error(`Cookies not found within timeout: ${missing.join(", ")}`);
+      }
     }
 
     const freshCookies = await context.cookies();

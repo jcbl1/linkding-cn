@@ -87,9 +87,9 @@ def refresh_token(token_config: dict, refresh_token_value: str) -> dict | None:
         body['client_secret'] = client_secret
     body.update(extra)
 
-    access_path = token_config.get('access_path', 'access_token')
-    refresh_path = token_config.get('refresh_path', 'refresh_token')
-    expires_path = token_config.get('expires_path', 'expires_in')
+    access_path = token_config.get('access_token_path', token_config.get('access_path', 'access_token'))
+    refresh_path = token_config.get('refresh_token_path', token_config.get('refresh_path', 'refresh_token'))
+    expires_path = token_config.get('expires_in_path', token_config.get('expires_path', 'expires_in'))
 
     try:
         if fmt == 'json':

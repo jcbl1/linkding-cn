@@ -10,7 +10,7 @@
         "type": {
           "type": "string",
           "enum": [
-            "anon",
+            "auto",
             "login"
           ],
           "description": "anon: 用时检查失效再刷; login: 需要用户提供"
@@ -63,7 +63,7 @@
           },
           "additionalProperties": false
         },
-        "refresh_interval": {
+        "interval": {
           "type": "integer",
           "description": "auth 类型的定时刷新间隔（秒），默认 14400"
         }
@@ -417,7 +417,7 @@
         "type": {
           "type": "string",
           "enum": [
-            "anon",
+            "auto",
             "login"
           ],
           "description": "anon: 反爬; login: 需要用户凭据"

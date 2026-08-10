@@ -595,7 +595,7 @@ def _list_credentials_in_dir(base_dir: str, meta_prefix: str,
         for cred_type, filename in [
             ('cookie', 'cookie.json'),
             ('header', 'header.json'),
-            ('token', 'token.json'),
+            ('oauth2', 'token.json'), ('token', 'token.json'),  # legacy: token → oauth2
         ]:
             path = os.path.join(domain_dir, filename)
             if not os.path.isfile(path):
@@ -625,7 +625,7 @@ def _list_credentials_in_dir(base_dir: str, meta_prefix: str,
                     except (json.JSONDecodeError, AttributeError):
                         entry['header_names'] = []
                         entry['header_values'] = {}
-                elif cred_type == 'token':
+                elif (cred_type == 'oauth2' or cred_type == 'token'):
                     try:
                         token_data = json.loads(content)
                         entry['token'] = token_data.get('refresh_token', '') if isinstance(token_data, dict) else ''
@@ -698,9 +698,9 @@ def get_auth_requirements_for_domain(hostname: str, base_dir: str = '') -> dict:
     auth = config.get('auth', {})
     has_cookie = bool(auth.get('cookie'))
     headers = list(auth.get('headers', {}).keys()) if isinstance(auth.get('headers'), dict) else []
-    has_token = bool(auth.get('token', {}).get('endpoint'))
-    cookie_type = auth.get('cookie', {}).get('type', 'anon') if isinstance(auth.get('cookie'), dict) else 'anon'
-    return {'cookie': has_cookie, 'headers': headers, 'token': has_token, 'cookie_type': cookie_type}
+    has_oauth2 = bool(auth.get('oauth2', {}).get('endpoint'))
+    cookie_type = auth.get('cookie', {}).get('type', 'auto') if isinstance(auth.get('cookie'), dict) else 'auto'
+    return {'cookie': has_cookie, 'headers': headers, 'oauth2': has_oauth2, 'token': has_oauth2, 'cookie_type': cookie_type}
 
 
 def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') -> dict:
@@ -728,9 +728,9 @@ def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') ->
     auth = merged.get('auth', {})
     has_cookie = bool(auth.get('cookie'))
     headers = sorted(auth.get('headers', {}).keys()) if isinstance(auth.get('headers'), dict) else []
-    has_token = bool(auth.get('token', {}).get('endpoint'))
-    cookie_type = auth.get('cookie', {}).get('type', 'anon') if isinstance(auth.get('cookie'), dict) else 'anon'
-    return {'cookie': has_cookie, 'headers': headers, 'token': has_token, 'cookie_type': cookie_type}
+    has_oauth2 = bool(auth.get('oauth2', {}).get('endpoint'))
+    cookie_type = auth.get('cookie', {}).get('type', 'auto') if isinstance(auth.get('cookie'), dict) else 'auto'
+    return {'cookie': has_cookie, 'headers': headers, 'oauth2': has_oauth2, 'token': has_oauth2, 'cookie_type': cookie_type}
 
 
 # ---------------------------------------------------------------------------

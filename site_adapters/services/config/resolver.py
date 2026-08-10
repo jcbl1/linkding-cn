@@ -71,6 +71,8 @@ def _merge_auth(*auth_blocks: dict) -> dict:
     Merge multiple auth blocks. Later blocks override earlier ones.
     cookie: deep-merge using merge_cookie()
     headers: merge dicts (later overrides same key)
+    oauth2: replace as a whole (later overrides)
+    basic_auth: replace as a whole (later overrides)
     """
     result = {}
     for block in auth_blocks:
@@ -84,9 +86,12 @@ def _merge_auth(*auth_blocks: dict) -> dict:
             existing_headers = result.get('headers', {})
             existing_headers.update(block['headers'])
             result['headers'] = existing_headers
-        # Token
-        if 'token' in block:
-            result['token'] = dict(block['token'])
+        # OAuth2 (was token)
+        if 'oauth2' in block:
+            result['oauth2'] = dict(block['oauth2'])
+        # Basic Auth
+        if 'basic_auth' in block:
+            result['basic_auth'] = dict(block['basic_auth'])
     return result
 
 
@@ -168,13 +173,11 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
     from urllib.parse import urlparse
     hostname = urlparse(full_config.get('_url', '')).hostname or domain_key
 
-    # Cookie config from auth
+    # Cookie config from auth (deep-merge with defaults)
     cookie_config = {}
-    if merged_auth.get('cookie'):
-        cookie_config = dict(merged_auth['cookie'])
-        for key, value in COOKIE_DEFAULTS.items():
-            if key not in cookie_config:
-                cookie_config[key] = value
+    merged_cookie = merged_auth.get('cookie', {})
+    if merged_cookie and merged_cookie.get('enabled', True):
+        cookie_config = merge_cookie(dict(COOKIE_DEFAULTS), dict(merged_cookie))
 
     # cookie and http Cookie header cannot coexist
     if cookie_config and 'Cookie' in headers:
@@ -186,29 +189,38 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
     if cookie_config:
         user_cookie_str, _ = get_best_cookie(username, hostname)
 
-    # Best headers: user credential first, shared fallback
+    # Headers: config default → shared credential → user credential
     if merged_auth.get('headers'):
-        for header_name in merged_auth['headers']:
-            if header_name not in headers:
-                best_val, _ = get_best_header(username, hostname, header_name)
-                if best_val:
-                    headers[header_name] = best_val
+        merged_headers = merged_auth['headers']
+        for header_name, default_val in merged_headers.items():
+            if not isinstance(default_val, str):
+                default_val = ''
+            # Priority: user cred > shared cred > config default
+            best_val = None
+            if username:
+                user_val, _ = get_best_header(username, hostname, header_name)
+                if user_val:
+                    best_val = user_val
+            if not best_val and default_val:
+                best_val = default_val
+            if best_val:
+                headers[header_name] = best_val
 
-    # Token: auto-inject access_token (user first, shared fallback)
-    merged_token = merged_auth.get('token', {})
-    if merged_token.get('endpoint'):
+    # OAuth2: auto-inject access_token (user first, shared fallback)
+    merged_oauth2 = merged_auth.get('oauth2', {})
+    if merged_oauth2.get('enabled', True) and merged_oauth2.get('endpoint'):
         if username:
-            access_token = get_valid_token(merged_token, username, hostname)
+            access_token = get_valid_token(merged_oauth2, username, hostname)
             if access_token:
-                token_headers = get_token_header(merged_token, access_token)
-                headers.update(token_headers)
+                oauth2_headers = get_token_header(merged_oauth2, access_token)
+                headers.update(oauth2_headers)
         else:
             best_rt, _ = get_best_token(username, hostname)
             if best_rt:
-                token_result = _refresh_token(merged_token, best_rt)
+                token_result = _refresh_token(merged_oauth2, best_rt)
                 if token_result:
-                    token_headers = get_token_header(merged_token, token_result['access_token'])
-                    headers.update(token_headers)
+                    oauth2_headers = get_token_header(merged_oauth2, token_result['access_token'])
+                    headers.update(oauth2_headers)
 
     result = {
         'headers': headers,

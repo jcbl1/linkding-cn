@@ -192,14 +192,14 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
     page_text = None
     last_exc = None
 
-    # Pre-flight: for anon-type cookie sites without cookies, acquire via browser first.
+    # Pre-flight: for auto-type cookie sites without cookies, acquire via browser first.
     try:
         cookie_config = config.get("cookie") if config else {}
-        if cookie_config and cookie_config.get("type") == "anon":
+        if cookie_config and cookie_config.get("type") == "auto":
             cookie_str = _cookie_string_from_config(config)
             if not cookie_str and cookie_config.get("refresh"):
                 domain_key = config.get("_domain_key")
-                logger.info("No cookie for anon site %s, acquiring via browser refresh", domain_key)
+                logger.info("No cookie for auto site %s, acquiring via browser refresh", domain_key)
                 new_cookie = verify_and_refresh(
                     cookie_config, fetch_url, domain_key,
                     {"url": fetch_url, "status": 0, "title": "", "body_preview": ""},

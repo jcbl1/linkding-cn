@@ -42,7 +42,7 @@ TOGGLES_PAGE_SIZE = 50
 
 
 def _get_domains_needing_auth(base_dir):
-    """Return list of {domain, needs_cookie, needs_headers, needs_token}."""
+    """Return list of {domain, needs_cookie, needs_headers, needs_oauth2}."""
     domains = []
     if not base_dir or not os.path.isdir(base_dir):
         return domains
@@ -50,13 +50,13 @@ def _get_domains_needing_auth(base_dir):
     all_config = _cache.load(base_dir)
     for key in sorted(k for k in all_config if k != 'defaults' and not k.startswith('_')):
         auth = get_auth_requirements_for_domain_key(key, base_dir=base_dir)
-        if auth['cookie'] or auth['headers'] or auth['token']:
+        if auth['cookie'] or auth['headers'] or auth.get('oauth2', auth.get('token', False)):
             domains.append({
                 'domain': key,
                 'needs_cookie': auth['cookie'],
                 'needs_headers': auth['headers'],
-                'needs_token': auth['token'],
-                'cookie_type': auth.get('cookie_type', 'anon'),
+                'needs_oauth2': auth.get('oauth2', auth.get('token', False)),
+                'cookie_type': auth.get('cookie_type', 'auto'),
             })
     return domains
 
@@ -94,7 +94,7 @@ def adapters_page(request):
                 header_value = request.POST.get('value', '').strip()
                 if header_name and header_value:
                     save_user_header(username, domain, header_name, header_value)
-            elif cred_type == 'token':
+            elif cred_type == 'oauth2':
                 token_value = request.POST.get('value', '').strip()
                 if token_value:
                     save_user_token(username, domain, token_value)
@@ -110,7 +110,7 @@ def adapters_page(request):
                     header_name = request.POST.get('header_name', '').strip()
                     if header_name:
                         delete_user_header(username, domain, header_name)
-                elif cred_type == 'token':
+                elif cred_type == 'oauth2':
                     delete_user_token(username, domain)
             return redirect(request.META.get('HTTP_REFERER', adapters_url))
 
@@ -303,7 +303,7 @@ def shared_credential_save(request):
         if not header_name or not header_value:
             return JsonResponse({'error': 'Header name and value required'}, status=400)
         save_shared_header(domain, header_name, header_value)
-    elif cred_type == 'token':
+    elif cred_type == 'oauth2':
         token_value = request.POST.get('value', '').strip()
         if not token_value:
             return JsonResponse({'error': 'Token value required'}, status=400)
@@ -334,7 +334,7 @@ def shared_credential_delete(request):
         if not header_name:
             return JsonResponse({'error': 'Header name required'}, status=400)
         delete_shared_header(domain, header_name)
-    elif cred_type == 'token':
+    elif cred_type == 'oauth2':
         delete_shared_token(domain)
     else:
         return JsonResponse({'error': 'Invalid credential type'}, status=400)

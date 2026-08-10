@@ -333,8 +333,8 @@ def _validate_cookie_block(issues: list[str], label: str, cookie: dict, file_dir
     if not isinstance(cookie, dict):
         issues.append(f"ERROR: {label} must be an object")
         return
-    valid_types = ("anon", "login")
-    ctype = cookie.get("type", "anon")
+    valid_types = ("auto", "login")
+    ctype = cookie.get("type", "auto")
     if ctype not in valid_types:
         issues.append(f"ERROR: {label}.type must be one of {valid_types}, got '{ctype}'")
     # verify
@@ -347,7 +347,7 @@ def _validate_cookie_block(issues: list[str], label: str, cookie: dict, file_dir
             if check is not None:
                 if not isinstance(check, list) or not all(isinstance(s, str) for s in check):
                     issues.append(f"ERROR: {label}.verify.check must be a string array")
-            invalid_pats = verify.get("invalid_patterns")
+            invalid_pats = verify.get("content_check", {}).get("invalid_patterns", []) if isinstance(verify.get("content_check"), dict) else verify.get("invalid_patterns", [])
             if invalid_pats is not None:
                 if not isinstance(invalid_pats, list) or not all(isinstance(s, str) for s in invalid_pats):
                     issues.append(f"ERROR: {label}.verify.invalid_patterns must be a string array")
@@ -356,7 +356,7 @@ def _validate_cookie_block(issues: list[str], label: str, cookie: dict, file_dir
                 issues.append(f"ERROR: {label}.verify.valid_selector must be a string")
             # warn about unknown keys
             for key in verify:
-                if key not in ("check", "invalid_patterns", "valid_selector"):
+                if key not in ("check", "check_selectors", "invalid_patterns", "invalid_selectors", "valid_selector", "http_head_probe", "content_check", "probe"):
                     issues.append(f"WARN: {label}.verify.{key} is unknown, will be ignored")
     # refresh
     refresh = cookie.get("refresh")
@@ -365,16 +365,17 @@ def _validate_cookie_block(issues: list[str], label: str, cookie: dict, file_dir
             issues.append(f"ERROR: {label}.refresh must be an object")
         else:
             for key in refresh:
-                if key not in ("url", "wait_cookie", "timeout"):
+                if key not in ("url", "wait_cookie", "timeout", "interval"):
                     issues.append(f"WARN: {label}.refresh.{key} is unknown, will be ignored")
     # refresh_interval
-    ri = cookie.get("refresh_interval")
+    refresh_block = cookie.get("refresh", {})
+    ri = refresh_block.get("interval", 0) if isinstance(refresh_block, dict) else cookie.get("refresh_interval", 0)
     if ri is not None:
         if not isinstance(ri, (int, float)) or ri <= 0:
-            issues.append(f"ERROR: {label}.refresh_interval must be a positive number")
+            issues.append(f"ERROR: {label}.refresh.interval must be a positive number")
     # warn about unknown keys at cookie level
     for key in cookie:
-        if key not in ("type", "verify", "refresh", "refresh_interval"):
+        if key not in ("enabled", "type", "verify", "refresh"):
             issues.append(f"WARN: {label}.{key} is unknown, will be ignored")
 
 
@@ -398,51 +399,50 @@ def _validate_auth_block(issues: list[str], label: str, auth: dict, file_dir: st
                     issues.append(f"ERROR: {label}.headers key must be a string")
                 if config and not isinstance(config, dict):
                     issues.append(f"ERROR: {label}.headers.{name} must be an object")
-    # Validate token sub-block
-    token = auth.get('token')
-    if token is not None:
-        if not isinstance(token, dict):
-            issues.append(f"ERROR: {label}.token must be an object")
-        else:
-            valid_types = ("anon", "login")
-            ttype = token.get("type")
-            if ttype is None:
-                issues.append(f"ERROR: {label}.token.type is required")
-            elif ttype not in valid_types:
-                issues.append(f"ERROR: {label}.token.type must be one of {valid_types}, got '{ttype}'")
-            endpoint = token.get("endpoint")
-            if not isinstance(endpoint, str) or not endpoint.strip():
-                issues.append(f"ERROR: {label}.token.endpoint must be a non-empty string")
-            for key in ("client_id", "client_secret", "grant_type", "format", "access_path", "refresh_path", "expires_path", "header", "header_format"):
-                value = token.get(key)
-                if value is not None and not isinstance(value, str):
-                    issues.append(f"ERROR: {label}.token.{key} must be a string")
-            extra_params = token.get("extra_params")
-            if extra_params is not None:
-                if not isinstance(extra_params, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in extra_params.items()):
-                    issues.append(f"ERROR: {label}.token.extra_params must be a string map")
-            verify = token.get("verify")
-            if verify is not None:
-                if not isinstance(verify, dict):
-                    issues.append(f"ERROR: {label}.token.verify must be an object")
-                else:
-                    check = verify.get("check")
-                    if check is not None:
-                        if not isinstance(check, list) or not all(isinstance(s, str) for s in check):
-                            issues.append(f"ERROR: {label}.token.verify.check must be a string array")
-                    invalid_pats = verify.get("invalid_patterns")
-                    if invalid_pats is not None:
-                        if not isinstance(invalid_pats, list) or not all(isinstance(s, str) for s in invalid_pats):
-                            issues.append(f"ERROR: {label}.token.verify.invalid_patterns must be a string array")
-                    valid_selector = verify.get("valid_selector")
-                    if valid_selector is not None and not isinstance(valid_selector, str):
-                        issues.append(f"ERROR: {label}.token.verify.valid_selector must be a string")
-                    for key in verify:
-                        if key not in ("check", "invalid_patterns", "valid_selector"):
-                            issues.append(f"WARN: {label}.token.verify.{key} is unknown, will be ignored")
+    # Validate oauth2 sub-block (also legacy 'token')
+    for oauth2_key in ('oauth2', 'token'):
+        oauth2 = auth.get(oauth2_key)
+        if oauth2 is None:
+            continue
+        prefix = f"{label}.{oauth2_key}"
+        if not isinstance(oauth2, dict):
+            issues.append(f"ERROR: {prefix} must be an object")
+            continue
+        endpoint = oauth2.get("endpoint")
+        if not isinstance(endpoint, str) or not endpoint.strip():
+            issues.append(f"ERROR: {prefix}.endpoint must be a non-empty string")
+        for key in ("client_id", "client_secret", "grant_type", "format",
+                     "access_token_path", "access_path",
+                     "refresh_token_path", "refresh_path",
+                     "expires_in_path", "expires_path",
+                     "header", "header_format"):
+            value = oauth2.get(key)
+            if value is not None and not isinstance(value, str):
+                issues.append(f"ERROR: {prefix}.{key} must be a string")
+        extra_params = oauth2.get("extra_params")
+        if extra_params is not None:
+            if not isinstance(extra_params, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in extra_params.items()):
+                issues.append(f"ERROR: {prefix}.extra_params must be a string map")
+        verify = oauth2.get("verify")
+        if verify is not None:
+            if not isinstance(verify, dict):
+                issues.append(f"ERROR: {prefix}.verify must be an object")
+            else:
+                invalid_pats = verify.get("invalid_patterns", [])
+                if invalid_pats is not None:
+                    if not isinstance(invalid_pats, list) or not all(isinstance(s, str) for s in invalid_pats):
+                        issues.append(f"ERROR: {prefix}.verify.invalid_patterns must be a string array")
+                for key in verify:
+                    if key not in ("invalid_patterns",):
+                        issues.append(f"WARN: {prefix}.verify.{key} is unknown, will be ignored")
+    # Validate basic_auth sub-block
+    basic_auth = auth.get('basic_auth')
+    if basic_auth is not None:
+        if not isinstance(basic_auth, dict):
+            issues.append(f"ERROR: {label}.basic_auth must be an object")
     # Warn about unknown keys
     for key in auth:
-        if key not in ('cookie', 'headers', 'token'):
+        if key not in ('cookie', 'headers', 'oauth2', 'token', 'basic_auth'):
             issues.append(f"WARN: {label}.{key} is unknown, will be ignored")
 
 

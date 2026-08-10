@@ -1259,7 +1259,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     var parts = [];
     if (cs.cookie) parts.push('cookie · ' + cs.cookie.source + ' · ' + cs.cookie.status);
     if (cs.headers) parts.push('headers · ' + cs.headers.source + ' · ' + cs.headers.status);
-    if (cs.token) parts.push('token · ' + cs.token.source + ' · ' + cs.token.status);
+    if (cs.oauth2) parts.push('oauth2 · ' + cs.oauth2.source + ' · ' + cs.oauth2.status);
     return renderSummaryRows([{label: 'credential_sources', value: parts.join('; ')}]);
   }
 
@@ -1273,14 +1273,14 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     if (r.cookie) {
       var c = r.cookie;
       var label = c.source + ' \u00b7 ' + c.status;
-      if (c.cookie_type === 'anon') label += ' (auto)';
+      if (c.cookie_type === 'auto') label += ' (auto)';
       h += renderSummaryRows([{label: 'cookie', value: label}]);
     }
     if (r.headers) {
       h += renderSummaryRows([{label: 'headers', value: r.headers.source + ' \u00b7 ' + r.headers.status}]);
     }
-    if (r.token) {
-      h += renderSummaryRows([{label: 'token', value: r.token.source + ' \u00b7 ' + r.token.status}]);
+    if (r.oauth2) {
+      h += renderSummaryRows([{label: 'oauth2', value: r.token.source + ' \u00b7 ' + r.token.status}]);
     }
     h += renderCommandInfo(filterExecutions(r.executions, ['cookie_refresh', 'cookie_verify']));
     h += '</div>';
@@ -1308,9 +1308,9 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       h += '</div>';
     }
     // Token detail
-    if (r.token) {
+    if (r.oauth2) {
       h += '<div class="wa-result-block">';
-      h += '<h3 class="wa-result-heading">Token</h3>';
+      h += '<h3 class="wa-result-heading">OAuth2</h3>';
       h += renderResultRows({
         'source': r.token.source,
         'status': r.token.status,

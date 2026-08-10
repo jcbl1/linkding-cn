@@ -217,7 +217,7 @@ def _snapshot_credential_state(config: dict, username: str, hostname: str) -> di
         state['headers'] = header_state
 
     # Token
-    if auth_req.get('token'):
+    if auth_req.get('oauth2'):
         best, _ = get_best_token(username, hostname)
         user_val, _ = get_user_token(username, hostname) if username else (None, '')
         shared_val, _ = get_shared_token(hostname)
@@ -226,7 +226,7 @@ def _snapshot_credential_state(config: dict, username: str, hostname: str) -> di
             source = 'user'
         elif shared_val:
             source = 'shared'
-        state['token'] = {'value': best, 'source': source}
+        state['oauth2'] = {'value': best, 'source': source}
 
     return state
 
@@ -289,7 +289,7 @@ def _compute_credential_sources(config: dict, username: str, hostname: str,
     """
     after = _snapshot_credential_state(config, username, hostname)
     result = {}
-    for cred_type in ('cookie', 'headers', 'token'):
+    for cred_type in ('cookie', 'headers', 'oauth2'):
         before_entry = before.get(cred_type)
         after_entry = after.get(cred_type)
         if not before_entry and not after_entry:
@@ -465,7 +465,7 @@ def _test_credential(url, base_dir, username, entries):
     # --- Cookie ---
     cookie_info = None
     if auth_req.get('cookie'):
-        cookie_type = auth_req.get('cookie_type', 'anon')
+        cookie_type = auth_req.get('cookie_type', 'auto')
 
         # Before state
         before_user, _ = get_user_cookie(username, hostname) if username else (None, '')
@@ -552,7 +552,7 @@ def _test_credential(url, base_dir, username, entries):
 
     # --- Token ---
     token_info = None
-    if auth_req.get('token'):
+    if auth_req.get('oauth2'):
         best, _ = get_best_token(username, hostname)
         user_val, _ = get_user_token(username, hostname) if username else (None, '')
         shared_val, _ = get_shared_token(hostname)
@@ -577,7 +577,7 @@ def _test_credential(url, base_dir, username, entries):
     if headers_info:
         result['headers'] = headers_info
     if token_info:
-        result['token'] = token_info
+        result['oauth2'] = token_info
 
     return _test_response(result, entries=entries)
 

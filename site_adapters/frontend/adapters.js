@@ -254,7 +254,7 @@ function initAdapters() {
       html += '<div class="wa-cred-row">'
         + '<span class="wa-col-domain wa-cred-domain-cell">' + escapeHtml(c.domain) + '</span>'
         + '<span class="wa-col-type wa-cred-type-cell">'
-        + '<span class="wa-badge">' + (c.type === 'cookie' ? 'Cookie' : c.type === 'token' ? 'Token' : 'Header') + '</span>'
+        + '<span class="wa-badge">' + (c.type === 'cookie' ? 'Cookie' : c.type === 'oauth2' ? 'OAuth2' : c.type === 'token' ? 'OAuth2' : 'Header') + '</span>'
         + (c.type === 'header' && c.header_names ? '<span class="wa-cred-header-names">(' + escapeHtml(c.header_names.slice(0, 3).join(', ')) + (c.header_names.length > 3 ? '...' : '') + ')</span>' : '')
         + '</span>'
         + '<span class="wa-col-updated wa-cred-updated-cell">' + escapeHtml((c.updated_at || '').slice(0, 10))
@@ -361,7 +361,7 @@ function initAdapters() {
   //  Show/hide credential field panels
   // ===================================================================
   function showFieldPanel(modal, fieldType) {
-    ['cookie', 'header', 'token'].forEach(function(t) {
+    ['cookie', 'header', 'oauth2'].forEach(function(t) {
       var panel = modal.querySelector('[data-cred-field="' + t + '"]');
       if (!panel) return;
       panel.hidden = t !== fieldType;
@@ -376,15 +376,15 @@ function initAdapters() {
     var autoType = null;
     if (inf.c) autoType = 'cookie';
     else if (inf.h && inf.h.length) autoType = 'header';
-    else if (inf.t) autoType = 'token';
+    else if (inf.t) autoType = 'oauth2';
 
     var localNeeded = (inf.c ? ['cookie'] : []).concat(
       (inf.h && inf.h.length ? ['header'] : []),
-      (inf.t ? ['token'] : [])
+      (inf.t ? ['oauth2'] : [])
     );
     var hasReq = localNeeded.length > 0;
 
-    ['cookie', 'header', 'token'].forEach(function(t) {
+    ['cookie', 'header', 'oauth2'].forEach(function(t) {
       setTypeGrayed(modal, t, hasReq && localNeeded.indexOf(t) < 0);
     });
 
@@ -450,18 +450,18 @@ function initAdapters() {
     if (domain && !type) {
       if (info.c) selectedType = 'cookie';
       else if (info.h && info.h.length) selectedType = 'header';
-      else if (info.t) selectedType = 'token';
+      else if (info.t) selectedType = 'oauth2';
     }
 
     var neededTypes = domain ? (
       (info.c ? ['cookie'] : []).concat(
         (info.h && info.h.length ? ['header'] : []),
-        (info.t ? ['token'] : [])
+        (info.t ? ['oauth2'] : [])
       )
-    ) : ['cookie', 'header', 'token'];
+    ) : ['cookie', 'header', 'oauth2'];
     var hasReq = neededTypes.length > 0 && domain;
 
-    ['cookie', 'header', 'token'].forEach(function(t) {
+    ['cookie', 'header', 'oauth2'].forEach(function(t) {
       var radio = modal.querySelector('input[name="dlg-type"][value="' + t + '"]');
       if (!radio) return;
       if (t === selectedType) radio.checked = true;
@@ -483,8 +483,8 @@ function initAdapters() {
     if (existingCred) {
       var cookieEl = modal.querySelector('#dlg-cookie-value');
       if (cookieEl && existingCred.cookie) cookieEl.value = existingCred.cookie;
-      var tokenEl = modal.querySelector('#dlg-token-value');
-      if (tokenEl && existingCred.token) tokenEl.value = existingCred.token;
+      var tokenEl = modal.querySelector('#dlg-oauth2-value');
+      if (tokenEl && existingCred.oauth2) tokenEl.value = existingCred.oauth2;
     }
 
     var headerRows = modal.querySelector('#dlg-header-rows');
@@ -528,7 +528,7 @@ function initAdapters() {
           var labels = [];
           if (d.c || d.needs_cookie) { var cookieLabel = (d.ct === 'login') ? 'Cookie' : 'Cookie (auto)'; labels.push(cookieLabel); }
           if ((d.h && d.h.length) || (d.needs_headers && d.needs_headers.length)) labels.push('Header');
-          if (d.t || d.needs_token) labels.push('Token');
+          if (d.t || d.needs_oauth2) labels.push('Token');
           item.innerHTML = '<span>' + escapeHtml(d.d || d.domain) + (labels.length ? ' <span class="text-gray" style="font-size:12px">(' + escapeHtml(labels.join(' + ')) + ')</span>' : '') + '</span>';
           item.addEventListener('mousedown', function(ev) {
             ev.preventDefault();
@@ -582,7 +582,7 @@ function initAdapters() {
         }
         submitCredentialForm(d, ct, {value: val});
       } else if (ct === 'token') {
-        var tv = modal.querySelector('#dlg-token-value').value.trim();
+        var tv = modal.querySelector('#dlg-oauth2-value').value.trim();
         if (!tv) { toast(gettext('Please enter refresh token'), 'error'); saveBtn.disabled = false; return; }
         submitCredentialForm(d, ct, {value: tv});
       } else {

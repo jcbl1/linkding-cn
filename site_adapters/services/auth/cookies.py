@@ -4,7 +4,7 @@ Cookie 凭据管理（用户 / 共享加密存储）
 Cookie 只存在于加密凭据系统中（用户 > 共享），不再使用 per-domain 持久文件。
 refresh_cookie_declarative 使用系统临时文件作为 Node 子进程 I/O 载体，用完即清理。
 冷却期：内存 dict（不持久化，60 秒）
-验证：auth.cookie.verify（声明式 invalid_patterns / valid_selector）
+验证：auth.cookie.verify.http_head_probe (L1) + content_check (L2, regex)
 刷新：auth.cookie.refresh + 冷却期 → 写回用户或共享凭据
 """
 
@@ -34,35 +34,53 @@ _cooldowns: dict[str, float] = {}
 # 声明式 cookie 默认值
 # ---------------------------------------------------------------------------
 COOKIE_DEFAULTS = {
-    "type": "anon",
+    "enabled": True,
+    "type": "auto",
+    "refresh": {
+        "url": "",
+        "wait_cookie": "",
+        "timeout": 30,          # 秒
+        "interval": 14400,      # 秒
+    },
     "verify": {
-        "check": ["title", "body"],
-        "invalid_patterns": [],
-        "probe": {
+        "http_head_probe": {
             "enabled": True,
-            "timeout": 5,
+            "url": "",
+            "timeout": 5,       # 秒
             "invalid_status": [401, 403],
             "invalid_location_patterns": [],
-            "check_set_cookie_cleared": True,
+            "set_cookie_cleared": True,
+        },
+        "content_check": {
+            "enabled": True,
+            "url": "",
+            "check_selectors": ["title", "body"],
+            "valid_patterns": [],
+            "valid_selectors": [],
+            "invalid_patterns": [],
+            "invalid_selectors": [],
         },
     },
-    "refresh": {
-        "timeout": 30000,
-    },
-    "refresh_interval": 14400,
 }
 
 
 def merge_cookie(base: dict, override: dict) -> dict:
-    """Merge two cookie config dicts.  override values replace base;
-    sub-objects (verify / refresh) are replaced as a whole, not deep-merged."""
+    """Deep-merge two cookie config dicts recursively.
+
+    Scalars and lists are replaced; dicts are merged recursively.
+    None values in override are ignored (use enabled: false to disable).
+    """
     if not base:
         return dict(override) if override else {}
     if not override:
         return dict(base)
     result = dict(base)
     for key, value in override.items():
-        if value is not None:
+        if value is None:
+            continue
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = merge_cookie(result[key], value)
+        else:
             result[key] = value
     return result
 
@@ -224,7 +242,7 @@ def _clear_cooldown(domain_key: str):
 def _verify_cookie_l1_probe(verify_config: dict, url: str,
                               cookie_str: str, domain_key: str,
                               timeout: int = 5) -> dict:
-    """L1 轻量 HTTP 探针：HEAD 请求检测 Cookie 有效性。
+    """L1 HTTP HEAD 探针：HEAD 请求检测 Cookie 有效性。
 
     检查项：
     - 响应状态码（是否在 invalid_status 列表中，如 401/403）
@@ -232,19 +250,21 @@ def _verify_cookie_l1_probe(verify_config: dict, url: str,
     - Set-Cookie 头（是否被服务端清空/覆盖）
 
     返回 {"valid": bool, "reason": str}。
-    网络错误时返回 {"valid": True, "reason": "probe_error"}，不阻塞后续 L2 检查。
+    网络错误时返回 {"valid": True, "reason": "http_head_probe_error"}，不阻塞后续 L2 检查。
     """
-    probe_cfg = verify_config.get('probe', {})
+    probe_cfg = verify_config.get('http_head_probe', {})
     if not probe_cfg or not probe_cfg.get('enabled', True):
-        return {"valid": True, "reason": "probe_disabled"}
+        return {"valid": True, "reason": "http_head_probe_disabled"}
 
     invalid_status = probe_cfg.get('invalid_status', [401, 403])
-    invalid_location = [p.lower() for p in probe_cfg.get('invalid_location_patterns', [])]
-    check_set_cookie = probe_cfg.get('check_set_cookie_cleared', True)
+    import re as _l1_re
+    raw_patterns = probe_cfg.get('invalid_location_patterns', [])
+    invalid_location = [_l1_re.compile(p, _l1_re.IGNORECASE) for p in raw_patterns]
+    check_set_cookie = probe_cfg.get('set_cookie_cleared', True)
     probe_timeout = probe_cfg.get('timeout', timeout)
 
     if not invalid_status and not invalid_location and not check_set_cookie:
-        return {"valid": True, "reason": "no_probe_checks"}
+        return {"valid": True, "reason": "no_http_head_probe_checks"}
 
     try:
         import requests as _requests
@@ -256,8 +276,8 @@ def _verify_cookie_l1_probe(verify_config: dict, url: str,
             timeout=probe_timeout,
         )
     except Exception as e:
-        logger.debug("L1 probe network error for %s: %s", domain_key, e)
-        return {"valid": True, "reason": "probe_error"}
+        logger.debug("L1 http_head_probe network error for %s: %s", domain_key, e)
+        return {"valid": True, "reason": "http_head_probe_error"}
 
     # 1. 检查状态码
     if resp.status_code in invalid_status:
@@ -266,8 +286,8 @@ def _verify_cookie_l1_probe(verify_config: dict, url: str,
 
     # 2. 检查 Location 重定向目标
     if invalid_location and 'Location' in resp.headers:
-        location = resp.headers['Location'].lower()
-        matched = next((p for p in invalid_location if p in location), None)
+        location = resp.headers['Location']
+        matched = next((p for p in invalid_location if p.search(location)), None)
         if matched:
             return {"valid": False,
                     "reason": f'L1: redirect to "{matched}"'}
@@ -279,7 +299,7 @@ def _verify_cookie_l1_probe(verify_config: dict, url: str,
             return {"valid": False,
                     "reason": "L1: Set-Cookie clearing detected"}
 
-    logger.debug("L1 probe passed for %s (status=%d)", domain_key, resp.status_code)
+    logger.debug("L1 http_head_probe passed for %s (status=%d)", domain_key, resp.status_code)
     return {"valid": True, "reason": f"L1: status={resp.status_code}"}
 
 
@@ -324,41 +344,86 @@ def _is_cookie_being_cleared(set_cookie_header: str, current_cookie_str: str) ->
 def verify_cookie_declarative(verify_config: dict, context: dict) -> dict:
     """
     声明式 cookie 验证。
-    verify_config: {check, invalid_patterns, valid_selector}
+    verify_config: content_check sub-config {check_selectors, invalid_patterns, invalid_selectors}
     context: {url, title, body_preview, html_path}
     返回: {valid: bool, reason: str}
     """
-    check = verify_config.get("check", ["title", "body"])
-    invalid = verify_config.get("invalid_patterns", [])
-    valid_selector = verify_config.get("valid_selector", "")
+    # Support both new nested (content_check) and old flat format
+    cc = verify_config.get("content_check", verify_config)
+    check_selectors = cc.get("check_selectors", cc.get("check", ["title", "body"]))
+    valid_patterns = cc.get("valid_patterns", [])
+    valid_selectors = cc.get("valid_selectors", cc.get("valid_selector", []))
+    invalid_patterns = cc.get("invalid_patterns", [])
+    invalid_selectors = cc.get("invalid_selectors", cc.get("invalid_selector", []))
 
-    # 1. 正向确认：CSS 选择器存在 → 有效
-    # Note: valid_selector requires html_path in context (currently unused by callers)
-    if valid_selector and context.get("html_path"):
+    import re as _cc_re
+
+    # ---- 正向验证：命中 → 有效（短路） ----
+
+    # 1a. 正向 CSS 选择器
+    if valid_selectors and context.get("html_path"):
         try:
             from bs4 import BeautifulSoup
             with open(context["html_path"], encoding="utf-8") as f:
                 soup = BeautifulSoup(f.read(), "html.parser")
-            if soup.select_one(valid_selector):
-                return {"valid": True, "reason": "selector matched"}
+            for sel in valid_selectors:
+                if soup.select_one(sel):
+                    return {"valid": True,
+                            "reason": f'valid selector matched: "{sel}"'}
         except Exception:
             pass
 
-    # 2. 没有配置 invalid_patterns → 跳过检测，认为有效
-    if not invalid:
-        return {"valid": True, "reason": "no patterns configured"}
+    # 1b. 正向文本模式（title / body）
+    if valid_patterns:
+        try:
+            vpatterns = [_cc_re.compile(p, _cc_re.IGNORECASE) for p in valid_patterns]
+        except _cc_re.error as e:
+            logger.warning("Invalid regex in valid_patterns: %s", e)
+        else:
+            text_parts = []
+            if "title" in check_selectors and context.get("title"):
+                text_parts.append(context["title"])
+            if "body" in check_selectors:
+                text_parts.append(context.get("body_preview", ""))
+            combined = " ".join(text_parts)
+            matched = next((p for p in vpatterns if p.search(combined)), None)
+            if matched:
+                return {"valid": True,
+                        "reason": f'valid pattern matched: "{matched.pattern}"'}
 
-    invalid_lower = [p.lower() for p in invalid]
+    # ---- 反向验证：命中 → 失效 ----
 
-    # 3. 检查 title
-    if "title" in check and context.get("title"):
-        title_lower = context["title"].lower()
-        matched = next((p for p in invalid_lower if p in title_lower), None)
+    # 2a. 反向 CSS 选择器
+    if invalid_selectors and context.get("html_path"):
+        try:
+            from bs4 import BeautifulSoup
+            with open(context["html_path"], encoding="utf-8") as f:
+                soup = BeautifulSoup(f.read(), "html.parser")
+            for sel in invalid_selectors:
+                if soup.select_one(sel):
+                    return {"valid": False,
+                            "reason": f'invalid selector matched: "{sel}"'}
+        except Exception:
+            pass
+
+    # 2b. 反向文本模式
+    if not invalid_patterns:
+        return {"valid": True, "reason": "no invalid patterns configured"}
+
+    try:
+        ipatterns = [_cc_re.compile(p, _cc_re.IGNORECASE) for p in invalid_patterns]
+    except _cc_re.error as e:
+        logger.warning("Invalid regex in invalid_patterns: %s", e)
+        return {"valid": True, "reason": "invalid regex config"}
+
+    if "title" in check_selectors and context.get("title"):
+        title_text = context["title"]
+        matched = next((p for p in ipatterns if p.search(title_text)), None)
         if matched:
-            return {"valid": False, "reason": f'title matches "{matched}"'}
+            return {"valid": False,
+                    "reason": f'title matches "{matched.pattern}"'}
 
-    # 4. 检查 body
-    if "body" in check:
+    if "body" in check_selectors:
         text = context.get("body_preview", "")
         if not text and context.get("html_path"):
             try:
@@ -366,10 +431,10 @@ def verify_cookie_declarative(verify_config: dict, context: dict) -> dict:
                     text = f.read(5000)
             except Exception:
                 pass
-        text_lower = text.lower()
-        matched = next((p for p in invalid_lower if p in text_lower), None)
+        matched = next((p for p in ipatterns if p.search(text)), None)
         if matched:
-            return {"valid": False, "reason": f'body matches "{matched}"'}
+            return {"valid": False,
+                    "reason": f'body matches "{matched.pattern}"'}
 
     return {"valid": True, "reason": "ok"}
 
@@ -410,8 +475,9 @@ def refresh_cookie_declarative(refresh_config: dict, url: str,
         except Exception:
             pass
     refresh_url = refresh_config.get('url') or url
-    wait_cookie = refresh_config.get('wait_cookie', '')
-    timeout = refresh_config.get('timeout', 30000)
+    raw_wait = refresh_config.get('wait_cookie', '')
+    wait_cookie = raw_wait if isinstance(raw_wait, list) else ([raw_wait] if raw_wait else [])
+    timeout = int(refresh_config.get('timeout', 30) * 1000)  # s → ms for Playwright
     license_key = getattr(django_settings, 'LD_BROWSER_CLOAKBROWSER_LICENSE_KEY', '')
 
     # 使用临时文件作为 Node 子进程的 I/O 载体
@@ -452,7 +518,7 @@ def refresh_cookie_declarative(refresh_config: dict, url: str,
             stdout=result.stdout,
             stderr=result.stderr,
             duration_ms=duration_ms,
-            config_snapshot={'wait_cookie': wait_cookie},
+            config_snapshot={'wait_cookie': raw_wait},
         )
 
         if result.returncode == 0:
@@ -533,7 +599,7 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
 
     # 没有 cookie 且有 refresh 配置 → 尝试刷新
     if not cookie_str and cookie_config.get('refresh'):
-        logger.info("No cookie for %s (%s), attempting browser refresh", domain_key, source or 'anon')
+        logger.info("No cookie for %s (%s), attempting browser refresh", domain_key, source or 'auto')
         data = refresh_cookie_declarative(cookie_config['refresh'], url, domain_key)
         if data:
             try:
@@ -551,17 +617,18 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
             logger.warning("Cookie refresh failed for %s, no cookies acquired", domain_key)
 
     verify_cfg = cookie_config.get('verify', {})
-    invalid_patterns = verify_cfg.get('invalid_patterns', [])
+    content_check_cfg = verify_cfg.get('content_check', {})
+    invalid_patterns = content_check_cfg.get('invalid_patterns', content_check_cfg.get('invalid_selectors', []))
 
     # L0 已过（有 cookie 字符串），进入 L1 探针
     if cookie_str:
-        probe_cfg = verify_cfg.get('probe', {})
+        probe_cfg = verify_cfg.get('http_head_probe', {})
         if probe_cfg and probe_cfg.get('enabled', True):
-            probe_result = _verify_cookie_l1_probe(
+            l1_result = _verify_cookie_l1_probe(
                 verify_cfg, url, cookie_str, domain_key)
-            if not probe_result.get('valid'):
+            if not l1_result.get('valid'):
                 logger.info("Cookie invalid (L1): %s: %s",
-                            domain_key, probe_result.get("reason"))
+                            domain_key, l1_result.get("reason"))
                 # L1 判定失效 → 如果配置了 refresh 就直接刷新，不再走 L2
                 if cookie_config.get('refresh'):
                     logger.info("L1 invalid for %s, attempting browser refresh",
@@ -582,8 +649,17 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
                                        domain_key)
                 return None
 
-    # 没有配置 invalid_patterns → 不验证，直接返回
-    if not invalid_patterns:
+    # L2 content_check: skip if disabled or no checks configured
+    if content_check_cfg.get('enabled', True) is False:
+        logger.debug("L2 content_check disabled for %s", domain_key)
+        return cookie_str
+
+    invalid_selectors = content_check_cfg.get('invalid_selectors',
+                          content_check_cfg.get('invalid_selector', []))
+    valid_patterns = content_check_cfg.get('valid_patterns', [])
+    valid_selectors = content_check_cfg.get('valid_selectors',
+                        content_check_cfg.get('valid_selector', []))
+    if not valid_patterns and not valid_selectors and not invalid_patterns and not invalid_selectors:
         return cookie_str
 
     # L2 页面内容验证

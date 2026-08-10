@@ -63,20 +63,20 @@ def get_auth_for_request(url: str, domain_key: str, section: str,
                 if best_val:
                     headers[header_name] = best_val
 
-    # Token: user first, shared fallback
-    merged_token = merged_auth.get('token', {})
-    if merged_token.get('endpoint'):
+    # OAuth2: user first, shared fallback
+    merged_oauth2 = merged_auth.get('oauth2', merged_auth.get('token', {}))
+    if merged_oauth2.get('enabled', True) and merged_oauth2.get('endpoint'):
         if username:
-            access_token = get_valid_token(merged_token, username, domain_key)
+            access_token = get_valid_token(merged_oauth2, username, domain_key)
             if access_token:
-                token_headers = get_token_header(merged_token, access_token)
+                token_headers = get_token_header(merged_oauth2, access_token)
                 headers.update(token_headers)
         else:
             best_rt, _ = get_best_token(username, domain_key)
             if best_rt:
-                token_result = _refresh_token(merged_token, best_rt)
+                token_result = _refresh_token(merged_oauth2, best_rt)
                 if token_result:
-                    token_headers = get_token_header(merged_token, token_result['access_token'])
+                    token_headers = get_token_header(merged_oauth2, token_result['access_token'])
                     headers.update(token_headers)
 
     return {

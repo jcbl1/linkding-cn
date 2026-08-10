@@ -60,17 +60,17 @@ def _cookie_string_from_config(config: dict = None) -> str | None:
 
 def create_snapshot(url: str, filepath: str, username: str = ''):
     config = get_snapshot_config(url, username=username)
-    # Pre-flight: for anon-type cookie sites without cookies, acquire via browser first.
+    # Pre-flight: for auto-type cookie sites without cookies, acquire via browser first.
     try:
         cookie_config = config.get("cookie") if config else {}
-        if cookie_config and cookie_config.get("type") == "anon":
+        if cookie_config and cookie_config.get("type") == "auto":
             has_cookie = bool(
                 config.get("_user_cookie") or
                 (get_shared_cookie(config.get("_domain_key", ""))[0] if config.get("_domain_key") else None)
             )
             if not has_cookie and cookie_config.get("refresh"):
                 domain_key = config.get("_domain_key")
-                logger.info("No cookie for anon site %s, acquiring via browser refresh", domain_key)
+                logger.info("No cookie for auto site %s, acquiring via browser refresh", domain_key)
                 new_cookie = verify_and_refresh(
                     cookie_config,
                     config.get("_request_url", url),
