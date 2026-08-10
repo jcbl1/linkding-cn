@@ -40,7 +40,7 @@ def _ensure_base_dirs():
     base_dir = _get_base_dir()
     adapters_dir = _get_adapters_dir()
     os.makedirs(adapters_dir, exist_ok=True)
-    for name in ('cookies', 'logs', 'test_assets'):
+    for name in ('logs', 'test_assets'):
         os.makedirs(os.path.join(base_dir, name), exist_ok=True)
 
     # 确保 defaults 适配器存在
