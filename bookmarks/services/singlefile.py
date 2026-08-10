@@ -210,7 +210,9 @@ def create_snapshot(url: str, filepath: str, config: dict = None):
     merge_option(result_options, injected_options)
     merge_option(result_options, custom_options)
 
-    snapshot_url = config.get("_request_url", url) if config else url
+    # If before hook provided HTML, use it as the capture target
+    before_html = config.get("_before_html_path") if config else None
+    snapshot_url = before_html if before_html else (config.get("_request_url", url) if config else url)
     args = [singlefile_path] + result_options + [snapshot_url, filepath]
 
     logger.debug("SingleFile full args: %s", args)

@@ -109,6 +109,84 @@ def _normalize_metadata_result(url: str, metadata, source: str):
     return _empty_metadata(url)
 
 
+def _load_with_hooks(url: str, config: dict, scripts: list, username: str = '',
+                     ignore_cache: bool = False) -> WebsiteMetadata:
+    """Execute metadata pipeline with hook scripts.
+
+    Order: before hooks → [replace or built-in engine] → after hooks
+    """
+    # 1. Run before hooks
+    for entry in scripts:
+        if entry.get('hook') != 'before':
+            continue
+        script_path = entry.get('path', '')
+        if not script_path or not os.path.exists(script_path):
+            continue
+        logger.debug("Running metadata before hook: %s", script_path)
+        run_script(script_path, hook_name='before', url=url, config=dict(config))
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("After before hook, config keys: %s", list(config.keys()))
+
+    # 2. Run replace hook or built-in engine
+    has_replace = any(e.get('hook') == 'replace' for e in scripts)
+
+    if has_replace:
+        for entry in scripts:
+            if entry.get('hook') != 'replace':
+                continue
+            script_path = entry.get('path', '')
+            if not script_path or not os.path.exists(script_path):
+                continue
+            logger.debug("Running metadata replace hook: %s", script_path)
+            result = run_script(script_path, hook_name='replace', url=url, config=dict(config))
+            if result is None:
+                return _empty_metadata(url)
+            if isinstance(result, dict):
+                result['title'] = apply_rewrite(result.get('title'), config.get('rewrite_title'))
+                result['description'] = apply_rewrite(result.get('description'), config.get('rewrite_description'))
+                result['image'] = apply_rewrite(result.get('image'), config.get('rewrite_image'))
+                metadata = _normalize_metadata_result(url, result, source=script_path)
+            else:
+                return _empty_metadata(url)
+            break  # Only one replace allowed
+    else:
+        # Built-in engine: load page + parse
+        if ignore_cache:
+            metadata = _load_website_metadata(url, config, username=username)
+        else:
+            metadata = _load_website_metadata_config_cached(
+                url, _metadata_config_cache_key(config), username=username
+            )
+
+    # 3. Run after hooks
+    if metadata is None:
+        metadata = _empty_metadata(url)
+
+    result_dict = {
+        'title': metadata.title,
+        'description': metadata.description,
+        'image': metadata.preview_image,
+        'url': metadata.url,
+    }
+
+    for entry in scripts:
+        if entry.get('hook') != 'after':
+            continue
+        script_path = entry.get('path', '')
+        if not script_path or not os.path.exists(script_path):
+            continue
+        logger.debug("Running metadata after hook: %s", script_path)
+        run_script(script_path, hook_name='after', url=url,
+                   config=dict(config), result_dict=result_dict)
+
+    return WebsiteMetadata(
+        url=result_dict.get('url') or url,
+        title=result_dict.get('title'),
+        description=result_dict.get('description'),
+        preview_image=result_dict.get('image'),
+    )
+
+
 def _metadata_config_cache_key(config: dict) -> str:
     return json.dumps(config, sort_keys=True, separators=(",", ":"), default=str)
 
@@ -117,6 +195,10 @@ def load_website_metadata(url: str, ignore_cache: bool = False, username: str = 
     config = get_metadata_config(url, username=username)
 
     if config:
+        scripts = config.get("scripts")
+        if scripts:
+            return _load_with_hooks(url, config, scripts, username=username, ignore_cache=ignore_cache)
+
         loader_file = config.get("script")
         if loader_file:
             loader_path = loader_file  # site_adapters engine resolved to absolute path

@@ -247,7 +247,7 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
             result['rewrite_description'] = section_data['rewrite_description']
         if 'rewrite_image' in section_data:
             result['rewrite_image'] = section_data['rewrite_image']
-        result['script'] = section_data.get('script')
+        result['scripts'] = section_data.get('scripts')
         result['load_full_page'] = section_data.get('load_full_page', True)
         if 'max_content_limit' in section_data:
             result['max_content_limit'] = section_data['max_content_limit']
@@ -257,7 +257,7 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
             result['process_lazy_images'] = section_data['process_lazy_images']
         result['remove_classes'] = section_data.get('remove_classes')
         result['set_styles'] = section_data.get('set_styles')
-        result['script'] = section_data.get('script')
+        result['scripts'] = section_data.get('scripts')
         result['singlefile_args'] = section_data.get('singlefile_args', {})
         result['toggles'] = section_data.get('toggles', {})
         result['remove_elements'], result['keep_elements'] = _apply_toggles(section_data, full_config, username)

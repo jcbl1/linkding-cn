@@ -74,31 +74,52 @@ def _resolve_all_paths(node, base_dir: str):
     """递归解析脚本路径字段中的相对路径，校验结果不越出站点适配根目录。
 
     同时拒绝指向根目录外的绝对路径。
+
+    处理 scripts 数组中的 path 字段，以及旧 script 字段。
     """
     if isinstance(node, dict):
         result = {}
         for key, value in node.items():
-            if (key == 'script' or key.endswith('_script')) and isinstance(value, str):
-                if value.startswith('./') or value.startswith('../'):
-                    resolved = _resolve_path(value, base_dir)
-                    if not is_safe_script_path(resolved, base_dir):
-                        logger.warning('Script path escapes allowed dir, skipping: %s', value)
-                        continue
+            if key == 'scripts' and isinstance(value, list):
+                resolved_scripts = []
+                for item in value:
+                    if isinstance(item, dict) and 'path' in item:
+                        resolved_path = _resolve_script_path(item['path'], base_dir)
+                        if resolved_path:
+                            resolved_scripts.append({**item, 'path': resolved_path})
+                    else:
+                        resolved_scripts.append(_resolve_all_paths(item, base_dir))
+                result[key] = resolved_scripts
+            elif (key == 'script' or key.endswith('_script')) and isinstance(value, str):
+                resolved = _resolve_script_path(value, base_dir)
+                if resolved:
                     result[key] = resolved
-                elif os.path.isabs(value):
-                    # Absolute paths must also be within the allowed directory
-                    if not is_safe_script_path(value, base_dir):
-                        logger.warning('Absolute script path outside allowed dir, skipping: %s', value)
-                        continue
-                    result[key] = value
-                else:
-                    result[key] = value
             else:
                 result[key] = _resolve_all_paths(value, base_dir)
         return result
     if isinstance(node, list):
         return [_resolve_all_paths(item, base_dir) for item in node]
     return node
+
+
+def _resolve_script_path(path: str, base_dir: str) -> str | None:
+    """解析单个脚本路径。文件名形式自动补全 scripts/ 前缀。
+
+    返回解析后的绝对路径，如果路径不安全则返回 None（记录警告）。
+    """
+    if os.path.isabs(path):
+        if not is_safe_script_path(path, base_dir):
+            logger.warning('Script path outside allowed dir, skipping: %s', path)
+            return None
+        return path
+    if not path.startswith('./') and not path.startswith('../') and not os.path.isabs(path):
+        # Plain path (no explicit directory prefix): auto-prefix scripts/ directory
+        path = os.path.join('scripts', path)
+    resolved = _resolve_path(path, base_dir)
+    if not is_safe_script_path(resolved, base_dir):
+        logger.warning('Script path escapes allowed dir, skipping: %s', path)
+        return None
+    return resolved
 
 
 # ---------------------------------------------------------------------------

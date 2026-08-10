@@ -1,5 +1,6 @@
 import logging
 import os
+from contextlib import suppress
 
 from bookmarks.services import singlefile
 from site_adapters.services.engine.script_runner import run_script
@@ -16,6 +17,10 @@ logger = logging.getLogger(__name__)
 
 def _run_snapshot(url: str, filepath: str, config: dict | None):
     if config:
+        scripts = config.get("scripts")
+        if scripts:
+            return _run_snapshot_with_hooks(url, filepath, config, scripts)
+
         script_path = config.get("script")
         if script_path:
             if os.path.exists(script_path):
@@ -23,6 +28,72 @@ def _run_snapshot(url: str, filepath: str, config: dict | None):
             logger.error("Snapshot script not found: %s", script_path)
         return _create_snapshot(url, filepath, config)
     return _create_snapshot(url, filepath, None)
+
+
+def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: list):
+    """Execute snapshot pipeline with hook scripts.
+
+    Order: before hooks → [replace or SingleFile] → after hooks
+    """
+    import tempfile
+    before_html_path = None
+
+    # 1. Run before hooks
+    for entry in scripts:
+        if entry.get('hook') != 'before':
+            continue
+        script_path = entry.get('path', '')
+        if not script_path or not os.path.exists(script_path):
+            continue
+        logger.debug("Running snapshot before hook: %s", script_path)
+        result = run_script(script_path, hook_name='before', url=url, config=dict(config))
+        if isinstance(result, str):
+            # before hook returned HTML — save to temp file for downstream
+            with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as tmp:
+                tmp.write(result)
+            before_html_path = tmp.name
+            logger.debug("Before hook returned HTML, saved to: %s", before_html_path)
+
+    # 2. Run replace hook or built-in engine
+    has_replace = any(e.get('hook') == 'replace' for e in scripts)
+    snapshot_url = before_html_path if before_html_path else url
+
+    if has_replace:
+        for entry in scripts:
+            if entry.get('hook') != 'replace':
+                continue
+            script_path = entry.get('path', '')
+            if not script_path or not os.path.exists(script_path):
+                continue
+            logger.debug("Running snapshot replace hook: %s", script_path)
+            run_script(script_path, hook_name='replace', url=url,
+                       config=dict(config), output_path=filepath)
+            break  # Only one replace allowed
+    else:
+        # Built-in engine: SingleFile
+        if before_html_path:
+            config_copy = dict(config)
+            config_copy['_before_html_path'] = before_html_path
+            _create_snapshot(url, filepath, config_copy)
+        else:
+            _create_snapshot(url, filepath, config)
+
+    # 3. Run after hooks
+    for entry in scripts:
+        if entry.get('hook') != 'after':
+            continue
+        script_path = entry.get('path', '')
+        if not script_path or not os.path.exists(script_path):
+            continue
+        logger.debug("Running snapshot after hook: %s", script_path)
+        run_script(script_path, hook_name='after', output_path=filepath,
+                   config=dict(config))
+
+    # Cleanup temp file
+    if before_html_path:
+        with suppress(OSError):
+            os.unlink(before_html_path)
+
 
 
 def _verify_snapshot_cookie(url: str, filepath: str, config: dict) -> bool:

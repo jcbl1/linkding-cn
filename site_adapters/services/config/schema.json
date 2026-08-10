@@ -204,6 +204,30 @@
         },
         "auth": {
           "$ref": "#/definitions/auth_config"
+        },
+        "scripts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "hook": {
+                "type": "string",
+                "enum": [
+                  "before",
+                  "after",
+                  "replace"
+                ]
+              }
+            },
+            "required": [
+              "path",
+              "hook"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false
@@ -325,6 +349,30 @@
             "required": [
               "selector"
             ]
+          }
+        },
+        "scripts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "hook": {
+                "type": "string",
+                "enum": [
+                  "before",
+                  "after",
+                  "replace"
+                ]
+              }
+            },
+            "required": [
+              "path",
+              "hook"
+            ],
+            "additionalProperties": false
           }
         }
       },

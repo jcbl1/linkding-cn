@@ -48,7 +48,7 @@ METADATA_FIELDS = frozenset({
     "select_title", "select_description", "select_image",
     "rewrite_title", "rewrite_description", "rewrite_image",
     "load_full_page", "max_content_limit",
-    "script",
+    "scripts",
     "timeout", "proxy",
     "request_url", "rewrite_url",
     "http", "auth",
@@ -57,7 +57,7 @@ METADATA_FIELDS = frozenset({
 SNAPSHOT_FIELDS = frozenset({
     "keep_elements", "remove_elements", "process_lazy_images",
     "remove_classes", "set_styles",
-    "script",
+    "scripts",
     "singlefile_args",
     "toggles",
     "timeout", "proxy",
@@ -483,6 +483,32 @@ def _validate_domain_config(issues: list[str], label: str, data: dict, file_dir:
         for key, value in sec.items():
             if classify_field(section, key) == 'unknown':
                 issues.append(f"WARN: {label}.{section}.{key} is unknown, will be ignored at runtime")
+            if key == 'scripts':
+                if not isinstance(value, list):
+                    issues.append(f"ERROR: {label}.{section}.scripts must be an array")
+                else:
+                    replace_count = 0
+                    seen_hooks = set()
+                    for i, item in enumerate(value):
+                        if not isinstance(item, dict):
+                            issues.append(f"ERROR: {label}.{section}.scripts[{i}] must be an object")
+                            continue
+                        script_path = item.get('path', '')
+                        hook_val = item.get('hook', '')
+                        if hook_val not in ('before', 'after', 'replace'):
+                            issues.append(f"ERROR: {label}.{section}.scripts[{i}].hook must be before/after/replace, got '{hook_val}'")
+                        if hook_val == 'replace':
+                            replace_count += 1
+                        if script_path:
+                            if '/' not in script_path and not os.path.isabs(script_path):
+                                script_path = os.path.join('scripts', script_path)
+                            resolved = _resolve_path(script_path, file_dir) if not os.path.isabs(script_path) else script_path
+                            if not os.path.exists(resolved):
+                                issues.append(f"ERROR: {label}.{section}.scripts[{i}].path not found: {item.get('path')}")
+                            elif not is_safe_script_path(resolved, file_dir):
+                                issues.append(f"ERROR: {label}.{section}.scripts[{i}].path not allowed: {item.get('path')}")
+                    if replace_count > 1:
+                        issues.append(f"ERROR: {label}.{section}.scripts has {replace_count} replace hooks, only 1 allowed")
             if key.endswith('_script') or key == 'script':
                 script_path = _resolve_path(value, file_dir) if isinstance(value, str) else ''
                 if value and not isinstance(value, str):
@@ -502,7 +528,7 @@ def _validate_domain_config(issues: list[str], label: str, data: dict, file_dir:
                 if not is_known_singlefile_arg(arg):
                     issues.append(f"WARN: {label}.snapshot.singlefile_args.{arg} unknown")
             _check_exclusive(issues, f"{label}.{section}", sec, [
-                ('script', 'keep_elements', 'remove_elements', 'remove_classes', 'set_styles', 'singlefile_args'),
+                ('scripts', 'keep_elements', 'remove_elements', 'remove_classes', 'set_styles', 'singlefile_args'),
             ])
         if section == 'reader':
             args = sec.get('defuddle_args', {})
