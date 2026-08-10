@@ -14,6 +14,7 @@ from site_adapters.services.auth.credentials import (
     get_best_cookie,
     get_best_header,
     get_best_token,
+    get_best_basic_auth,
     save_user_cookie,
     save_user_header,
     save_user_token,
@@ -79,6 +80,16 @@ def get_auth_for_request(url: str, domain_key: str, section: str,
                     token_headers = get_token_header(merged_oauth2, token_result['access_token'])
                     headers.update(token_headers)
 
+
+    # Basic Auth: user credential first, shared fallback
+    merged_basic = merged_auth.get('basic_auth', {})
+    if isinstance(merged_basic, dict) and merged_basic.get('enabled', True) and merged_basic:
+        best_ba, _ = get_best_basic_auth(username, domain_key)
+        if best_ba:
+            import base64
+            credentials = f"{best_ba['username']}:{best_ba['password']}"
+            encoded = base64.b64encode(credentials.encode()).decode()
+            headers['Authorization'] = f'Basic {encoded}'
     return {
         'headers': headers,
         'cookie_str': cookie_str,

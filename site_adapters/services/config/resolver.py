@@ -26,6 +26,7 @@ from site_adapters.services.auth.credentials import (
     get_best_cookie,
     get_best_header,
     get_best_token,
+    get_best_basic_auth,
 )
 from site_adapters.services.auth.tokens import (
     get_token_header,
@@ -222,6 +223,16 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
                     oauth2_headers = get_token_header(merged_oauth2, token_result['access_token'])
                     headers.update(oauth2_headers)
 
+
+    # Basic Auth: user credential first, shared fallback
+    merged_basic = merged_auth.get('basic_auth', {})
+    if isinstance(merged_basic, dict) and merged_basic.get('enabled', True) and merged_basic:
+        best_ba, _ = get_best_basic_auth(username, hostname)
+        if best_ba:
+            import base64
+            credentials = f"{best_ba['username']}:{best_ba['password']}"
+            encoded = base64.b64encode(credentials.encode()).decode()
+            headers['Authorization'] = f'Basic {encoded}'
     result = {
         'headers': headers,
         'timeout': timeout,

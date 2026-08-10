@@ -21,15 +21,19 @@ from site_adapters.services.auth.credentials import (
     save_user_cookie,
     save_user_header,
     save_user_token,
+    save_user_basic_auth,
     save_shared_cookie,
     save_shared_header,
     save_shared_token,
+    save_shared_basic_auth,
     delete_user_cookie,
     delete_user_header,
     delete_user_token,
+    delete_user_basic_auth,
     delete_shared_cookie,
     delete_shared_header,
     delete_shared_token,
+    delete_shared_basic_auth,
     get_user_preferences,
     save_user_preferences,
     list_domains_with_toggles,
@@ -50,12 +54,13 @@ def _get_domains_needing_auth(base_dir):
     all_config = _cache.load(base_dir)
     for key in sorted(k for k in all_config if k != 'defaults' and not k.startswith('_')):
         auth = get_auth_requirements_for_domain_key(key, base_dir=base_dir)
-        if auth['cookie'] or auth['headers'] or auth.get('oauth2', auth.get('token', False)):
+        if auth['cookie'] or auth['headers'] or auth.get('oauth2', auth.get('token', False)) or auth.get('basic_auth'):
             domains.append({
                 'domain': key,
                 'needs_cookie': auth['cookie'],
                 'needs_headers': auth['headers'],
                 'needs_oauth2': auth.get('oauth2', auth.get('token', False)),
+                'needs_basic_auth': bool(auth.get('basic_auth')),
                 'cookie_type': auth.get('cookie_type', 'auto'),
             })
     return domains
@@ -98,6 +103,11 @@ def adapters_page(request):
                 token_value = request.POST.get('value', '').strip()
                 if token_value:
                     save_user_token(username, domain, token_value)
+            elif cred_type == 'basic_auth':
+                username_val = request.POST.get('username', '').strip()
+                password_val = request.POST.get('password', '').strip()
+                if username_val and password_val:
+                    save_user_basic_auth(username, domain, username_val, password_val)
             return redirect(request.META.get('HTTP_REFERER', adapters_url))
 
         elif action == 'delete_credential':
@@ -112,6 +122,8 @@ def adapters_page(request):
                         delete_user_header(username, domain, header_name)
                 elif cred_type == 'oauth2':
                     delete_user_token(username, domain)
+                elif cred_type == 'basic_auth':
+                    delete_user_basic_auth(username, domain)
             return redirect(request.META.get('HTTP_REFERER', adapters_url))
 
         elif action == 'toggle_pref':
@@ -145,6 +157,9 @@ def adapters_page(request):
             'type': cr['type'],
             'cookie': cr.get('cookie', ''),
             'token': cr.get('token', ''),
+            'oauth2': cr.get('token', ''),
+            'basic_auth_username': cr.get('basic_auth_username', ''),
+            'basic_auth_password': cr.get('basic_auth_password', ''),
             'header_names': cr.get('header_names', []),
             'header_values': cr.get('header_values', {}),
         }
@@ -154,7 +169,7 @@ def adapters_page(request):
     # Domains needing auth (for add credential modal autocomplete)
     domains_needing_auth = _get_domains_needing_auth(base_dir)
     ctx['auth_domains_json'] = json.dumps([
-        {'d': d['domain'], 'c': d['needs_cookie'], 'h': d['needs_headers'], 't': d['needs_token'], 'ct': d.get('cookie_type', 'anon')}
+        {'d': d['domain'], 'c': d['needs_cookie'], 'h': d['needs_headers'], 't': d['needs_oauth2'], 'b': d.get('needs_basic_auth', False), 'ct': d.get('cookie_type', 'anon')}
         for d in domains_needing_auth
     ])
 
@@ -235,8 +250,8 @@ def user_credentials(request):
     domains = _get_domains_needing_auth(base_dir)
     return JsonResponse({
         'domains': [{'domain': d['domain'], 'needs_cookie': d['needs_cookie'],
-                      'needs_headers': d['needs_headers'], 'needs_token': d['needs_token'],
-                      'cookie_type': d.get('cookie_type', 'anon')}
+                      'needs_headers': d['needs_headers'], 'needs_token': d['needs_oauth2'],
+                      'needs_basic_auth': d.get('needs_basic_auth', False), 'cookie_type': d.get('cookie_type', 'anon')}
                      for d in domains],
     })
 
@@ -273,8 +288,8 @@ def shared_credential_list(request):
     return JsonResponse({
         'credentials': credentials,
         'domains': [{'domain': d['domain'], 'needs_cookie': d['needs_cookie'],
-                      'needs_headers': d['needs_headers'], 'needs_token': d['needs_token'],
-                      'cookie_type': d.get('cookie_type', 'anon')}
+                      'needs_headers': d['needs_headers'], 'needs_token': d['needs_oauth2'],
+                      'needs_basic_auth': d.get('needs_basic_auth', False), 'cookie_type': d.get('cookie_type', 'anon')}
                      for d in domains],
     })
 
@@ -308,6 +323,12 @@ def shared_credential_save(request):
         if not token_value:
             return JsonResponse({'error': 'Token value required'}, status=400)
         save_shared_token(domain, token_value)
+    elif cred_type == 'basic_auth':
+        username_val = request.POST.get('username', '').strip()
+        password_val = request.POST.get('password', '').strip()
+        if not username_val or not password_val:
+            return JsonResponse({'error': 'Username and password required'}, status=400)
+        save_shared_basic_auth(domain, username_val, password_val)
     else:
         return JsonResponse({'error': 'Invalid credential type'}, status=400)
 
@@ -336,6 +357,8 @@ def shared_credential_delete(request):
         delete_shared_header(domain, header_name)
     elif cred_type == 'oauth2':
         delete_shared_token(domain)
+    elif cred_type == 'basic_auth':
+        delete_shared_basic_auth(domain)
     else:
         return JsonResponse({'error': 'Invalid credential type'}, status=400)
 

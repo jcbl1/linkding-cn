@@ -254,7 +254,7 @@ function initAdapters() {
       html += '<div class="wa-cred-row">'
         + '<span class="wa-col-domain wa-cred-domain-cell">' + escapeHtml(c.domain) + '</span>'
         + '<span class="wa-col-type wa-cred-type-cell">'
-        + '<span class="wa-badge">' + (c.type === 'cookie' ? 'Cookie' : c.type === 'oauth2' ? 'OAuth2' : c.type === 'token' ? 'OAuth2' : 'Header') + '</span>'
+        + '<span class="wa-badge">' + (c.type === 'cookie' ? 'Cookie' : c.type === 'oauth2' ? 'OAuth2' : c.type === 'token' ? 'OAuth2' : c.type === 'basic_auth' ? 'Basic Auth' : 'Header') + '</span>'
         + (c.type === 'header' && c.header_names ? '<span class="wa-cred-header-names">(' + escapeHtml(c.header_names.slice(0, 3).join(', ')) + (c.header_names.length > 3 ? '...' : '') + ')</span>' : '')
         + '</span>'
         + '<span class="wa-col-updated wa-cred-updated-cell">' + escapeHtml((c.updated_at || '').slice(0, 10))
@@ -278,6 +278,8 @@ function initAdapters() {
       if (extras) {
         if (extras.value) data.value = extras.value;
         if (extras.header_name) data.header_name = extras.header_name;
+        if (extras.username) data.username = extras.username;
+        if (extras.password) data.password = extras.password;
       }
       apiPost(urls.sharedCredSave, data).then(function(r) {
         if (r.success) {
@@ -361,7 +363,7 @@ function initAdapters() {
   //  Show/hide credential field panels
   // ===================================================================
   function showFieldPanel(modal, fieldType) {
-    ['cookie', 'header', 'oauth2'].forEach(function(t) {
+    ['cookie', 'header', 'oauth2', 'basic_auth'].forEach(function(t) {
       var panel = modal.querySelector('[data-cred-field="' + t + '"]');
       if (!panel) return;
       panel.hidden = t !== fieldType;
@@ -377,14 +379,16 @@ function initAdapters() {
     if (inf.c) autoType = 'cookie';
     else if (inf.h && inf.h.length) autoType = 'header';
     else if (inf.t) autoType = 'oauth2';
+    else if (inf.b) autoType = 'basic_auth';
 
     var localNeeded = (inf.c ? ['cookie'] : []).concat(
       (inf.h && inf.h.length ? ['header'] : []),
-      (inf.t ? ['oauth2'] : [])
+      (inf.t ? ['oauth2'] : []),
+      (inf.b ? ['basic_auth'] : [])
     );
     var hasReq = localNeeded.length > 0;
 
-    ['cookie', 'header', 'oauth2'].forEach(function(t) {
+    ['cookie', 'header', 'oauth2', 'basic_auth'].forEach(function(t) {
       setTypeGrayed(modal, t, hasReq && localNeeded.indexOf(t) < 0);
     });
 
@@ -451,17 +455,19 @@ function initAdapters() {
       if (info.c) selectedType = 'cookie';
       else if (info.h && info.h.length) selectedType = 'header';
       else if (info.t) selectedType = 'oauth2';
+      else if (info.b) selectedType = 'basic_auth';
     }
 
     var neededTypes = domain ? (
       (info.c ? ['cookie'] : []).concat(
         (info.h && info.h.length ? ['header'] : []),
-        (info.t ? ['oauth2'] : [])
+        (info.t ? ['oauth2'] : []),
+        (info.b ? ['basic_auth'] : [])
       )
-    ) : ['cookie', 'header', 'oauth2'];
+    ) : ['cookie', 'header', 'oauth2', 'basic_auth'];
     var hasReq = neededTypes.length > 0 && domain;
 
-    ['cookie', 'header', 'oauth2'].forEach(function(t) {
+    ['cookie', 'header', 'oauth2', 'basic_auth'].forEach(function(t) {
       var radio = modal.querySelector('input[name="dlg-type"][value="' + t + '"]');
       if (!radio) return;
       if (t === selectedType) radio.checked = true;
@@ -485,6 +491,10 @@ function initAdapters() {
       if (cookieEl && existingCred.cookie) cookieEl.value = existingCred.cookie;
       var tokenEl = modal.querySelector('#dlg-oauth2-value');
       if (tokenEl && existingCred.oauth2) tokenEl.value = existingCred.oauth2;
+      var baUserEl = modal.querySelector('#dlg-basic-auth-username');
+      if (baUserEl && existingCred.basic_auth_username) baUserEl.value = existingCred.basic_auth_username;
+      var baPassEl = modal.querySelector('#dlg-basic-auth-password');
+      if (baPassEl && existingCred.basic_auth_password) baPassEl.value = existingCred.basic_auth_password;
     }
 
     var headerRows = modal.querySelector('#dlg-header-rows');
@@ -529,6 +539,7 @@ function initAdapters() {
           if (d.c || d.needs_cookie) { var cookieLabel = (d.ct === 'login') ? 'Cookie' : 'Cookie (auto)'; labels.push(cookieLabel); }
           if ((d.h && d.h.length) || (d.needs_headers && d.needs_headers.length)) labels.push('Header');
           if (d.t || d.needs_oauth2) labels.push('Token');
+          if (d.b || d.needs_basic_auth) labels.push('Basic Auth');
           item.innerHTML = '<span>' + escapeHtml(d.d || d.domain) + (labels.length ? ' <span class="text-gray" style="font-size:12px">(' + escapeHtml(labels.join(' + ')) + ')</span>' : '') + '</span>';
           item.addEventListener('mousedown', function(ev) {
             ev.preventDefault();
@@ -581,10 +592,15 @@ function initAdapters() {
           return;
         }
         submitCredentialForm(d, ct, {value: val});
-      } else if (ct === 'token') {
+      } else if (ct === 'oauth2') {
         var tv = modal.querySelector('#dlg-oauth2-value').value.trim();
         if (!tv) { toast(gettext('Please enter refresh token'), 'error'); saveBtn.disabled = false; return; }
         submitCredentialForm(d, ct, {value: tv});
+      } else if (ct === 'basic_auth') {
+        var bu = modal.querySelector('#dlg-basic-auth-username').value.trim();
+        var bp = modal.querySelector('#dlg-basic-auth-password').value.trim();
+        if (!bu || !bp) { toast(gettext('Please enter username and password'), 'error'); saveBtn.disabled = false; return; }
+        submitCredentialForm(d, ct, {username: bu, password: bp});
       } else {
         var rows = modal.querySelectorAll('#dlg-header-rows > .wa-header-row');
         var sub = 0;

@@ -387,6 +387,45 @@ def delete_user_token(username: str, domain: str):
 
 
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Basic Auth credentials
+# ---------------------------------------------------------------------------
+
+def get_user_basic_auth(username: str, hostname: str) -> tuple[dict | None, str]:
+    """Get the user's basic auth credential for a hostname.
+
+    Returns ({'username': ..., 'password': ...} | None, status).
+    """
+    path = _resolve_credential_path(username, hostname, 'basic_auth.json')
+    content, status = _read_encrypted_file(path)
+    if content is None:
+        return None, status
+    try:
+        data = json.loads(content)
+        return data if isinstance(data, dict) else None, status
+    except (json.JSONDecodeError, AttributeError):
+        return None, 'error'
+
+
+def save_user_basic_auth(username: str, domain: str, username_val: str, password_val: str, exact: bool = True):
+    """Save the user's basic auth credential (encrypted storage)."""
+    path = _credential_path(username, domain, 'basic_auth.json') if exact \
+        else _resolve_credential_path(username, domain, 'basic_auth.json')
+    content = json.dumps({'username': username_val, 'password': password_val}, ensure_ascii=False)
+    _write_encrypted_file(path, content)
+    _update_meta_entry('basic_auth', username, domain,
+                       updated_at=_now_iso(), source='paste')
+
+
+def delete_user_basic_auth(username: str, domain: str):
+    """Delete the user's basic auth credential."""
+    path = _resolve_credential_path(username, domain, 'basic_auth.json')
+    _remove_file(path)
+    meta = _load_meta()
+    meta['credentials'].pop(f'basic_auth:{username}:{domain}', None)
+    _save_meta(meta)
+# ---------------------------------------------------------------------------
 # Shared credentials
 # ---------------------------------------------------------------------------
 
@@ -546,6 +585,42 @@ def delete_shared_token(domain: str):
 
 
 # ---------------------------------------------------------------------------
+
+# ── Shared Basic Auth ──
+
+def get_shared_basic_auth(hostname: str) -> tuple[dict | None, str]:
+    """Get the shared basic auth credential for a hostname."""
+    matched = _resolve_shared_credential_domain(hostname)
+    if not matched:
+        return None, 'not_found'
+    path = _shared_credential_path(matched, 'basic_auth')
+    content, status = _read_encrypted_file(path)
+    if content is None:
+        return None, status
+    try:
+        data = json.loads(content)
+        return data if isinstance(data, dict) else None, status
+    except (json.JSONDecodeError, AttributeError):
+        return None, 'error'
+
+
+def save_shared_basic_auth(domain: str, username_val: str, password_val: str):
+    """Save a shared basic auth credential (encrypted storage)."""
+    path = _shared_credential_path(domain, 'basic_auth')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    content = json.dumps({'username': username_val, 'password': password_val}, ensure_ascii=False)
+    _write_encrypted_file(path, content)
+    _update_meta_entry('basic_auth', 'shared', domain,
+                       updated_at=_now_iso(), source='paste')
+
+
+def delete_shared_basic_auth(domain: str):
+    """Delete a shared basic auth credential."""
+    path = _shared_credential_path(domain, 'basic_auth')
+    _remove_file(path)
+    meta = _load_meta()
+    meta['credentials'].pop(f'basic_auth:shared:{domain}', None)
+    _save_meta(meta)
 # Unified best-credential resolution (user first, shared fallback)
 # Used by resolver.py and auth/__init__.py to avoid duplicated fallback logic.
 # ---------------------------------------------------------------------------
@@ -577,6 +652,15 @@ def get_best_token(username: str, hostname: str) -> tuple[str | None, str]:
     return get_shared_token(hostname)
 
 
+
+def get_best_basic_auth(username: str, hostname: str) -> tuple[dict | None, str]:
+    """Get the best available basic auth: user credential first, shared fallback."""
+    if username:
+        result, status = get_user_basic_auth(username, hostname)
+        if result:
+            return result, status
+    return get_shared_basic_auth(hostname)
+
 def _list_credentials_in_dir(base_dir: str, meta_prefix: str,
                                   include_values: bool = False) -> list[dict]:
     """List all credentials in a directory, optionally with decrypted values."""
@@ -596,6 +680,7 @@ def _list_credentials_in_dir(base_dir: str, meta_prefix: str,
             ('cookie', 'cookie.json'),
             ('header', 'header.json'),
             ('oauth2', 'token.json'), ('token', 'token.json'),  # legacy: token → oauth2
+            ('basic_auth', 'basic_auth.json'),
         ]:
             path = os.path.join(domain_dir, filename)
             if not os.path.isfile(path):
@@ -631,6 +716,14 @@ def _list_credentials_in_dir(base_dir: str, meta_prefix: str,
                         entry['token'] = token_data.get('refresh_token', '') if isinstance(token_data, dict) else ''
                     except (json.JSONDecodeError, AttributeError):
                         entry['token'] = ''
+                elif cred_type == 'basic_auth':
+                    try:
+                        ba_data = json.loads(content)
+                        entry['basic_auth_username'] = ba_data.get('username', '') if isinstance(ba_data, dict) else ''
+                        entry['basic_auth_password'] = ba_data.get('password', '') if isinstance(ba_data, dict) else ''
+                    except (json.JSONDecodeError, AttributeError):
+                        entry['basic_auth_username'] = ''
+                        entry['basic_auth_password'] = ''
 
             result.append(entry)
 
@@ -700,7 +793,8 @@ def get_auth_requirements_for_domain(hostname: str, base_dir: str = '') -> dict:
     headers = list(auth.get('headers', {}).keys()) if isinstance(auth.get('headers'), dict) else []
     has_oauth2 = bool(auth.get('oauth2', {}).get('endpoint'))
     cookie_type = auth.get('cookie', {}).get('type', 'auto') if isinstance(auth.get('cookie'), dict) else 'auto'
-    return {'cookie': has_cookie, 'headers': headers, 'oauth2': has_oauth2, 'token': has_oauth2, 'cookie_type': cookie_type}
+    has_basic_auth = bool(auth.get('basic_auth'))
+    return {'cookie': has_cookie, 'headers': headers, 'oauth2': has_oauth2, 'token': has_oauth2, 'basic_auth': has_basic_auth, 'cookie_type': cookie_type}
 
 
 def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') -> dict:
@@ -730,7 +824,8 @@ def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') ->
     headers = sorted(auth.get('headers', {}).keys()) if isinstance(auth.get('headers'), dict) else []
     has_oauth2 = bool(auth.get('oauth2', {}).get('endpoint'))
     cookie_type = auth.get('cookie', {}).get('type', 'auto') if isinstance(auth.get('cookie'), dict) else 'auto'
-    return {'cookie': has_cookie, 'headers': headers, 'oauth2': has_oauth2, 'token': has_oauth2, 'cookie_type': cookie_type}
+    has_basic_auth = bool(auth.get('basic_auth'))
+    return {'cookie': has_cookie, 'headers': headers, 'oauth2': has_oauth2, 'token': has_oauth2, 'basic_auth': has_basic_auth, 'cookie_type': cookie_type}
 
 
 # ---------------------------------------------------------------------------
