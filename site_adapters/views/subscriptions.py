@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shutil
+import time
 from urllib.parse import urlparse
 
 from django.http import JsonResponse
@@ -66,16 +67,18 @@ def subscription_manage(request):
         if action_name == 'add':
             item = _adapter_from_post(request)
 
-            # 远程源：先轻量下载提取 _meta，再用正确的 id/name 正式缓存
+            # 远程源：下载提取 _meta 获得 id/name，然后立即缓存到本地
             source = item.get('source', '')
             from site_adapters.services.subscriptions import is_remote_source
+            auto_detect_data = None
+            auto_detect_meta = {}
             if is_remote_source(source) and (not item.get('id', '').strip() or not item.get('name', '').strip()):
                 from site_adapters.services.subscriptions import _download_jsonc
                 download_error = None
                 try:
-                    data, _resp = _download_jsonc(source)
-                    if data and isinstance(data.get('_meta'), dict):
-                        meta = data['_meta']
+                    auto_detect_data, auto_detect_meta = _download_jsonc(source)
+                    if auto_detect_data and isinstance(auto_detect_data.get('_meta'), dict):
+                        meta = auto_detect_data['_meta']
                         if not item.get('id', '').strip():
                             item['id'] = meta.get('id', '')
                         if not item.get('name', '').strip():
@@ -102,6 +105,39 @@ def subscription_manage(request):
             adapters.append(item)
             _save_adapters_list(adapters)
 
+            # 远程订阅源：立即缓存下载的数据
+            if is_remote_source(source) and auto_detect_data is not None:
+                from site_adapters.services.subscriptions import (
+                    _write_adapter_file,
+                    resolve_adapter_path,
+                    _normalize_source_to_directory,
+                    _update_meta_entry,
+                    _resolve_includes,
+                )
+                adapters_root = _get_adapters_dir()
+                file_path = resolve_adapter_path(item.get('name', ''), source, adapters_root)
+                base_url = _normalize_source_to_directory(source)
+
+                if '_includes' in auto_detect_data:
+                    try:
+                        auto_detect_data = _resolve_includes(source, auto_detect_data, set())
+                    except Exception as e:
+                        logger.warning('Failed to resolve _includes for new subscription: %s', e)
+
+                try:
+                    _write_adapter_file(file_path, base_url, auto_detect_data)
+                    _update_meta_entry(
+                        base_url,
+                        last_fetch=time.time(),
+                        content_hash=auto_detect_meta.get('content_hash', ''),
+                        etag=auto_detect_meta.get('etag', ''),
+                        last_modified=auto_detect_meta.get('last_modified', ''),
+                        fetch_status='ok',
+                    )
+                    _invalidate_site_adapters_cache()
+                except Exception as e:
+                    logger.warning('Failed to cache new subscription immediately: %s', e)
+
         elif action_name == 'save':
             index = _adapter_index(request, adapters)
             item = _adapter_from_post(request)
@@ -125,6 +161,13 @@ def subscription_manage(request):
                 item.pop('display_name', None)
             adapters[index] = item
             _save_adapters_list(adapters)
+            # 远程订阅源：确保缓存目录存在（source 变更时可能需要新建目录）
+            source = item.get('source', '')
+            from site_adapters.services.subscriptions import is_remote_source
+            if is_remote_source(source):
+                cache_dir = _adapter_cache_dir(item)
+                if cache_dir:
+                    os.makedirs(cache_dir, exist_ok=True)
 
         elif action_name == 'delete':
             index = _adapter_index(request, adapters)
@@ -244,7 +287,7 @@ def subscription_domain_read(request):
     sub_name = request.GET.get('sub', '')
     from site_adapters.services.subscriptions import _read_subscription_file
 
-    # 在已注册的适配器中查找
+    adapters = _get_adapters_list()
     for adapter in adapters:
         if not isinstance(adapter, dict):
             continue

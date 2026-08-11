@@ -106,47 +106,67 @@ class SourceCache:
         """Resolve the adapter file path.
 
         entry: {"id": "...", "name": "...", "source": "..."}
-        source is a required field.
+        source is the subscription directory (containing adapters.jsonc) or a direct file URL.
 
         - HTTPS URL → adapters/{id}.{name}/adapters.jsonc (cache target)
-        - Absolute path → use directly
-        - Relative path → resolve relative to adapters/ directory
+        - Absolute path → <source>/adapters.jsonc
+        - Relative path → resolve relative to adapters/, append adapters.jsonc
         """
         from site_adapters.services.base import _adapter_dir
+        from site_adapters.services.subscriptions import _normalize_source_to_directory
         name = entry.get('name', '') if isinstance(entry, dict) else ''
         source = entry.get('source', '') if isinstance(entry, dict) else ''
         dir_name = _adapter_dir(entry) if isinstance(entry, dict) else name
 
         if source.startswith('https://') or source.startswith('http://'):
             return os.path.join(adapters_dir, dir_name, _ADAPTER_FILE)
+        # 本地目录路径：规范化并拼接 adapters.jsonc
+        source = _normalize_source_to_directory(source)
         if os.path.isabs(source):
-            return source
-        return os.path.normpath(os.path.join(adapters_dir, source))
+            return os.path.join(source, _ADAPTER_FILE)
+        return os.path.normpath(os.path.join(adapters_dir, source, _ADAPTER_FILE))
 
     def _load_adapter_file(self, file_path: str) -> dict:
         """Load a single adapter file, returning {"*": ..., "domains": {...}}.
 
         Resolution logic:
-        1. If the given path exists directly → use it
-        2. If a directory exists, try adapters.jsonc → <dirname>.jsonc
+        1. If the given path is a file → use it directly
+        2. If the given path is a directory → try adapters.jsonc inside
+        3. If the parent directory exists → try adapters.jsonc / <dirname>.jsonc
+        4. Otherwise → return empty dict (e.g. remote adapter not yet fetched)
         """
-        if os.path.exists(file_path):
+        if os.path.isfile(file_path):
             pass  # file exists, use directly
-        elif os.path.isdir(os.path.dirname(file_path)) or os.path.isdir(file_path):
-            # try adapters.jsonc in the same directory
-            dir_path = file_path if os.path.isdir(file_path) else os.path.dirname(file_path)
+        elif os.path.isdir(file_path):
+            candidates = [
+                os.path.join(file_path, 'adapters.jsonc'),
+                os.path.join(file_path, os.path.basename(file_path) + '.jsonc'),
+            ]
+            file_path = None
+            for c in candidates:
+                if os.path.isfile(c):
+                    file_path = c
+                    break
+            if file_path is None:
+                logger.warning("Adapter file not found in directory: %s", file_path if file_path else candidates[0])
+                return {'defaults': {}, '_builtin': {}, 'domains': {}}
+        elif os.path.isdir(os.path.dirname(file_path)):
+            dir_path = os.path.dirname(file_path)
             candidates = [
                 os.path.join(dir_path, 'adapters.jsonc'),
                 os.path.join(dir_path, os.path.basename(dir_path) + '.jsonc'),
             ]
             file_path = None
             for c in candidates:
-                if os.path.exists(c):
+                if os.path.isfile(c):
                     file_path = c
                     break
             if file_path is None:
                 logger.warning("Adapter file not found in: %s", dir_path)
                 return {'defaults': {}, '_builtin': {}, 'domains': {}}
+        else:
+            logger.debug("Adapter path not found, skipping: %s", file_path)
+            return {'defaults': {}, '_builtin': {}, 'domains': {}}
         try:
             data = load_jsonc_file(file_path)
         except (json.JSONDecodeError, OSError) as e:
@@ -327,12 +347,8 @@ class SourceCache:
             source = item.get('source', '')
 
             from site_adapters.services.base import _adapter_dir
-            dir_name = _adapter_dir(item)
-            local_path = os.path.join(adapters_dir, dir_name, 'adapters.jsonc')
-            if source and not (source.startswith('https://') or source.startswith('http://')):
-                resolved = os.path.normpath(os.path.join(adapters_dir, source)) if not os.path.isabs(source) else source
-                if os.path.exists(resolved):
-                    local_path = resolved
+            from site_adapters.services.subscriptions import resolve_adapter_path
+            local_path = resolve_adapter_path(adapter_id, source, adapters_dir) if source else os.path.join(adapters_dir, _adapter_dir(item), 'adapters.jsonc')
 
             adapter_data = self._sources.get(cache_key, (0, {'_meta': {}}))[1]
             meta = adapter_data.get('_meta', {})

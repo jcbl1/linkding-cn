@@ -62,8 +62,8 @@ def _script_root_for_file_dir(file_dir: str) -> str:
 
 def is_safe_script_path(script_path: str, file_dir: str) -> bool:
     """检查脚本路径是否在允许的站点适配根目录内。"""
-    abs_script = os.path.abspath(script_path)
-    abs_base = os.path.abspath(_script_root_for_file_dir(file_dir))
+    abs_script = os.path.realpath(os.path.abspath(script_path))
+    abs_base = os.path.realpath(os.path.abspath(_script_root_for_file_dir(file_dir)))
     try:
         return os.path.commonpath([abs_script, abs_base]) == abs_base
     except ValueError:
@@ -90,10 +90,6 @@ def _resolve_all_paths(node, base_dir: str):
                     else:
                         resolved_scripts.append(_resolve_all_paths(item, base_dir))
                 result[key] = resolved_scripts
-            elif (key == 'script' or key.endswith('_script')) and isinstance(value, str):
-                resolved = _resolve_script_path(value, base_dir)
-                if resolved:
-                    result[key] = resolved
             else:
                 result[key] = _resolve_all_paths(value, base_dir)
         return result

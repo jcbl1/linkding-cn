@@ -453,25 +453,23 @@ def _adapter_cache_info(adapter: dict) -> dict:
         return {'cached': False, 'domain_count': 0}
 
     from site_adapters.services.subscriptions import (
+        _get_meta_entry,
         _read_subscription_file,
+        is_remote_source,
         list_cached_domains_from_file,
+        resolve_adapter_path,
     )
     from site_adapters.services.base import _adapter_dir
     from site_adapters.services.base import _get_adapters_dir
     
     name = adapter.get('name', '')
-    source = adapter.get('source')
+    source = adapter.get('source', '')
     dir_name = _adapter_dir(adapter)
     adapters_root = _get_adapters_dir()
-    file_path = os.path.join(adapters_root, dir_name, 'adapters.jsonc')
-    if source and not source.startswith('http'):
-        # Local path source
-        resolved = os.path.normpath(os.path.join(adapters_root, source)) if not os.path.isabs(source) else source
-        if os.path.exists(resolved):
-            file_path = resolved
+    file_path = resolve_adapter_path(name, source, adapters_root) if name else os.path.join(adapters_root, dir_name, 'adapters.jsonc')
     cached = os.path.exists(file_path)
     cached_domains = list_cached_domains_from_file(file_path) if cached else []
-    is_remote = source and (source.startswith('https://') or source.startswith('http://'))
+    is_remote = is_remote_source(source)
     info = {
         'name': name,
         'cached': cached,
@@ -479,13 +477,23 @@ def _adapter_cache_info(adapter: dict) -> dict:
         'domain_count': len(cached_domains),
         'domains': cached_domains,
     }
+    # 从 _meta.json 读取运行时状态（key 需规范化为目录 URL）
+    if is_remote:
+        from site_adapters.services.subscriptions import _normalize_source_to_directory
+        meta_key = _normalize_source_to_directory(source)
+        meta_entry = _get_meta_entry(meta_key)
+        if meta_entry:
+            info.update({
+                'last_fetch': meta_entry.get('last_fetch'),
+                'fetch_status': meta_entry.get('fetch_status', 'ok'),
+            })
+    # 从缓存的 adapters.jsonc 读取发布者元信息
     if cached:
         try:
             sub_data = _read_subscription_file(file_path)
             if sub_data and isinstance(sub_data.get('_meta'), dict):
                 meta = sub_data['_meta']
                 info.update({
-                    'last_fetch': meta.get('last_fetch'),
                     'version': meta.get('version', ''),
                     'changelog': meta.get('changelog', ''),
                     'source_name': meta.get('name', ''),
@@ -594,14 +602,10 @@ def build_domain_files() -> list[dict]:
         if adapter.get('enabled') is False:
             continue
         name = adapter.get('name', '')
-        source = adapter.get('source')
-        # Resolve file path
-        dir_name = _adapter_dir(adapter)
-        file_path = os.path.join(adapters_dir, dir_name, 'adapters.jsonc')
-        if source and not source.startswith('http') and os.path.exists(os.path.join(adapters_dir, source) if not os.path.isabs(source) else source):
-            file_path = os.path.normpath(os.path.join(adapters_dir, source)) if not os.path.isabs(source) else source
+        source = adapter.get('source', '')
+        file_path = resolve_adapter_path(name, source, adapters_dir)
 
-        if not os.path.exists(file_path):
+        if not file_path or not os.path.exists(file_path):
             continue
 
         try:
