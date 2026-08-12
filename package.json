@@ -38,6 +38,7 @@
     "esbuild": "^0.28.1",
     "iconify-icon": "^3.0.2",
     "lit": "^3.3.3",
+    "playwright-core": "^1.62.1",
     "postcss": "^8.5.16",
     "postcss-cli": "^11.0.0",
     "postcss-import": "^16.1.0",

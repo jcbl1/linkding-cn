@@ -104,9 +104,9 @@ async function getLauncher() {
   try {
     await page.goto(url, { waitUntil: "networkidle", timeout });
 
-    if (waitForCookies.length > 0) {
+    if (waitForCookie.length > 0) {
       const deadline = Date.now() + timeout;
-      const targetSet = new Set(waitForCookies);
+      const targetSet = new Set(waitForCookie);
       let allFound = false;
       while (Date.now() < deadline) {
         const cookies = await context.cookies();
