@@ -11,7 +11,7 @@ import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
-import tldextract
+from publicsuffixlist import PublicSuffixList
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.http import HttpResponseRedirect
@@ -224,13 +224,17 @@ def get_domain(url: str) -> str:
     return urllib.parse.urlparse(url).netloc
 
 
-_registrable_domain_extractor = tldextract.TLDExtract(suffix_list_urls=None)
+_psl = PublicSuffixList()
 
 
 def get_registrable_domain(url: str) -> str:
     hostname = urllib.parse.urlparse(url).hostname or ""
     if not hostname:
         return ""
+
+    registrable = _psl.privatesuffix(hostname)
+    return registrable.lower() if registrable else hostname.lower()
+
 
     extracted = _registrable_domain_extractor(hostname)
     if extracted.domain and extracted.suffix:
