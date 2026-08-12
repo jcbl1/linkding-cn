@@ -13,7 +13,6 @@ from site_adapters.views.helpers import (
     get_singlefile_args_set,
     _get_adapters_dir,
     _get_base_dir,
-    _schema_section_fields,
     site_adapters_required,
 )
 from site_adapters.services.auth.credentials import (
@@ -70,7 +69,6 @@ def site_adapters_page(request):
             'singlefile_args': sorted(get_singlefile_args_set()),
             'defuddle_params': sorted(get_defuddle_params_set()),
         }, ensure_ascii=False),
-        'section_fields_json': json.dumps(_schema_section_fields(), ensure_ascii=False),
         # Credentials partial context
         'credentials': credentials,
         'cred_q': '',

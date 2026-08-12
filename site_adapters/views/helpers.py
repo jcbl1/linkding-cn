@@ -6,7 +6,6 @@ import logging
 import os
 import re
 from functools import wraps
-from pathlib import Path
 
 from django.conf import settings as django_settings
 from django.contrib.auth.decorators import login_required
@@ -349,44 +348,6 @@ def _extract_cleanup_stats(html_path: str) -> dict:
 
 
 # Schema helpers
-def _schema_type(prop: dict) -> str:
-    if '$ref' in prop:
-        return prop['$ref'].rsplit('/', 1)[-1]
-    if 'oneOf' in prop:
-        return ' | '.join(_schema_type(item) for item in prop['oneOf'])
-    value = prop.get('type', 'any')
-    if isinstance(value, list):
-        return ' | '.join(value)
-    if value == 'array':
-        return f"array<{_schema_type(prop.get('items', {}))}>"
-    return value
-
-
-def _schema_section_fields() -> dict:
-    schema_path = Path(__file__).resolve().parent.parent / 'services' / 'config' / 'schema.json'
-    with open(schema_path, encoding='utf-8') as f:
-        schema = json.load(f)
-    definitions = schema.get('definitions', {})
-    sections = {
-        'http': 'http_config',
-        'metadata': 'metadata_config',
-        'snapshot': 'snapshot_config',
-        'reader': 'reader_config',
-    }
-    result = {}
-    for section, definition_name in sections.items():
-        props = definitions.get(definition_name, {}).get('properties', {})
-        result[section] = {
-            name: {
-                'type': _schema_type(prop),
-                'desc': prop.get('description', ''),
-            }
-            for name, prop in props.items()
-        }
-    return result
-
-
-# Adapter helpers
 def _adapter_from_post(request) -> dict:
     source = request.POST.get('source', '').strip()
     name = request.POST.get('name', '').strip()

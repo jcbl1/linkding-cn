@@ -234,7 +234,6 @@
     window.__ld_cred_mode = "shared";
     window.__ld_credentials_data = {{ credentials_json|safe }};
     window.__ld_auth_domains = {{ auth_domains_json|safe }};
-    window.__ld_section_fields = {{ section_fields_json|safe }};
     window.__ld_authority_lists = {{ authority_lists_json|safe }};
     window.__ld_urls = {
       action: "{% url 'linkding:settings.site_adapters.action' %}",
