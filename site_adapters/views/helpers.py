@@ -12,8 +12,6 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import JsonResponse
 
-import shutil
-
 from bookmarks.utils import atomic_write
 from site_adapters.services.config import (
     parse_jsonc,
@@ -26,6 +24,11 @@ from site_adapters.services.config.validator import (
     get_defuddle_params_set,
     get_singlefile_args_set,
 )
+from site_adapters.services.config.bootstrap import (
+    _get_defaults_source_path as _service_get_defaults_source_path,
+    ensure_base_dirs as _service_ensure_base_dirs,
+    ensure_defaults_adapter as _service_ensure_defaults_adapter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,15 +37,7 @@ from site_adapters.services.base import _get_adapters_dir, _get_base_dir
 
 
 def _ensure_base_dirs():
-    base_dir = _get_base_dir()
-    adapters_dir = _get_adapters_dir()
-    os.makedirs(adapters_dir, exist_ok=True)
-    for name in ('logs', 'test_assets'):
-        os.makedirs(os.path.join(base_dir, name), exist_ok=True)
-
-    # 确保 defaults 适配器存在
-    _ensure_defaults_adapter(adapters_dir)
-    # 清理磁盘已删除的适配器条目
+    adapters_dir = _service_ensure_base_dirs()
     _cleanup_stale_adapters(adapters_dir)
 
 
@@ -92,91 +87,16 @@ def _cleanup_stale_adapters(adapters_dir: str):
 
 def _get_defaults_source_path() -> str:
     """Return the path to the source defaults adapter template."""
-    return os.path.join(
-        os.path.dirname(__file__), '..', 'services', 'config',
-        'adapters', 'defaults', 'adapters.jsonc',
+    return _service_get_defaults_source_path()
+
+
+def _ensure_defaults_adapter(adapters_dir: str, sync: bool = True):
+    """Ensure the runtime defaults adapter exists and is synced with the source template."""
+    return _service_ensure_defaults_adapter(
+        adapters_dir,
+        source_path=_get_defaults_source_path(),
+        sync=sync,
     )
-
-
-def _ensure_defaults_adapter(adapters_dir: str):
-    """Ensure the runtime defaults adapter exists and is synced with the source template.
-
-    - Creates config.jsonc if missing.
-    - Copies the source template on first deployment.
-    - On every call, syncs _meta and _builtin from the source template
-      while preserving user-editable sections (_builtin_overrides, defaults, domains).
-    """
-    source_path = _get_defaults_source_path()
-    config_path = os.path.join(adapters_dir, 'config.jsonc')
-    defaults_dir = os.path.join(adapters_dir, 'defaults')
-    defaults_file = os.path.join(defaults_dir, 'adapters.jsonc')
-
-    # Create config.jsonc if missing
-    if not os.path.exists(config_path):
-        default_config = {
-            '_adapters': [{
-                'id': 'defaults',
-                'name': 'defaults',
-                'source': './defaults/adapters.jsonc',
-                'update_interval': 86400,
-                'enabled': True,
-            }],
-        }
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        atomic_write(config_path, json.dumps(default_config, indent=2, ensure_ascii=False))
-
-    # First deployment: copy the entire source template
-    if not os.path.exists(defaults_file):
-        if os.path.exists(source_path):
-            os.makedirs(defaults_dir, exist_ok=True)
-            shutil.copy2(source_path, defaults_file)
-            logger.info('Defaults adapter initialized from source template')
-        else:
-            logger.error('Defaults source template not found: %s', source_path)
-        return
-
-    # Sync _meta and _builtin from source template to runtime file.
-    # Use JSONC-aware editing to preserve user comments in other sections.
-    if not os.path.exists(source_path):
-        logger.error('Defaults source template not found, skipping sync: %s', source_path)
-        return
-
-    try:
-        source_data = load_jsonc_file(source_path)
-    except Exception as exc:
-        logger.error('Failed to read source template: %s: %s', source_path, exc)
-        return
-
-    try:
-        with open(defaults_file, 'r', encoding='utf-8') as f:
-            text = f.read()
-    except OSError as exc:
-        logger.error('Failed to read runtime defaults file: %s: %s', defaults_file, exc)
-        return
-
-    # Sync _meta
-    source_meta = source_data.get('_meta', {})
-    if isinstance(source_meta, dict) and source_meta:
-        text = _replace_top_level_jsonc_value(text, '_meta', source_meta)
-
-    # Sync _builtin
-    source_builtin = source_data.get('_builtin', {})
-    if isinstance(source_builtin, dict) and source_builtin:
-        text = _replace_top_level_jsonc_value(text, '_builtin', source_builtin)
-
-    # Ensure _builtin_overrides exists
-    try:
-        current = parse_jsonc(text)
-    except Exception:
-        current = {}
-    if isinstance(current, dict) and '_builtin_overrides' not in current:
-        text = _replace_top_level_jsonc_value(text, '_builtin_overrides', {})
-
-    try:
-        with open(defaults_file, 'w', encoding='utf-8') as f:
-            f.write(text)
-    except OSError as exc:
-        logger.error('Failed to write runtime defaults file: %s: %s', defaults_file, exc)
 
 
 def site_adapters_required(view_func):
@@ -256,18 +176,9 @@ def _save_adapters_list(adapters: list[dict]):
 
 
 
-def _ensure_defaults_first(adapters: list):
-    """确保 id="defaults" 的适配器排在列表第一位。"""
-    defaults_idx = None
-    for i, a in enumerate(adapters):
-        if isinstance(a, dict) and a.get('id') == 'defaults':
-            defaults_idx = i
-            break
-    if defaults_idx is not None and defaults_idx > 0:
-        adapters.insert(0, adapters.pop(defaults_idx))
-
-
 def _get_adapters_list() -> list:
+    # Self-heal the defaults adapter before exposing or operating on the list.
+    _ensure_defaults_adapter(_get_adapters_dir(), sync=False)
     data, _ = _load_config()
     adapters = data.get("_adapters", [])
     if not isinstance(adapters, list):
@@ -284,8 +195,6 @@ def _get_adapters_list() -> list:
             continue
         seen_keys.add(key)
         deduped.append(item)
-    # 确保 defaults 始终排在第一位
-    _ensure_defaults_first(deduped)
     return deduped
 
 

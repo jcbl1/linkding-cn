@@ -1,6 +1,7 @@
 import os
 import shutil
 import tempfile
+import json
 from unittest import mock
 
 from django.test import RequestFactory, TestCase, override_settings
@@ -25,6 +26,32 @@ class SiteAdaptersViewsTestCase(TestCase):
         _cache.invalidate()
         self.settings_override.disable()
         shutil.rmtree(self.base_dir)
+
+    def _write_jsonc(self, relpath, data):
+        path = os.path.join(self.base_dir, relpath)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+
+    def _setup_two_adapters(self, defaults_first=False):
+        adapters = [
+            {"id": "custom", "name": "custom", "source": "./custom/adapters.jsonc", "enabled": True},
+            {
+                "id": "defaults",
+                "name": "defaults",
+                "source": "./defaults/adapters.jsonc",
+                "update_interval": 86400,
+                "enabled": True,
+            },
+        ]
+        if defaults_first:
+            adapters = [adapters[1], adapters[0]]
+        self._write_jsonc("adapters/config.jsonc", {"_adapters": adapters})
+        self._write_jsonc(
+            "adapters/custom/adapters.jsonc",
+            {"_meta": {"id": "custom", "name": "custom"}, "domains": {}},
+        )
 
     def test_site_adapters_requires_superuser(self):
         user = User.objects.create_user("site-adapter-nonstaff", password="password")
@@ -166,4 +193,78 @@ class SiteAdaptersViewsTestCase(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_subscription_list_preserves_order_and_initializes_defaults(self):
+        self._setup_two_adapters(defaults_first=False)
 
+        response = self.client.get(
+            reverse("linkding:settings.site_adapters.subscription_manage")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in response.json()["adapters"]],
+            ["custom", "defaults"],
+        )
+        self.assertTrue(
+            os.path.exists(
+                os.path.join(self.base_dir, "adapters", "defaults", "adapters.jsonc")
+            )
+        )
+
+    def test_reorder_does_not_force_defaults_first(self):
+        self._setup_two_adapters(defaults_first=False)
+
+        response = self.client.post(
+            reverse("linkding:settings.site_adapters.subscription_manage"),
+            {"action": "reorder", "indices": [0, 1]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in response.json()["adapters"]],
+            ["custom", "defaults"],
+        )
+
+    def test_defaults_adapter_cannot_be_edited_or_deleted(self):
+        self._setup_two_adapters(defaults_first=True)
+        url = reverse("linkding:settings.site_adapters.subscription_manage")
+
+        edit_response = self.client.post(
+            url, {"action": "save", "index": "0", "source": "./defaults/adapters.jsonc"}
+        )
+        delete_response = self.client.post(
+            url, {"action": "delete", "index": "0"}
+        )
+
+        self.assertEqual(edit_response.status_code, 403)
+        self.assertEqual(delete_response.status_code, 403)
+
+    def test_adapter_with_defaults_id_and_other_name_is_not_protected(self):
+        self._write_jsonc(
+            "adapters/config.jsonc",
+            {
+                "_adapters": [
+                    {
+                        "id": "defaults",
+                        "name": "other",
+                        "source": "./other/adapters.jsonc",
+                        "enabled": True,
+                    },
+                    {
+                        "id": "defaults",
+                        "name": "defaults",
+                        "source": "./defaults/adapters.jsonc",
+                        "enabled": True,
+                    },
+                ]
+            },
+        )
+        url = reverse("linkding:settings.site_adapters.subscription_manage")
+
+        response = self.client.post(url, {"action": "delete", "index": "0"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in response.json()["adapters"]],
+            ["defaults"],
+        )

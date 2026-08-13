@@ -12,8 +12,8 @@ class SiteAdaptersConfig(AppConfig):
 
     def ready(self):
         try:
-            from site_adapters.views.helpers import _ensure_base_dirs
-            _ensure_base_dirs()
+            from site_adapters.services.config.bootstrap import ensure_base_dirs
+            ensure_base_dirs()
         except Exception:
             logger.exception("Failed to ensure site adapters base directories")
 

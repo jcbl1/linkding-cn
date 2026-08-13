@@ -78,8 +78,13 @@ class LoadBuiltinConfigTestCase(TestCase):
 
     # ---- cases ----
 
-    def test_missing_runtime_file_returns_none(self):
-        self.assertIsNone(load_builtin_config(self.base_dir))
+    def test_missing_runtime_file_is_recreated(self):
+        self.assertFalse(os.path.exists(self._runtime_path()))
+        result = load_builtin_config(self.base_dir)
+        self.assertIsNotNone(result)
+        self.assertTrue(os.path.exists(self._runtime_path()))
+        for key in ("defaults", "metadata", "snapshot", "reader"):
+            self.assertIn(key, result)
 
     def test_empty_builtin_returns_none(self):
         self._write_runtime({"_builtin": {}, "_builtin_overrides": {}})
@@ -222,6 +227,37 @@ class EnsureDefaultsAdapterTestCase(TestCase):
         self._call()
         config_path = os.path.join(self.adapters_dir, "config.jsonc")
         self.assertTrue(os.path.exists(config_path))
+
+    def test_non_canonical_defaults_id_does_not_satisfy_config_entry(self):
+        config_path = os.path.join(self.adapters_dir, "config.jsonc")
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "_adapters": [
+                        {
+                            "id": "defaults",
+                            "name": "other",
+                            "source": "./other/adapters.jsonc",
+                            "enabled": True,
+                        }
+                    ]
+                },
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
+            f.write("\n")
+
+        self._call()
+
+        from site_adapters.services.config import load_jsonc_file
+        data = load_jsonc_file(config_path)
+        self.assertTrue(
+            any(
+                item.get("id") == "defaults" and item.get("name") == "defaults"
+                for item in data["_adapters"]
+            )
+        )
 
     def test_resync_overwrites_meta_and_builtin(self):
         # First deploy

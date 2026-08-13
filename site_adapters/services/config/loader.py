@@ -6,7 +6,7 @@ Directory structure:
     adapters/
       config.jsonc            # _adapters list: declares all adapters and their priority
       defaults/
-        defaults.jsonc         # highest-priority adapter
+        adapters.jsonc         # built-in defaults + user-managed domains
         scripts/
       fivefilters/
         adapters.jsonc
@@ -29,7 +29,8 @@ config.jsonc format:
 
 Merge priority:
   _adapters array order = priority (first is highest)
-  → the "*" wildcard of the defaults adapter (id="defaults") acts as a global override, applied to all domains
+  The defaults adapter participates like any other adapter. Its `_builtin`
+  baseline is applied separately at the lowest priority by the resolver.
 """
 
 import copy
@@ -48,6 +49,7 @@ from site_adapters.services.config import (
     deep_merge,
     load_jsonc_file,
 )
+from site_adapters.services.config.bootstrap import ensure_defaults_adapter
 from site_adapters.services.subscriptions import (
     _read_subscription_file,
 )
@@ -61,6 +63,7 @@ logger = logging.getLogger(__name__)
 
 _ADAPTER_FILE = 'adapters.jsonc'
 _CONFIG_FILE = 'config.jsonc'
+_DEFAULTS_CACHE_KEY = 'adapter:defaults:defaults'
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +219,7 @@ class SourceCache:
             self._last_check = now
 
         adapters_dir = os.path.join(base_dir, 'adapters')
+        ensure_defaults_adapter(adapters_dir, sync=False)
         config_path = os.path.join(adapters_dir, _CONFIG_FILE)
 
         changed = False
@@ -293,20 +297,13 @@ class SourceCache:
                 self._sources.pop(key, None)
                 changed = True
 
-        # ensure the defaults adapter is always first
-        _defaults_idx = None
-        for i, key in enumerate(new_order):
-            if key.startswith('adapter:defaults:'):
-                _defaults_idx = i
-                break
-        if _defaults_idx is not None and _defaults_idx > 0:
-            new_order.insert(0, new_order.pop(_defaults_idx))
-            changed = True
-
         if self._adapter_order != new_order:
             self._adapter_order = new_order
             changed = True
-        self._defaults_cache_key = new_order[0] if new_order else None
+        self._defaults_cache_key = next(
+            (key for key in new_order if key == _DEFAULTS_CACHE_KEY),
+            None,
+        )
 
         if changed or self._merged is None:
             with self._lock:
@@ -322,7 +319,8 @@ class SourceCache:
         1. _adapters order = priority (first is highest)
         2. Within the same adapter: domain config overrides "*" ("*" is the internal baseline)
         3. Across adapters: earlier overrides later
-        4. The defaults adapter (id="defaults") _builtin acts as the fallback config (applied to all domains via load_domain_config)
+        4. The defaults adapter's `_builtin` acts as the fallback config and is
+           applied separately by load_builtin_config at the lowest priority.
         """
         merged_domains = {}
 
@@ -565,7 +563,7 @@ def show_config(url: str, base_dir: str) -> dict:
 
 
 # Path to the source defaults adapter template (bundled in the Python package).
-# Used only by _ensure_defaults_adapter at startup to seed / update the runtime copy.
+# Used only by bootstrap.ensure_defaults_adapter at startup to seed / update the runtime copy.
 _DEFAULTS_SOURCE_DIR = os.path.join(os.path.dirname(__file__), 'adapters', 'defaults')
 _DEFAULTS_SOURCE_FILE = os.path.join(_DEFAULTS_SOURCE_DIR, 'adapters.jsonc')
 
@@ -606,6 +604,7 @@ def load_builtin_config(base_dir: str) -> dict | None:
     block in that file is kept in sync with the source template at startup
     via AppConfig.ready().
     """
+    ensure_defaults_adapter(os.path.join(base_dir, 'adapters'), sync=False)
     runtime = _read_runtime_defaults(base_dir)
     if not runtime:
         return None

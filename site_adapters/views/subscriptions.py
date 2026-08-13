@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods, require_POST
 
+from site_adapters.services.config.bootstrap import is_defaults_adapter
 from site_adapters.views.helpers import (
     _adapter_cache_dir,
     _adapter_cache_name,
@@ -19,7 +20,6 @@ from site_adapters.views.helpers import (
     _adapter_index,
     _adapter_payload,
     _adapters_response,
-    _ensure_defaults_first,
     _get_adapters_dir,
     _get_adapters_list,
     _has_adapter_conflict,
@@ -140,6 +140,8 @@ def subscription_manage(request):
 
         elif action_name == 'save':
             index = _adapter_index(request, adapters)
+            if is_defaults_adapter(adapters[index]):
+                return JsonResponse({'error': 'defaults adapter cannot be edited'}, status=403)
             item = _adapter_from_post(request)
             old = adapters[index]
             # 保留未提供的 id 和 name
@@ -171,6 +173,8 @@ def subscription_manage(request):
 
         elif action_name == 'delete':
             index = _adapter_index(request, adapters)
+            if is_defaults_adapter(adapters[index]):
+                return JsonResponse({'error': 'defaults adapter cannot be deleted'}, status=403)
             adapter = adapters.pop(index)
             _save_adapters_list(adapters)
             # 仅远程适配器删除缓存目录，本地适配器保留文件夹
@@ -202,8 +206,6 @@ def subscription_manage(request):
             for i, ad in enumerate(adapters):
                 if i not in seen:
                     reordered.append(ad)
-            # 强制 defaults 排第一位
-            _ensure_defaults_first(reordered)
             adapters = reordered
             _save_adapters_list(adapters)
 

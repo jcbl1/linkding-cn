@@ -422,13 +422,11 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
 
   function renderSubscriptions() {
     var list = document.getElementById('subscription-list'); if (!list) return;
-    var defaultsRow = document.getElementById('defaults-row'); if (!defaultsRow) return;
     if (!subData.length) {
-      defaultsRow.innerHTML = '';
       list.innerHTML = '<p class="text-gray" style="padding:16px">' + gettext('No adapters.') + '</p>';
       return;
     }
-    var parts = { defaults: '', rest: '' };
+    var html = '';
     subData.forEach(function (s, i) {
       var label = s.display_name || s.name || s.source_name || (s.id ? s.id : '');
       var remote = s.source && (s.source.startsWith('https://') || s.source.startsWith('http://'));
@@ -436,53 +434,47 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       var version = s.version || '';
       var lastFetch = s.last_fetch || 0;
       var interval = s.update_interval || 86400;
-      var isDefaults = s.id === 'defaults';
+      var isDefaults = s.id === 'defaults' && s.name === 'defaults';
       var rowCls = 'wa-sub-item' + (enabled ? '' : ' wa-sub-disabled');
-      var key = isDefaults ? 'defaults' : 'rest';
-      parts[key] += '<div class="' + rowCls + '" data-index="' + i + '" draggable="true">';
-      if (isDefaults) {
-        parts[key] += '<div class="wa-sub-drag-locked" title="' + gettext('System adapter (cannot reorder)') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-lock"></use></svg></div>';
-      } else {
-        parts[key] += '<div class="wa-sub-drag" title="' + gettext('Drag to reorder') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-grip"></use></svg></div>';
-      }
-      parts[key] += '<label class="form-switch wa-sub-toggle">';
-      parts[key] += '<input type="checkbox" ' + (enabled ? 'checked' : '') + ' data-sub-toggle="' + i + '">';
-      parts[key] += '<i class="form-icon"></i>';
-      parts[key] += '</label>';
-      parts[key] += '<div class="wa-sub-body">';
-      parts[key] += '<div class="wa-sub-view">';
-      parts[key] += '<span class="wa-sub-name">' + esc(label) + '</span>';
-      if (s.cache_missing) parts[key] += ' <span class="wa-badge wa-badge-warn" title="' + gettext('Cache file missing. Click Update to re-download.') + '">' + gettext('missing') + '</span>';
-      parts[key] += '<span class="wa-sub-meta">';
-      parts[key] += '<span>' + (s.domain_count || 0) + ' ' + gettext('domains') + '</span>';
-      parts[key] += '<span class="wa-sub-sep">·</span>';
-      parts[key] += '<span>' + formatTimeAgo(lastFetch) + '</span>';
-      if (version) { parts[key] += '<span class="wa-sub-sep">·</span><span>v' + esc(version) + '</span>'; }
-      parts[key] += '</span>';
-      parts[key] += '</div>';
-      parts[key] += '</div>';
-      if (!enabled) parts[key] += '<span class="wa-badge wa-badge-warn wa-sub-disabled-badge">' + gettext('disabled') + '</span>';
-      parts[key] += '<div class="wa-sub-actions">';
-      if (remote) parts[key] += '<button class="btn btn-sm js-sub-update" data-index="' + i + '" title="' + gettext('Update') + '" aria-label="' + gettext('Update') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-refresh"></use></svg></button>';
-      parts[key] += '<button class="btn btn-sm js-sub-edit" data-index="' + i + '" title="' + gettext('Edit') + '" aria-label="' + gettext('Edit') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-edit"></use></svg></button>';
-      parts[key] += '<button class="btn btn-sm btn-error js-sub-delete" data-index="' + i + '" title="' + gettext('Delete') + '" aria-label="' + gettext('Delete') + '" ld-confirm-question="' + gettext('Delete') + ' ' + esc(label) + '?" ld-confirm-danger=""><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-delete"></use></svg></button>';
-      parts[key] += '<button class="btn btn-sm js-sub-expand" data-index="' + i + '" title="' + gettext('Details') + '" aria-label="' + gettext('Details') + '"><svg width="16" height="16" aria-hidden="true" class="wa-sub-chevron"><use href="#ld-icon-chevron-down"></use></svg></button>';
-      parts[key] += '</div>';
-      parts[key] += '<div class="wa-sub-detail" hidden>';
-      parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Source') + ':</span><code>' + esc(s.source || '-') + '</code></div>';
-      if (s.id) { parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">ID:</span><code>' + esc(s.id) + '</code></div>'; }
-      if (s.source_name) { parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Name') + ':</span><span>' + esc(s.source_name) + '</span></div>'; }
-      if (s.description) { parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Description') + ':</span><span>' + esc(s.description) + '</span></div>'; }
-      parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Interval') + ':</span><span>' + esc(String(interval)) + 's (' + formatNextFetch(lastFetch, interval) + ')</span></div>';
-      parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Last fetch') + ':</span><span>' + (lastFetch ? new Date(lastFetch * 1000).toLocaleString() : '-') + '</span></div>';
-      if (version) { parts[key] += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Version') + ':</span><span>v' + esc(version) + '</span></div>'; }
-      parts[key] += '</div>';
-      parts[key] += '</div>';
+      html += '<div class="' + rowCls + '" data-index="' + i + '" draggable="true">';
+      html += '<div class="wa-sub-drag" title="' + gettext('Drag to reorder') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-grip"></use></svg></div>';
+      html += '<label class="form-switch wa-sub-toggle">';
+      html += '<input type="checkbox" ' + (enabled ? 'checked' : '') + ' data-sub-toggle="' + i + '">';
+      html += '<i class="form-icon"></i>';
+      html += '</label>';
+      html += '<div class="wa-sub-body">';
+      html += '<div class="wa-sub-view">';
+      html += '<span class="wa-sub-name">' + esc(label) + '</span>';
+      if (s.cache_missing) html += ' <span class="wa-badge wa-badge-warn" title="' + gettext('Cache file missing. Click Update to re-download.') + '">' + gettext('missing') + '</span>';
+      html += '<span class="wa-sub-meta">';
+      html += '<span>' + (s.domain_count || 0) + ' ' + gettext('domains') + '</span>';
+      html += '<span class="wa-sub-sep">·</span>';
+      html += '<span>' + formatTimeAgo(lastFetch) + '</span>';
+      if (version) { html += '<span class="wa-sub-sep">·</span><span>v' + esc(version) + '</span>'; }
+      html += '</span>';
+      html += '</div>';
+      html += '</div>';
+      if (!enabled) html += '<span class="wa-badge wa-badge-warn wa-sub-disabled-badge">' + gettext('disabled') + '</span>';
+      html += '<div class="wa-sub-actions">';
+      if (remote) html += '<button class="btn btn-sm js-sub-update" data-index="' + i + '" title="' + gettext('Update') + '" aria-label="' + gettext('Update') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-refresh"></use></svg></button>';
+      if (!isDefaults) html += '<button class="btn btn-sm js-sub-edit" data-index="' + i + '" title="' + gettext('Edit') + '" aria-label="' + gettext('Edit') + '"><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-edit"></use></svg></button>';
+      if (!isDefaults) html += '<button class="btn btn-sm btn-error js-sub-delete" data-index="' + i + '" title="' + gettext('Delete') + '" aria-label="' + gettext('Delete') + '" ld-confirm-question="' + gettext('Delete') + ' ' + esc(label) + '?" ld-confirm-danger=""><svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-delete"></use></svg></button>';
+      html += '<button class="btn btn-sm js-sub-expand" data-index="' + i + '" title="' + gettext('Details') + '" aria-label="' + gettext('Details') + '"><svg width="16" height="16" aria-hidden="true" class="wa-sub-chevron"><use href="#ld-icon-chevron-down"></use></svg></button>';
+      html += '</div>';
+      html += '<div class="wa-sub-detail" hidden>';
+      html += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Source') + ':</span><code>' + esc(s.source || '-') + '</code></div>';
+      if (s.id) { html += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">ID:</span><code>' + esc(s.id) + '</code></div>'; }
+      if (s.source_name) { html += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Name') + ':</span><span>' + esc(s.source_name) + '</span></div>'; }
+      if (s.description) { html += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Description') + ':</span><span>' + esc(s.description) + '</span></div>'; }
+      html += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Interval') + ':</span><span>' + esc(String(interval)) + 's (' + formatNextFetch(lastFetch, interval) + ')</span></div>';
+      html += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Last fetch') + ':</span><span>' + (lastFetch ? new Date(lastFetch * 1000).toLocaleString() : '-') + '</span></div>';
+      if (version) { html += '<div class="wa-sub-detail-row"><span class="wa-sub-detail-label">' + gettext('Version') + ':</span><span>v' + esc(version) + '</span></div>'; }
+      html += '</div>';
+      html += '</div>';
     });
-    defaultsRow.innerHTML = parts.defaults;
-    list.innerHTML = parts.rest;
+    list.innerHTML = html;
 
-    var allContainers = [defaultsRow, list];
+    var allContainers = [list];
     allContainers.forEach(function (container) {
       container.querySelectorAll('[data-sub-toggle]').forEach(function (cb) {
         cb.addEventListener('change', function () {

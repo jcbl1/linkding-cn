@@ -14,9 +14,11 @@ from django.views.decorators.http import require_POST
 
 from bookmarks.utils import atomic_write, is_safe_domain_key
 from site_adapters.services.config import parse_jsonc, load_jsonc_file
+from site_adapters.services.config.bootstrap import is_defaults_adapter
 from site_adapters.services.base import _get_adapters_dir
 from site_adapters.services.subscriptions import resolve_adapter_path, _read_subscription_file
 from site_adapters.views.helpers import (
+    _ensure_defaults_adapter,
     _invalidate_site_adapters_cache,
     _get_adapters_list,
     site_adapters_required,
@@ -31,7 +33,7 @@ def _defaults_file_path() -> str:
     for adapter in adapters_list:
         if not isinstance(adapter, dict):
             continue
-        if adapter.get('id') == 'defaults':
+        if is_defaults_adapter(adapter):
             return resolve_adapter_path(
                 adapter.get('name', ''),
                 adapter.get('source', ''),
@@ -41,10 +43,8 @@ def _defaults_file_path() -> str:
 
 
 def _ensure_defaults_file():
-    """Return the path to the runtime defaults adapter file.
-
-    File creation is handled by AppConfig.ready() on startup.
-    """
+    """Ensure and return the path to the runtime defaults adapter file."""
+    _ensure_defaults_adapter(_get_adapters_dir(), sync=False)
     return _defaults_file_path()
 def _read_domain_from_adapter(domain_key: str, adapter_name: str = '') -> tuple[str | None, str | None, dict | None]:
     """在所有适配器中查找域名，返回 (file_path, domain_key, config)。

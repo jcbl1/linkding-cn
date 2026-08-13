@@ -2,7 +2,7 @@
   "_meta": {
     "id": "defaults",
     "name": "defaults",
-    "description": "Built-in system adapter with the highest priority.\n`_builtin` serves as the system-wide baseline, always merged before any domain-specific config.\nDomain configs override `_builtin` fields when present."
+    "description": "Built-in system adapter.\n`_builtin` serves as the system-wide baseline, always merged before any domain-specific config.\nDomain configs override `_builtin` fields when present."
   },
   "_builtin": {
     // The _builtin section is regenerated and overwritten on every service restart.
