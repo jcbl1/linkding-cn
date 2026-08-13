@@ -7,7 +7,7 @@
   "_builtin": {
     // The _builtin section is regenerated and overwritten on every service restart.
     // To add or override fields, define them in the _builtin_overrides section below.
-    "default": {
+    "defaults": {
       "timeout": 30,
       "http": {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0"

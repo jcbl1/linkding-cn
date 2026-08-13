@@ -24,8 +24,6 @@ from site_adapters.services.config.jsonc import (
 )
 from site_adapters.services.config.validator import (
     get_defuddle_params_set,
-    get_http_headers_descs,
-    get_http_headers_set,
     get_singlefile_args_set,
 )
 

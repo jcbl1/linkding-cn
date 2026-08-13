@@ -4,15 +4,15 @@ Config resolver: provides unified config access for each service.
 Config structure:
   {
     "auth": { ... },      # auth requirements (cookie + headers)
-    "default": { ... },   # shared settings
+    "defaults": { ... },  # shared settings
     "metadata": { ... },   # metadata extraction
     "snapshot": { ... },   # HTML snapshot
     "reader": { ... }      # reader mode
   }
 
-Merge rule: default + section -> section overrides same-name fields.
-HTTP sub-objects are merged: default.http + section.http -> section overrides.
-Auth sub-objects are merged: top.auth + default.auth + section.auth -> section overrides.
+Merge rule: defaults + section -> section overrides same-name fields.
+HTTP sub-objects are merged: defaults.http + section.http -> section overrides.
+Auth sub-objects are merged: top.auth + defaults.auth + section.auth -> section overrides.
 """
 
 import logging
@@ -28,7 +28,7 @@ from site_adapters.services.auth.credentials import (
     get_best_token,
     get_best_basic_auth,
 )
-from site_adapters.services.auth.tokens import (
+from site_adapters.services.auth.oauth2 import (
     get_token_header,
     get_valid_token,
     refresh_token as _refresh_token,
@@ -133,24 +133,24 @@ def _apply_toggles(section_data: dict, full_config: dict, username: str) -> tupl
 
 def _build_section_config(full_config: dict, section: str, base_dir: str, username: str = '') -> dict:
     """
-    Build flat config for a section by merging default + section.
+    Build flat config for a section by merging defaults + section.
 
     Returns a dict with:
     - headers: HTTP headers dict
     - timeout, proxy: framework fields
     - auth: merged auth config dict (cookie + headers)
-    - request_url, rewrite_url
+    - request_url; rewrite_url (metadata only)
     - section-specific fields
     - _request_url, _rewrite_url: resolved URLs
     - _domain_key, _raw: metadata
     """
-    default = full_config.get('default', {})
+    default = full_config.get('defaults', {})
     section_data = full_config.get(section, {})
 
-    # Merge: default + section (section overrides)
+    # Merge: defaults + section (section overrides)
     merged = _merge_dicts(default, section_data)
 
-    # HTTP: default.http + section.http
+    # HTTP: defaults.http + section.http
     default_http = default.get('http', {})
     section_http = section_data.get('http', {})
     merged_http = _merge_dicts(default_http, section_http)
@@ -162,7 +162,7 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
     # HTTP headers (all keys in http sub-object are headers)
     headers = {k: v for k, v in merged_http.items() if v is not None}
 
-    # Auth: top.auth + default.auth + section.auth merged
+    # Auth: top.auth + defaults.auth + section.auth merged
     top_auth = full_config.get('auth', {})
     default_auth = default.get('auth', {})
     section_auth = section_data.get('auth', {})
@@ -241,8 +241,9 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
         'cookie': cookie_config,
         '_user_cookie': user_cookie_str,
         'request_url': merged.get('request_url'),
-        'rewrite_url': merged.get('rewrite_url'),
     }
+    if section == 'metadata':
+        result['rewrite_url'] = merged.get('rewrite_url')
 
     # Section-specific fields
     if section == 'metadata':
@@ -282,9 +283,10 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
         request_url = apply_request_url(url, merged.get('request_url'))
         if request_url:
             result['_request_url'] = request_url
-        rewrite_url = apply_rewrite_url(url, merged.get('rewrite_url'))
-        if rewrite_url:
-            result['_rewrite_url'] = rewrite_url
+        if section == 'metadata':
+            rewrite_url = apply_rewrite_url(url, merged.get('rewrite_url'))
+            if rewrite_url:
+                result['_rewrite_url'] = rewrite_url
 
     # Metadata
     result['_domain_key'] = full_config.get('_domain_key')

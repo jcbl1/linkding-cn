@@ -90,6 +90,9 @@ def _resolve_all_paths(node, base_dir: str):
                     else:
                         resolved_scripts.append(_resolve_all_paths(item, base_dir))
                 result[key] = resolved_scripts
+            elif (key == 'script' or key.endswith('_script')) and isinstance(value, str):
+                resolved_path = _resolve_script_path(value, base_dir)
+                result[key] = resolved_path if resolved_path else value
             else:
                 result[key] = _resolve_all_paths(value, base_dir)
         return result

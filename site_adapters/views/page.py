@@ -8,8 +8,6 @@ from django.shortcuts import render
 
 from site_adapters.views.helpers import (
     get_defuddle_params_set,
-    get_http_headers_descs,
-    get_http_headers_set,
     get_singlefile_args_set,
     _get_adapters_dir,
     _get_base_dir,
@@ -64,8 +62,6 @@ def site_adapters_page(request):
         'base_dir': base_dir,
         'adapters_dir': adapters_dir,
         'authority_lists_json': json.dumps({
-            'http_headers': sorted(get_http_headers_set()),
-            'http_headers_descs': get_http_headers_descs(),
             'singlefile_args': sorted(get_singlefile_args_set()),
             'defuddle_params': sorted(get_defuddle_params_set()),
         }, ensure_ascii=False),

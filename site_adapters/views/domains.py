@@ -193,7 +193,7 @@ def domain_create(request):
     file_path = _ensure_defaults_file()
 
     default_config = {
-        "default": {"http": {}},
+        "defaults": {"http": {}},
         "metadata": {},
         "snapshot": {},
         "reader": {},

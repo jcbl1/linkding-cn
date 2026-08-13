@@ -3,7 +3,7 @@ Reader script - replaces defuddle engine.
 
 Parameters:
   url: str - URL being processed
-  config: dict - merged config (default + reader sections)
+  config: dict - merged config (defaults + reader sections)
 
 Return:
   str (HTML content) or dict with content and optional title

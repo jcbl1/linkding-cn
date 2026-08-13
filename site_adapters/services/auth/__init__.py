@@ -25,10 +25,9 @@ from site_adapters.services.auth.credentials import (
     get_auth_requirements_for_domain,
     get_auth_requirements_for_domain_key,
 )
-from site_adapters.services.auth.tokens import (
+from site_adapters.services.auth.oauth2 import (
     get_valid_token,
     get_token_header,
-    verify_and_refresh_token,
     refresh_token as _refresh_token,
 )
 

@@ -186,37 +186,6 @@ def get_valid_token(token_config: dict, username: str, domain_key: str) -> str |
     return result['access_token']
 
 
-def verify_and_refresh_token(token_config: dict, username: str,
-                              domain_key: str, verify_context: dict) -> str | None:
-    """
-    验证 token 有效性，失效则刷新。
-    与 cookies.verify_and_refresh 对应。
-    """
-    token = get_valid_token(token_config, username, domain_key)
-    if not token:
-        return None
-
-    verify_cfg = token_config.get('verify', {})
-    invalid = verify_cfg.get('invalid_patterns', [])
-    if not invalid:
-        return token
-
-    # 验证（复用 cookies 的声明式验证逻辑）
-    from site_adapters.services.auth.cookies import verify_cookie_declarative
-    result = verify_cookie_declarative(verify_cfg, verify_context)
-    if result.get('valid'):
-        return token
-
-    logger.info('Token invalid for %s, refreshing', domain_key)
-
-    # 清除缓存强制刷新。注意：get_valid_token 内部会重新刷新并更新缓存，
-    # 如果刷新成功但验证仍失败，第二次调用会从缓存返回（不再循环）。
-    with _token_cache_lock:
-        _token_cache.pop(_cache_key(username, domain_key), None)
-
-    return get_valid_token(token_config, username, domain_key)
-
-
 def get_token_header(token_config: dict, access_token: str) -> dict:
     """
     将 access_token 格式化为 HTTP header。

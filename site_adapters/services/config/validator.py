@@ -1,14 +1,10 @@
 """
 Validator — 配置验证 + 字段分类
-
-合并了原 engine.py 的验证函数和 classifier.py 的字段分类逻辑。
-编辑器自动补全函数（get_http_headers_set 等）也在此模块。
 """
 
 import json
 import logging
 import os
-import re
 
 from site_adapters.services.config import (
     is_safe_script_path,
@@ -20,195 +16,39 @@ from site_adapters.services.config import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 路径
-# ---------------------------------------------------------------------------
-_BASE_DIR = os.path.dirname(__file__)
-_SERVICES_DIR = os.path.dirname(_BASE_DIR)
-_SOURCE_ETC_DIR = os.path.join(_SERVICES_DIR, 'engine', 'references')
-
-# ---------------------------------------------------------------------------
 # 缓存
 # ---------------------------------------------------------------------------
-_http_headers_set: set[str] | None = None
-_http_headers_descs: dict[str, str] | None = None
 _singlefile_args_set: set[str] | None = None
 _defuddle_params_set: set[str] | None = None
 
 # ---------------------------------------------------------------------------
 # 各板块合法字段
 # ---------------------------------------------------------------------------
-
-DEFAULT_FIELDS = frozenset({
-    "timeout", "proxy",
-    "request_url", "rewrite_url",
-    "http", "auth",
-})
-
-METADATA_FIELDS = frozenset({
-    "select_title", "select_description", "select_image",
-    "rewrite_title", "rewrite_description", "rewrite_image",
-    "load_full_page", "max_content_limit",
-    "scripts",
-    "timeout", "proxy",
-    "request_url", "rewrite_url",
-    "http", "auth",
-})
-
-SNAPSHOT_FIELDS = frozenset({
-    "keep_elements", "remove_elements", "process_lazy_images",
-    "remove_classes", "set_styles",
-    "scripts",
-    "singlefile_args",
-    "toggles",
-    "timeout", "proxy",
-    "request_url", "rewrite_url",
-    "http", "auth",
-})
-
-READER_FIELDS = frozenset({
-    "defuddle_args",
-    "timeout", "proxy",
-    "http", "auth",
-})
-
-# ---------------------------------------------------------------------------
-# 兜底列表
-# ---------------------------------------------------------------------------
-
-COMMON_HTTP_HEADERS = frozenset({
-    "Accept", "Accept-Encoding", "Accept-Language", "Authorization",
-    "Cache-Control", "Connection", "Content-Type", "Cookie",
-    "Host", "Origin", "Pragma", "Referer", "User-Agent",
-    "X-Forwarded-For", "X-Requested-With",
-})
-
-_SINGLEFILE_ARGS_FALLBACK = frozenset({
-    "--accept-header-document", "--accept-header-font", "--accept-header-image",
-    "--accept-header-script", "--accept-header-stylesheet", "--accept-language",
-    "--block-alternative-images", "--block-audios", "--block-fonts", "--block-images",
-    "--block-mixed-content", "--block-scripts", "--block-stylesheets",
-    "--block-videos", "--blocked-URL-pattern", "--browser-arg", "--browser-args",
-    "--browser-capture-max-time", "--browser-cookie", "--browser-cookies-file",
-    "--browser-debug", "--browser-device-height", "--browser-device-scale-factor",
-    "--browser-device-width", "--browser-executable-path", "--browser-headless",
-    "--browser-height", "--browser-ignore-insecure-certs", "--browser-load-max-time",
-    "--browser-mobile-emulation", "--browser-remote-debugging-URL", "--browser-script",
-    "--browser-server", "--browser-start-minimized", "--browser-stylesheet",
-    "--browser-wait-delay", "--browser-wait-end-delay", "--browser-wait-until",
-    "--browser-wait-until-delay", "--browser-wait-until-fallback", "--browser-width",
-    "--compress-CSS", "--compress-HTML", "--compress-content",
-    "--console-messages-file", "--crawl-external-links-max-depth",
-    "--crawl-inner-links-only", "--crawl-links", "--crawl-load-session",
-    "--crawl-max-depth", "--crawl-no-parent", "--crawl-remove-URL-fragment",
-    "--crawl-replace-URLs", "--crawl-rewrite-rule", "--crawl-save-session",
-    "--crawl-sync-session", "--create-root-directory", "--debug-messages-file",
-    "--dump-content", "--embed-pdf", "--embed-pdf-options", "--embed-screenshot",
-    "--embed-screenshot-options", "--embedded-image", "--embedded-pdf",
-    "--emulate-media-feature", "--errors-file", "--errors-traces-disabled",
-    "--extract-data-from-page", "--filename-conflict-action", "--filename-max-length",
-    "--filename-max-length-unit", "--filename-replaced-character",
-    "--filename-replacement-character", "--filename-template",
-    "--group-duplicate-images", "--group-duplicate-stylesheets", "--help",
-    "--http-header", "--http-proxy-password", "--http-proxy-server",
-    "--http-proxy-username", "--include-BOM", "--include-infobar",
-    "--infobar-position-absolute", "--infobar-position-bottom",
-    "--infobar-position-left", "--infobar-position-right", "--infobar-position-top",
-    "--infobar-template", "--insert-meta-CSP", "--insert-single-file-comment",
-    "--insert-text-body", "--load-deferred-images",
-    "--load-deferred-images-before-frames",
-    "--load-deferred-images-dispatch-scroll-event",
-    "--load-deferred-images-keep-zoom-level", "--load-deferred-images-max-idle-time",
-    "--max-parallel-workers", "--max-resource-size", "--max-resource-size-enabled",
-    "--max-size-duplicate-images", "--move-styles-in-head", "--open-infobar",
-    "--output-directory", "--output-json", "--password", "--platform",
-    "--prevent-appended-data", "--remove-alternative-fonts",
-    "--remove-alternative-images", "--remove-alternative-medias", "--remove-frames",
-    "--remove-hidden-elements", "--remove-no-script-tags", "--remove-saved-date",
-    "--remove-unused-fonts", "--remove-unused-styles", "--removed-elements-selector",
-    "--replace-emojis-in-filename", "--resolve-links", "--save-original-URLs",
-    "--save-raw-page", "--self-extracting-archive", "--settings-file",
-    "--settings-file-profile", "--urls-file", "--user-agent", "--user-script-enabled",
-    "--version",
-})
-
-_DEFUDDLE_PARAMS_FALLBACK = frozenset({
-    "contentSelector", "removeExactSelectors", "removePartialSelectors",
-    "removeHiddenElements", "removeLowScoring", "removeSmallImages",
-    "removeImages", "standardize", "url", "markdown", "separateMarkdown",
-    "debug", "language", "useAsync", "includeReplies", "profile",
-})
-
-# ---------------------------------------------------------------------------
-# etc 文件加载
-# ---------------------------------------------------------------------------
-
-_ETC_DELIMITERS = ('|', ',', ' ')
-
-def _parse_etc_line(line: str) -> tuple[str, str] | None:
-    """Parse one line: 'Name' or 'Name | Description'. Delimiters: | , space"""
-    line = line.strip()
-    if not line or line.startswith('#'):
-        return None
-    for i, ch in enumerate(line):
-        if ch in _ETC_DELIMITERS:
-            return line[:i].strip(), line[i+1:].strip()
-    return line, ''
-
-def _get_user_etc_dir() -> str:
-    try:
-        from django.conf import settings
-        return os.path.join(settings.LD_SITE_ADAPTERS_DIR, 'etc')
-    except Exception:
-        return ''
-
-def _load_from_etc(filename: str, fallback: frozenset) -> tuple[set[str], dict[str, str]]:
-    """Load from engine/references/ (user dir first), return (set, {name: desc})"""
-    user_dir = _get_user_etc_dir()
-    for d in (user_dir, _SOURCE_ETC_DIR):
-        path = os.path.join(d, filename) if d else ''
-        if path and os.path.exists(path):
-            try:
-                names, descs = set(), {}
-                with open(path, encoding='utf-8') as f:
-                    for line in f:
-                        parsed = _parse_etc_line(line)
-                        if parsed:
-                            names.add(parsed[0])
-                            if parsed[1]:
-                                descs[parsed[0]] = parsed[1]
-                if names:
-                    return names, descs
-            except OSError:
-                pass
-    return set(fallback), {}
-
-
-def get_http_headers_set() -> set[str]:
-    global _http_headers_set
-    if _http_headers_set is None:
-        _http_headers_set = _load_from_etc('http_headers.txt', COMMON_HTTP_HEADERS)[0]
-    return _http_headers_set
-
-
-def get_http_headers_descs() -> dict[str, str]:
-    """Return HTTP header descriptions (if provided in etc file)"""
-    global _http_headers_descs
-    if _http_headers_descs is None:
-        _http_headers_descs = _load_from_etc('http_headers.txt', COMMON_HTTP_HEADERS)[1]
-    return _http_headers_descs
+from site_adapters.services.config.fields import (
+    DEFAULT_FIELDS,
+    DEFUDDLE_ARG_FIELDS,
+    METADATA_FIELDS,
+    SNAPSHOT_FIELDS,
+    READER_FIELDS,
+    ALL_SECTIONS,
+    SINGLEFILE_ARG_NAMES,
+)
 
 
 def get_singlefile_args_set() -> set[str]:
     global _singlefile_args_set
     if _singlefile_args_set is None:
-        _singlefile_args_set = _load_from_etc('singlefile_args.txt', _SINGLEFILE_ARGS_FALLBACK)[0]
+        _singlefile_args_set = set(SINGLEFILE_ARG_NAMES)
     return _singlefile_args_set
 
 
 def get_defuddle_params_set() -> set[str]:
     global _defuddle_params_set
     if _defuddle_params_set is None:
-        _defuddle_params_set = _load_from_etc('defuddle_params.txt', _DEFUDDLE_PARAMS_FALLBACK)[0]
+        _defuddle_params_set = {
+            key for key, info in DEFUDDLE_ARG_FIELDS.items()
+            if not info.get("reserved")
+        }
     return _defuddle_params_set
 
 
@@ -217,10 +57,10 @@ def get_defuddle_params_set() -> set[str]:
 # ---------------------------------------------------------------------------
 
 _SECTION_FIELDS = {
-    'default': DEFAULT_FIELDS,
-    'metadata': METADATA_FIELDS,
-    'snapshot': SNAPSHOT_FIELDS,
-    'reader': READER_FIELDS,
+    'defaults': set(DEFAULT_FIELDS.keys()),
+    'metadata': set(METADATA_FIELDS.keys()),
+    'snapshot': set(SNAPSHOT_FIELDS.keys()),
+    'reader': set(READER_FIELDS.keys()),
 }
 
 def classify_field(section: str, key: str) -> str:
@@ -229,17 +69,10 @@ def classify_field(section: str, key: str) -> str:
     - "field": known field for this section
     - "unknown": unrecognized field
     """
-    fields = _SECTION_FIELDS.get(section, frozenset())
+    fields = _SECTION_FIELDS.get(section, set())
     if key in fields:
         return "field"
     return "unknown"
-
-
-def is_http_header(name: str) -> bool:
-    headers = get_http_headers_set()
-    if headers:
-        return name in headers
-    return bool(re.match(r'^[A-Z]', name))
 
 
 def is_known_singlefile_arg(name: str) -> bool:
@@ -270,7 +103,7 @@ def separate_http_fields(data: dict) -> tuple[dict, dict]:
 def validate_section_fields(section: str, data: dict) -> list[str]:
     """Validate section fields, return warnings. Unknown fields are discarded."""
     warnings = []
-    fields = _SECTION_FIELDS.get(section, frozenset())
+    fields = _SECTION_FIELDS.get(section, set())
     for key in data:
         if key not in fields:
             warnings.append(f"WARN: {section}.{key} is unknown, discarded")
@@ -312,20 +145,6 @@ def _validate_subscriptions(issues: list[str], adapters):
         interval = adp.get('update_interval', 86400)
         if not isinstance(interval, int) or interval <= 0:
             issues.append(f"ERROR: {label}.update_interval 必须是正整数")
-
-
-def _check_exclusive(issues, label, data, groups):
-    """检查互斥参数组，同组内超过一个则警告"""
-    for group in groups:
-        present = []
-        for key in group:
-            val = data
-            for part in key.split('.'):
-                val = (val if isinstance(val, dict) else {}).get(part)
-            if val:
-                present.append(key)
-        if len(present) > 1:
-            issues.append(f"WARN: {label}: {', '.join(present)} 互斥，只有 {present[0]} 生效")
 
 
 def _validate_cookie_block(issues: list[str], label: str, cookie: dict, file_dir: str):
@@ -399,44 +218,30 @@ def _validate_auth_block(issues: list[str], label: str, auth: dict, file_dir: st
                     continue
                 if not isinstance(name, str):
                     issues.append(f"ERROR: {label}.headers key must be a string")
-                if config and not isinstance(config, dict):
-                    issues.append(f"ERROR: {label}.headers.{name} must be an object")
-    # Validate oauth2 sub-block (also legacy 'token')
-    for oauth2_key in ('oauth2', 'token'):
-        oauth2 = auth.get(oauth2_key)
-        if oauth2 is None:
-            continue
-        prefix = f"{label}.{oauth2_key}"
+                if config is not None and not isinstance(config, str):
+                    issues.append(f"ERROR: {label}.headers.{name} must be a string")
+    # Validate oauth2 sub-block
+    oauth2 = auth.get("oauth2")
+    if oauth2 is not None:
+        prefix = f"{label}.oauth2"
         if not isinstance(oauth2, dict):
             issues.append(f"ERROR: {prefix} must be an object")
-            continue
-        endpoint = oauth2.get("endpoint")
-        if not isinstance(endpoint, str) or not endpoint.strip():
-            issues.append(f"ERROR: {prefix}.endpoint must be a non-empty string")
-        for key in ("client_id", "client_secret", "grant_type", "format",
-                     "access_token_path", "access_path",
-                     "refresh_token_path", "refresh_path",
-                     "expires_in_path", "expires_path",
-                     "header", "header_format"):
-            value = oauth2.get(key)
-            if value is not None and not isinstance(value, str):
-                issues.append(f"ERROR: {prefix}.{key} must be a string")
-        extra_params = oauth2.get("extra_params")
-        if extra_params is not None:
-            if not isinstance(extra_params, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in extra_params.items()):
-                issues.append(f"ERROR: {prefix}.extra_params must be a string map")
-        verify = oauth2.get("verify")
-        if verify is not None:
-            if not isinstance(verify, dict):
-                issues.append(f"ERROR: {prefix}.verify must be an object")
-            else:
-                invalid_pats = verify.get("invalid_patterns", [])
-                if invalid_pats is not None:
-                    if not isinstance(invalid_pats, list) or not all(isinstance(s, str) for s in invalid_pats):
-                        issues.append(f"ERROR: {prefix}.verify.invalid_patterns must be a string array")
-                for key in verify:
-                    if key not in ("invalid_patterns",):
-                        issues.append(f"WARN: {prefix}.verify.{key} is unknown, will be ignored")
+        else:
+            endpoint = oauth2.get("endpoint")
+            if not isinstance(endpoint, str) or not endpoint.strip():
+                issues.append(f"ERROR: {prefix}.endpoint must be a non-empty string")
+            for key in ("client_id", "client_secret", "grant_type", "format",
+                         "access_token_path", "access_path",
+                         "refresh_token_path", "refresh_path",
+                         "expires_in_path", "expires_path",
+                         "header", "header_format"):
+                value = oauth2.get(key)
+                if value is not None and not isinstance(value, str):
+                    issues.append(f"ERROR: {prefix}.{key} must be a string")
+            extra_params = oauth2.get("extra_params")
+            if extra_params is not None:
+                if not isinstance(extra_params, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in extra_params.items()):
+                    issues.append(f"ERROR: {prefix}.extra_params must be a string map")
     # Validate basic_auth sub-block
     basic_auth = auth.get('basic_auth')
     if basic_auth is not None:
@@ -444,7 +249,7 @@ def _validate_auth_block(issues: list[str], label: str, auth: dict, file_dir: st
             issues.append(f"ERROR: {label}.basic_auth must be an object")
     # Warn about unknown keys
     for key in auth:
-        if key not in ('cookie', 'headers', 'oauth2', 'token', 'basic_auth'):
+        if key not in ('cookie', 'headers', 'oauth2', 'basic_auth'):
             issues.append(f"WARN: {label}.{key} is unknown, will be ignored")
 
 
@@ -461,18 +266,18 @@ def _validate_domain_config(issues: list[str], label: str, data: dict, file_dir:
     if top_auth is not None:
         _validate_auth_block(issues, f"{label}.auth", top_auth, file_dir)
 
-    # Validate default section
-    default = data.get('default', {})
+    # Validate defaults section
+    default = data.get('defaults', {})
     if default:
         if not isinstance(default, dict):
-            issues.append(f"ERROR: {label}.default must be an object")
+            issues.append(f"ERROR: {label}.defaults must be an object")
         else:
             for key in default:
-                if classify_field('default', key) == 'unknown':
-                    issues.append(f"WARN: {label}.default.{key} is unknown, will be ignored at runtime")
+                if classify_field('defaults', key) == 'unknown':
+                    issues.append(f"WARN: {label}.defaults.{key} is unknown, will be ignored at runtime")
             auth = default.get('auth')
             if auth is not None:
-                _validate_auth_block(issues, f"{label}.default.auth", auth, file_dir)
+                _validate_auth_block(issues, f"{label}.defaults.auth", auth, file_dir)
 
     # Validate sections
     for section in ('metadata', 'snapshot', 'reader'):
@@ -529,9 +334,25 @@ def _validate_domain_config(issues: list[str], label: str, data: dict, file_dir:
             for arg in (args if isinstance(args, dict) else {}):
                 if not is_known_singlefile_arg(arg):
                     issues.append(f"WARN: {label}.snapshot.singlefile_args.{arg} unknown")
-            _check_exclusive(issues, f"{label}.{section}", sec, [
-                ('scripts', 'keep_elements', 'remove_elements', 'remove_classes', 'set_styles', 'singlefile_args'),
-            ])
+            scripts = sec.get('scripts')
+            has_replace = (
+                isinstance(scripts, list)
+                and any(isinstance(item, dict) and item.get('hook') == 'replace' for item in scripts)
+            )
+            if has_replace:
+                declarative_fields = [
+                    'keep_elements', 'remove_elements', 'remove_classes',
+                    'set_styles', 'singlefile_args',
+                ]
+                present = [
+                    key for key in declarative_fields
+                    if sec.get(key) not in (None, [], {})
+                ]
+                if present:
+                    issues.append(
+                        f"WARN: {label}.{section}: replace script bypasses "
+                        f"{', '.join(present)}"
+                    )
         if section == 'reader':
             args = sec.get('defuddle_args', {})
             if args and not isinstance(args, dict):

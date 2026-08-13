@@ -502,7 +502,7 @@ def load_domain_config(url: str, base_dir: str) -> dict | None:
     Returns:
     {
         'auth': {...},
-        'default': {...},
+        'defaults': {...},
         'metadata': {...},
         'snapshot': {...},
         'reader': {...},

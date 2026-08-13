@@ -4,7 +4,6 @@
  * 输入（stdin JSON）：
  *   { "htmlPath": "/tmp/page.html", "url": "https://...",
  *     "contentSelector": [".article-body"],   ← defuddle 原始参数
- *     "removeExactSelectors": [".ad"],         ← defuddle 原始参数
  *     "includeReplies": false, ... }
  *
  * 输出：defuddle JSON（title, content, description, author, site, wordCount）

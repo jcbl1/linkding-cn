@@ -11,7 +11,7 @@ from site_adapters.services.config.loader import (
 )
 from site_adapters.services.config import parse_jsonc
 from site_adapters.services.config.resolver import get_metadata_config
-from site_adapters.services.auth.tokens import _resolve_json_path
+from site_adapters.services.auth.oauth2 import _resolve_json_path
 
 
 class SiteAdaptersEngineTestCase(TestCase):
@@ -127,7 +127,7 @@ class SiteAdaptersEngineTestCase(TestCase):
     def test_resolver_merges_http_and_handles_auth_config(self):
         self.setup_adapter("example.com", {
             "auth": {"cookie": {"type": "anon"}},
-            "default": {
+            "defaults": {
                 "timeout": 5,
                 "http": {"Cookie": "ignored", "X-Test": "domain"}
             },
@@ -172,5 +172,3 @@ class ApplyTogglesTestCase(TestCase):
         remove, keep = _apply_toggles(section, {"_domain_key": "example.com"}, "user")
         self.assertEqual(remove, [".ad"])
         self.assertEqual(keep, [".article"])
-
-

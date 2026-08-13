@@ -22,7 +22,7 @@ from site_adapters.views.helpers import (
 # ---------------------------------------------------------------------------
 
 _BUILTIN_BASELINE = {
-    "default": {
+    "defaults": {
         "timeout": 30,
         "http": {"User-Agent": "Mozilla/5.0 Test"},
     },
@@ -91,7 +91,7 @@ class LoadBuiltinConfigTestCase(TestCase):
         )
         result = load_builtin_config(self.base_dir)
         self.assertIsNotNone(result)
-        self.assertEqual(result["default"]["timeout"], 30)
+        self.assertEqual(result["defaults"]["timeout"], 30)
         self.assertEqual(result["snapshot"]["timeout"], 120)
         self.assertEqual(result["metadata"]["select_title"], ["h1", "title"])
 
@@ -99,11 +99,11 @@ class LoadBuiltinConfigTestCase(TestCase):
         self._write_runtime(
             {
                 "_builtin": _BUILTIN_BASELINE,
-                "_builtin_overrides": {"default": {"timeout": 60}},
+                "_builtin_overrides": {"defaults": {"timeout": 60}},
             }
         )
         result = load_builtin_config(self.base_dir)
-        self.assertEqual(result["default"]["timeout"], 60)
+        self.assertEqual(result["defaults"]["timeout"], 60)
         # Other fields still from builtin
         self.assertEqual(result["snapshot"]["timeout"], 120)
 
@@ -122,11 +122,11 @@ class LoadBuiltinConfigTestCase(TestCase):
         self._write_runtime(
             {
                 "_builtin": _BUILTIN_BASELINE,
-                "_builtin_overrides": {"default": {"proxy": "http://p"}},
+                "_builtin_overrides": {"defaults": {"proxy": "http://p"}},
             }
         )
         result = load_builtin_config(self.base_dir)
-        self.assertEqual(result["default"]["proxy"], "http://p")
+        self.assertEqual(result["defaults"]["proxy"], "http://p")
 
     def test_corrupted_runtime_file_returns_none(self):
         path = self._runtime_path()
@@ -144,9 +144,9 @@ class ReadBuiltinSourceTestCase(TestCase):
     def test_source_file_exists_returns_builtin(self):
         result = _read_builtin_source()
         self.assertIsInstance(result, dict)
-        for key in ("default", "metadata", "snapshot", "reader"):
+        for key in ("defaults", "metadata", "snapshot", "reader"):
             self.assertIn(key, result)
-        self.assertEqual(result["default"]["timeout"], 30)
+        self.assertEqual(result["defaults"]["timeout"], 30)
         self.assertTrue(result["snapshot"]["process_lazy_images"])
 
     def test_source_file_missing_returns_empty(self):
