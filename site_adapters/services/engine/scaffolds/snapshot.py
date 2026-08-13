@@ -1,5 +1,13 @@
 """
-Snapshot hook scripts for site-adapters.
+Snapshot hook scripts for site-adapters (Python external mode).
+
+Python snapshot scripts always run outside SingleFile. Use them for
+pre-fetching, cookie/header/request URL handling, custom HTML generation, or
+final file rewriting.
+
+For DOM-level hooks that should run inside the SingleFile browser, use the
+JavaScript scaffold `snapshot.js`. This Python scaffold is for external hooks
+only.
 
 Each script defines one or more hook functions. The function name is the hook
 value from the adapter configuration. Define only the hooks you need.
@@ -30,10 +38,18 @@ Config keys available in every hook
     toggles            dict           User-toggleable controls
     scripts            list[dict]     Script hooks configuration
 
-File handling:
-    replace scripts: write HTML to output_path
-    after scripts:   read and modify output_path in-place
-    Framework creates and cleans up temp files automatically.
+--------------------------------------------------------------------------------
+File handling
+--------------------------------------------------------------------------------
+
+  before: return an HTML string to feed to SingleFile, or None to let
+          SingleFile fetch the URL normally.
+
+  replace: write a complete HTML file to output_path.
+
+  after: read and modify output_path in-place.
+
+  The framework creates and cleans up temp files automatically.
 """
 
 
@@ -60,6 +76,9 @@ def before(url: str, config: dict) -> str | None:
             html = page.content()
             browser.close()
         return html
+
+    Example - return a fixed HTML document:
+        return "<html><body><h1>Captured</h1></body></html>"
     """
     return None
 
@@ -88,6 +107,7 @@ def replace(url: str, config: dict, output_path: str) -> None:
 
     Example - custom work then delegate to SingleFile:
         from site_adapters.services.engine import create_snapshot
+
         # ... do custom preprocessing ...
         create_snapshot(url, output_path, config)
     """
@@ -104,18 +124,24 @@ def after(output_path: str, config: dict) -> None:
     Example - inject dark mode CSS:
         with open(output_path, "r+", encoding="utf-8") as f:
             html = f.read()
-            html = html.replace("</head>",
-                "<style>body{background:#111;color:#eee}</style></head>")
+            html = html.replace(
+                "</head>",
+                "<style>body{background:#111;color:#eee}</style></head>",
+            )
             f.seek(0)
             f.write(html)
             f.truncate()
 
     Example - rewrite CDN image URLs:
         import re
+
         with open(output_path, "r+", encoding="utf-8") as f:
             html = f.read()
-            html = re.sub(r"https://cdn\\.example\\.com/",
-                         "https://example.com/", html)
+            html = re.sub(
+                r"https://cdn\\.example\\.com/",
+                "https://example.com/",
+                html,
+            )
             f.seek(0)
             f.write(html)
             f.truncate()

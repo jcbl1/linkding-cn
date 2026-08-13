@@ -19,7 +19,11 @@ from site_adapters.services.auth.cookies import (
 )
 from site_adapters.services.auth.credentials import get_shared_cookie
 from site_adapters.services.execution_log import log_execution
-from site_adapters.services.config import apply_rewrite
+from site_adapters.services.config import (
+    apply_request_url,
+    apply_rewrite,
+    apply_rewrite_url,
+)
 from site_adapters.services.config.resolver import get_metadata_config
 from site_adapters.services.engine.script_runner import run_script
 from site_adapters.services.engine.browser_fallback import load_metadata_via_browser
@@ -94,9 +98,45 @@ def _empty_metadata(url: str):
     return WebsiteMetadata(url=url, title=None, description=None, preview_image=None)
 
 
+def _apply_metadata_before_result(url: str, config: dict, result) -> None:
+    """Apply the partial config returned by a metadata before hook."""
+    if not isinstance(result, dict):
+        return
+    for key, value in result.items():
+        if key.startswith('_'):
+            continue
+        if key == 'request_url':
+            config['request_url'] = value
+            if isinstance(value, str) and value.startswith(('http://', 'https://')):
+                config['_request_url'] = value
+            else:
+                resolved = apply_request_url(url, value)
+                if resolved:
+                    config['_request_url'] = resolved
+        elif key == 'rewrite_url':
+            config['rewrite_url'] = value
+            resolved = apply_rewrite_url(url, value)
+            if resolved:
+                config['_rewrite_url'] = resolved
+        elif key == 'user_cookie':
+            config['_user_cookie'] = value
+            config['user_cookie'] = value
+        elif key == 'headers' and isinstance(value, dict):
+            config.setdefault('headers', {}).update(value)
+        else:
+            config[key] = value
+
+
 def _normalize_metadata_result(url: str, metadata, source: str):
     if isinstance(metadata, WebsiteMetadata):
         return metadata
+    if isinstance(metadata, dict):
+        return WebsiteMetadata(
+            url=metadata.get('url') or url,
+            title=metadata.get('title'),
+            description=metadata.get('description'),
+            preview_image=metadata.get('image') or metadata.get('preview_image'),
+        )
 
     if metadata is None:
         logger.warning("Metadata loader returned no result. url=%s source=%s", url, source)
@@ -123,7 +163,8 @@ def _load_with_hooks(url: str, config: dict, scripts: list, username: str = '',
         if not script_path or not os.path.exists(script_path):
             continue
         logger.debug("Running metadata before hook: %s", script_path)
-        run_script(script_path, hook_name='before', url=url, config=dict(config))
+        result = run_script(script_path, hook_name='before', url=url, config=dict(config))
+        _apply_metadata_before_result(url, config, result)
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("After before hook, config keys: %s", list(config.keys()))
 
@@ -176,8 +217,15 @@ def _load_with_hooks(url: str, config: dict, scripts: list, username: str = '',
         if not script_path or not os.path.exists(script_path):
             continue
         logger.debug("Running metadata after hook: %s", script_path)
-        run_script(script_path, hook_name='after', url=url,
-                   config=dict(config), result_dict=result_dict)
+        after_result = run_script(
+            script_path,
+            hook_name='after',
+            url=url,
+            config=dict(config),
+            result_dict=result_dict,
+        )
+        if isinstance(after_result, dict):
+            result_dict.update(after_result)
 
     return WebsiteMetadata(
         url=result_dict.get('url') or url,
@@ -212,7 +260,10 @@ def load_website_metadata(url: str, ignore_cache: bool = False, username: str = 
                             url=result.get('url') or url,
                             title=apply_rewrite(result.get('title'), config.get('rewrite_title')),
                             description=apply_rewrite(result.get('description'), config.get('rewrite_description')),
-                            preview_image=apply_rewrite(result.get('preview_image'), config.get('rewrite_image')),
+                            preview_image=apply_rewrite(
+                                result.get('preview_image') or result.get('image'),
+                                config.get('rewrite_image'),
+                            ),
                         )
                     return _empty_metadata(url)
                 result = run_script(loader_path, url=url, config=config, html_content=body)

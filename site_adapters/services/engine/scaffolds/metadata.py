@@ -1,5 +1,9 @@
 """
-Metadata hook scripts for site-adapters.
+Metadata hook scripts for site-adapters (Python / JavaScript).
+
+Metadata scripts are always executed outside the browser. Python scripts may
+modify `result` in-place; JavaScript scripts must return the modified result
+dict because they run in a separate Node process.
 
 Each script defines one or more hook functions. The function name is the hook
 value from the adapter configuration. Define only the hooks you need; the
@@ -31,28 +35,50 @@ Config keys available in every hook
     rewrite_image      list|None
     load_full_page     bool           Whether to load full page HTML
     scripts            list[dict]     Script hooks configuration
+
+--------------------------------------------------------------------------------
+Return value conventions
+--------------------------------------------------------------------------------
+
+  before: return a partial config dict or None. The framework merges returned
+          keys into the config before the built-in engine runs.
+
+  replace: return a dict with any of: title, description, image, url.
+
+  after: modify `result` in-place and return None.
 """
 
 
-def before(url: str, config: dict) -> None:
+def before(url: str, config: dict) -> dict | None:
     """
     Hook: before
 
-    Executes before the main metadata pipeline. Modify `config` in-place
-    to affect downstream stages.
+    Executes before the main metadata pipeline. Return a partial config dict
+    to affect the built-in engine; return None when no config change is needed.
 
-    Modifiable config keys:
+    Supported return keys:
         request_url, user_cookie, headers, timeout, proxy
 
     Example - acquire a login cookie before the request:
         import requests
-        resp = requests.post("https://example.com/login",
-                            json={"user": "...", "pass": "..."})
-        config["user_cookie"] = "; ".join(
-            f"{k}={v}" for k, v in resp.cookies.items()
+
+        resp = requests.post(
+            "https://example.com/login",
+            json={"user": "...", "pass": "..."},
         )
+        return {
+            "user_cookie": "; ".join(
+                f"{k}={v}" for k, v in resp.cookies.items()
+            )
+        }
+
+    Example - set a custom request URL and header:
+        return {
+            "request_url": "https://api.example.com/v2/articles",
+            "headers": {"X-Trace": "metadata-hook"},
+        }
     """
-    pass
+    return None
 
 
 def replace(url: str, config: dict) -> dict:
@@ -68,8 +94,11 @@ def replace(url: str, config: dict) -> dict:
         import requests
         from site_adapters.services.engine import parse_metadata
 
-        resp = requests.get(url, headers=config.get("headers", {}),
-                           timeout=config.get("timeout", 10))
+        resp = requests.get(
+            url,
+            headers=config.get("headers", {}),
+            timeout=config.get("timeout", 10),
+        )
         result = parse_metadata(resp.text, url, config)
         result["title"] = result["title"].replace(" - Suffix", "")
         return result
@@ -105,5 +134,9 @@ def after(result: dict, url: str, config: dict) -> None:
             .replace(" - Example", "")
             .replace(" | Example", "")
         )
+
+    Example - fall back to a fixed image:
+        if not result["image"]:
+            result["image"] = "https://example.com/default.png"
     """
     pass

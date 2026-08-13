@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -66,9 +67,9 @@ def get_custom_options(config: dict):
                 logger.warning("Ignoring unknown SingleFile arg: %s", arg)
                 continue
             if value is True:
-                args.append(f"{arg}=true")
+                args.append(arg)
             elif value is False:
-                args.append(f"{arg}=false")
+                continue
             elif value is None:
                 continue
             elif isinstance(value, list):
@@ -89,7 +90,89 @@ def _as_list(value):
     return value if isinstance(value, list) else [value]
 
 
-def _build_browser_script(config: dict) -> str | None:
+_BUILTIN_ENGINE_RE = re.compile(
+    r'^[ \t]*(?:const|let)\s+builtin_engine\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|(null))\s*;?',
+    re.MULTILINE,
+)
+
+
+def read_builtin_engine(script_path: str) -> str | None:
+    """Read the builtin_engine declaration from a snapshot JS script."""
+    with open(script_path, encoding='utf-8') as f:
+        source = f.read()
+    match = _BUILTIN_ENGINE_RE.search(source)
+    if not match:
+        raise SingleFileError(
+            f"Snapshot JS script must declare builtin_engine: {script_path}"
+        )
+    if match.group(3) is not None:
+        return None
+    return match.group(1) if match.group(1) is not None else match.group(2)
+
+
+def uses_builtin_engine(script_path: str, hook_name: str = '') -> bool:
+    """Return whether a snapshot JS before/after hook runs inside SingleFile."""
+    if not script_path.endswith('.js') or hook_name not in ('before', 'after'):
+        return False
+    engine = read_builtin_engine(script_path)
+    if engine == 'singlefile':
+        return True
+    if engine in ('', None):
+        return False
+    raise SingleFileError(
+        f"Unsupported builtin_engine value {engine!r} in {script_path}"
+    )
+
+
+_BROWSER_HOOK_BOILERPLATE = r"""
+(() => {
+  dispatchEvent(new CustomEvent("single-file-user-script-init"));
+
+  const runHook = async (name, event, responseEvent) => {
+    event.preventDefault();
+    try {
+      for (const hook of window.__linkdingHooks || []) {
+        const fn = hook[name];
+        if (typeof fn === "function") {
+          await fn(
+            window.__linkding_snapshot_config.url,
+            window.__linkding_snapshot_config.config
+          );
+        }
+      }
+    } finally {
+      dispatchEvent(new CustomEvent(responseEvent));
+    }
+  };
+
+  addEventListener(
+    "single-file-on-before-capture-request",
+    (event) => runHook("before", event, "single-file-on-before-capture-response")
+  );
+  addEventListener(
+    "single-file-on-after-capture-request",
+    (event) => runHook("after", event, "single-file-on-after-capture-response")
+  );
+})();
+"""
+
+
+def _wrap_user_hook_script(source: str, include_before: bool, include_after: bool) -> str:
+    checks = []
+    if include_before:
+        checks.append(
+            "if (typeof before === 'function') "
+            "window.__linkdingHooks.push({ before: before, after: undefined });"
+        )
+    if include_after:
+        checks.append(
+            "if (typeof after === 'function') "
+            "window.__linkdingHooks.push({ before: undefined, after: after });"
+        )
+    return "(() => {\n" + source + "\n" + "\n".join(checks) + "\n})();\n"
+
+
+def _build_browser_script(config: dict, url: str = '') -> str | None:
     if not config:
         # No config at all — still enable default lazy image fix
         cleanup = {"keep": [], "remove": [], "lazy": True, "removeClasses": {}, "setStyles": {}}
@@ -113,13 +196,41 @@ def _build_browser_script(config: dict) -> str | None:
     import site_adapters.services as _sa_services; vendor_path = os.path.join(os.path.dirname(_sa_services.__file__), 'engine', 'scripts', 'snapshot_browser_script.js')
     with open(vendor_path, encoding='utf-8') as f:
         script = f.read()
+
+    parts = []
+    before_paths = _as_list(config.get('_browser_before_scripts'))
+    after_paths = _as_list(config.get('_browser_after_scripts'))
+
+    if before_paths or after_paths:
+        from site_adapters.services.engine.script_runner import _sanitize_config
+        injected_url = url or config.get('_request_url') or config.get('_url') or ''
+        parts.append(
+            "window.__linkding_snapshot_config = "
+            + json.dumps(
+                {"url": injected_url, "config": _sanitize_config(config)},
+                ensure_ascii=False,
+            )
+            + ";\n"
+        )
+        parts.append("window.__linkdingHooks = [];\n")
+        for script_path in before_paths:
+            with open(script_path, encoding='utf-8') as f:
+                source = f.read()
+            parts.append(_wrap_user_hook_script(source, include_before=True, include_after=False))
+        for script_path in after_paths:
+            with open(script_path, encoding='utf-8') as f:
+                source = f.read()
+            parts.append(_wrap_user_hook_script(source, include_before=False, include_after=True))
+        parts.append(_BROWSER_HOOK_BOILERPLATE)
+
     preamble = "window.__linkding_cleanup_config = " + json.dumps(cleanup) + ";\n"
+    parts.append(preamble + script)
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as tmp:
-        tmp.write(preamble + script)
+        tmp.write("".join(parts))
         return tmp.name
 
 
-def _build_site_adapter_options(config: dict) -> tuple[list[str], list[str]]:
+def _build_site_adapter_options(url: str, config: dict) -> tuple[list[str], list[str]]:
     if not config:
         return [], []
     options = []
@@ -149,7 +260,7 @@ def _build_site_adapter_options(config: dict) -> tuple[list[str], list[str]]:
                 temp_files.append(cookie_file)
     if cookie_file:
         options.append(f"--browser-cookies-file={cookie_file}")
-    browser_script = _build_browser_script(config)
+    browser_script = _build_browser_script(config, url=url)
     if browser_script:
         options.append(f"--browser-script={browser_script}")
         temp_files.append(browser_script)
@@ -160,7 +271,7 @@ def create_snapshot(url: str, filepath: str, config: dict = None):
     singlefile_path = settings.LD_SINGLEFILE_PATH
 
     custom_options = get_custom_options(config)
-    injected_options, temp_files = _build_site_adapter_options(config)
+    injected_options, temp_files = _build_site_adapter_options(url, config)
     global_options = shlex.split(settings.LD_SINGLEFILE_OPTIONS)
     ublock_options = shlex.split(settings.LD_SINGLEFILE_UBLOCK_OPTIONS)
     required_options = [

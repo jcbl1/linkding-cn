@@ -225,3 +225,101 @@ class SingleFileServiceTestCase(TestCase):
         self.assertIn("window.__linkding_cleanup_config", script)
         self.assertIn("single-file-on-before-capture-request", script)
         self.assertIn('"keep": [".article"]', script)
+
+    def _write_js(self, content):
+        fd, path = tempfile.mkstemp(suffix=".js")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+        return path
+
+    def test_read_builtin_engine_supports_singlefile_empty_and_null(self):
+        singlefile_path = self._write_js('const builtin_engine = "singlefile";\n')
+        empty_path = self._write_js("const builtin_engine = '';\n")
+        null_path = self._write_js("const builtin_engine = null;\n")
+
+        self.assertEqual(singlefile.read_builtin_engine(singlefile_path), "singlefile")
+        self.assertEqual(singlefile.read_builtin_engine(empty_path), "")
+        self.assertIsNone(singlefile.read_builtin_engine(null_path))
+        self.assertTrue(singlefile.uses_builtin_engine(singlefile_path, "before"))
+        self.assertFalse(singlefile.uses_builtin_engine(empty_path, "before"))
+
+    def test_read_builtin_engine_rejects_unknown_value(self):
+        path = self._write_js('const builtin_engine = "monolith";\n')
+
+        with self.assertRaises(singlefile.SingleFileError):
+            singlefile.uses_builtin_engine(path, "before")
+
+    def test_build_browser_script_embeds_user_hooks(self):
+        before_path = self._write_js(
+            'const builtin_engine = "singlefile";\n'
+            "async function before(url, config) {\n"
+            "  document.querySelectorAll('.collapsed').forEach((el) => el.classList.remove('collapsed'));\n"
+            "}\n"
+        )
+        after_path = self._write_js(
+            'const builtin_engine = "singlefile";\n'
+            "async function after(url, config) {\n"
+            "  const style = document.createElement('style');\n"
+            "  document.head.appendChild(style);\n"
+            "}\n"
+        )
+        script_path = singlefile._build_browser_script(
+            {
+                "_browser_before_scripts": [before_path],
+                "_browser_after_scripts": [after_path],
+                "keep_elements": [".article"],
+            },
+            url="https://example.com",
+        )
+        self.addCleanup(lambda: os.path.exists(script_path) and os.remove(script_path))
+
+        with open(script_path, encoding="utf-8") as f:
+            script = f.read()
+
+        self.assertIn("window.__linkdingHooks", script)
+        self.assertIn("single-file-user-script-init", script)
+        self.assertIn("single-file-on-before-capture-request", script)
+        self.assertIn("single-file-on-after-capture-request", script)
+        self.assertIn("single-file-on-before-capture-response", script)
+        self.assertIn("single-file-on-after-capture-response", script)
+        self.assertIn("el.classList.remove", script)
+        self.assertIn("document.head.appendChild", script)
+        self.assertIn('"url": "https://example.com"', script)
+        self.assertLess(
+            script.index("el.classList.remove"),
+            script.index("single-file-user-script-init"),
+        )
+        self.assertLess(
+            script.index("single-file-user-script-init"),
+            script.index("window.__linkding_cleanup_config"),
+        )
+
+    def test_custom_options_passes_browser_script(self):
+        result = singlefile.get_custom_options({
+            "singlefile_args": {
+                "--browser-script": "/tmp/custom.js",
+                "--remove-hidden-elements": True,
+            }
+        })
+
+        self.assertIn("--browser-script=/tmp/custom.js", result)
+        self.assertIn("--remove-hidden-elements", result)
+
+    def test_create_snapshot_passes_framework_and_custom_browser_scripts(self):
+        mock_process = self.successful_singlefile_process()
+        self.create_test_file()
+
+        with mock.patch("subprocess.Popen", return_value=mock_process) as mock_popen:
+            singlefile.create_snapshot(
+                "https://example.com",
+                self.temp_html_filepath,
+                {"singlefile_args": {"--browser-script": "/tmp/raw-singlefile.js"}},
+            )
+
+        browser_scripts = [
+            arg for arg in mock_popen.call_args.args[0]
+            if arg.startswith("--browser-script=")
+        ]
+        self.assertEqual(len(browser_scripts), 2)
+        self.assertIn("--browser-script=/tmp/raw-singlefile.js", browser_scripts)

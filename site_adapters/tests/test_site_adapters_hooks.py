@@ -13,9 +13,11 @@ import json
 import os
 import shutil
 import tempfile
+from unittest import mock
 
 from django.test import TestCase, override_settings
 
+from bookmarks.services import singlefile
 from site_adapters.services.config.loader import _cache
 from site_adapters.services.config.validator import validate_config
 from site_adapters.services.engine.script_runner import run_script
@@ -206,10 +208,10 @@ class MetadataHookDispatchTestCase(TestCase):
         return path
 
     def test_before_hook_modifies_config(self):
-        """before hook can modify config, affecting downstream stages."""
+        """before hook returns partial config that affects downstream stages."""
         self._write("adapters/defaults/scripts/before_test.py", """
 def before(url, config):
-    config['request_url'] = 'https://modified.example.com/api'
+    return {'request_url': 'https://modified.example.com/api'}
 """)
         self._write("adapters/defaults/scripts/replace_test.py", """
 def replace(url, config):
@@ -238,10 +240,88 @@ def replace(url, config):
 
         with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
             from site_adapters.services.config.resolver import get_metadata_config
+            from bookmarks.services.website_loader import load_website_metadata
             config = get_metadata_config("https://example.com/page")
             self.assertIsNotNone(config)
             scripts = config.get("scripts")
             self.assertIsNotNone(scripts)
+            metadata = load_website_metadata("https://example.com/page")
+            self.assertEqual(metadata.title, "Modified")
+
+    def test_js_before_hook_returns_config(self):
+        """JS before hook returns partial config that affects downstream stages."""
+        self._write("adapters/defaults/scripts/before.js", """
+const fs = require('fs');
+const input = JSON.parse(fs.readFileSync('/dev/stdin', 'utf8'));
+console.log(JSON.stringify({
+  request_url: 'https://modified.example.com/api'
+}));
+""")
+        self._write("adapters/defaults/scripts/replace_test.py", """
+def replace(url, config):
+    result = {"title": "Test", "description": None, "image": None}
+    if config.get('request_url') == 'https://modified.example.com/api':
+        result['title'] = 'Modified'
+    return result
+""")
+        self._write("adapters/config.jsonc", json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults",
+                          "source": "./defaults/adapters.jsonc"}]
+        }))
+        self._write("adapters/defaults/adapters.jsonc", json.dumps({
+            "domains": {
+                "example.com": {
+                    "metadata": {
+                        "scripts": [
+                            {"path": "before.js", "hook": "before"},
+                            {"path": "replace_test.py", "hook": "replace"},
+                        ]
+                    }
+                }
+            }
+        }))
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            from bookmarks.services.website_loader import load_website_metadata
+
+            metadata = load_website_metadata("https://example.com/page")
+            self.assertEqual(metadata.title, "Modified")
+
+    def test_js_after_hook_returns_result(self):
+        """JS after hook returns the modified result dict."""
+        self._write("adapters/defaults/scripts/replace_test.py", """
+def replace(url, config):
+    return {"title": "Original", "description": None, "image": None, "url": url}
+""")
+        self._write("adapters/defaults/scripts/after.js", """
+const fs = require('fs');
+const input = JSON.parse(fs.readFileSync('/dev/stdin', 'utf8'));
+const result = input.result;
+result.title = result.title + ' - Modified';
+console.log(JSON.stringify(result));
+""")
+        self._write("adapters/config.jsonc", json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults",
+                          "source": "./defaults/adapters.jsonc"}]
+        }))
+        self._write("adapters/defaults/adapters.jsonc", json.dumps({
+            "domains": {
+                "example.com": {
+                    "metadata": {
+                        "scripts": [
+                            {"path": "replace_test.py", "hook": "replace"},
+                            {"path": "after.js", "hook": "after"},
+                        ]
+                    }
+                }
+            }
+        }))
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            from bookmarks.services.website_loader import load_website_metadata
+
+            metadata = load_website_metadata("https://example.com/page")
+            self.assertEqual(metadata.title, "Original - Modified")
 
     def test_replace_hook_produces_metadata(self):
         """replace hook result is used as WebsiteMetadata."""
@@ -357,7 +437,7 @@ def before(url, config):
 
         with override_settings(
             LD_SITE_ADAPTERS_DIR=self.base_dir,
-            LD_SINGLEFILE_PATH="/bin/true",
+            LD_SINGLEFILE_PATH=shutil.which("true") or "/usr/bin/true",
             LD_SINGLEFILE_OPTIONS="",
             LD_SINGLEFILE_TIMEOUT_SEC=5,
         ):
@@ -369,10 +449,16 @@ def before(url, config):
                 import tempfile
                 with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False) as tmp:
                     output_path = tmp.name
-                result = _run_snapshot_with_hooks(
-                    "https://example.com/page", output_path, config,
-                    config["scripts"]
-                )
+                with mock.patch(
+                    "bookmarks.services.snapshot_processor._create_snapshot"
+                ) as mock_create:
+                    _run_snapshot_with_hooks(
+                        "https://example.com/page", output_path, config,
+                        config["scripts"]
+                    )
+                self.assertTrue(mock_create.called)
+                passed_config = mock_create.call_args.args[2]
+                self.assertTrue(passed_config.get("_before_html_path"))
                 # Cleanup
                 if os.path.exists(output_path):
                     os.unlink(output_path)
@@ -468,6 +554,137 @@ def after(output_path, config):
                     content = f.read()
                 self.assertIn("Modified by After", content)
                 os.unlink(output_path)
+
+    def test_js_singlefile_hooks_are_passed_to_singlefile(self):
+        before_js = self._write(
+            "adapters/defaults/scripts/before.js",
+            'const builtin_engine = "singlefile";\n'
+            "async function before(url, config) {\n"
+            "  document.title = 'modified';\n"
+            "}\n",
+        )
+        after_js = self._write(
+            "adapters/defaults/scripts/after.js",
+            'const builtin_engine = "singlefile";\n'
+            "async function after(url, config) {\n"
+            "  document.body.dataset.ready = '1';\n"
+            "}\n",
+        )
+        self._write("adapters/config.jsonc", json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults",
+                          "source": "./defaults/adapters.jsonc"}]
+        }))
+        self._write("adapters/defaults/adapters.jsonc", json.dumps({
+            "domains": {
+                "example.com": {
+                    "snapshot": {
+                        "scripts": [
+                            {"path": before_js, "hook": "before"},
+                            {"path": after_js, "hook": "after"},
+                        ]
+                    }
+                }
+            }
+        }))
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            from site_adapters.services.config.resolver import get_snapshot_config
+            from bookmarks.services.snapshot_processor import _run_snapshot_with_hooks
+
+            config = get_snapshot_config("https://example.com/page")
+            output_path = os.path.join(self.base_dir, "out.html")
+            with mock.patch(
+                "bookmarks.services.snapshot_processor.run_script"
+            ) as mock_run:
+                with mock.patch(
+                    "bookmarks.services.snapshot_processor._create_snapshot"
+                ) as mock_create:
+                    _run_snapshot_with_hooks(
+                        "https://example.com/page", output_path, config,
+                        config["scripts"]
+                    )
+
+            mock_run.assert_not_called()
+            passed_config = mock_create.call_args.args[2]
+            self.assertIn(before_js, passed_config["_browser_before_scripts"])
+            self.assertIn(after_js, passed_config["_browser_after_scripts"])
+
+    def test_js_external_node_before_stays_external(self):
+        external_js = self._write(
+            "adapters/defaults/scripts/external.js",
+            "const builtin_engine = '';\n"
+            "async function before(url, config) { return null; }\n",
+        )
+        self._write("adapters/config.jsonc", json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults",
+                          "source": "./defaults/adapters.jsonc"}]
+        }))
+        self._write("adapters/defaults/adapters.jsonc", json.dumps({
+            "domains": {
+                "example.com": {
+                    "snapshot": {
+                        "scripts": [
+                            {"path": external_js, "hook": "before"}
+                        ]
+                    }
+                }
+            }
+        }))
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            from site_adapters.services.config.resolver import get_snapshot_config
+            from bookmarks.services.snapshot_processor import _run_snapshot_with_hooks
+
+            config = get_snapshot_config("https://example.com/page")
+            output_path = os.path.join(self.base_dir, "out.html")
+            with mock.patch(
+                "bookmarks.services.snapshot_processor.run_script",
+                return_value=None,
+            ) as mock_run:
+                with mock.patch(
+                    "bookmarks.services.snapshot_processor._create_snapshot"
+                ) as mock_create:
+                    _run_snapshot_with_hooks(
+                        "https://example.com/page", output_path, config,
+                        config["scripts"]
+                    )
+
+            mock_run.assert_called_once()
+            self.assertEqual(mock_run.call_args.kwargs["hook_name"], "before")
+            passed_config = mock_create.call_args.args[2]
+            self.assertNotIn("_browser_before_scripts", passed_config)
+
+    def test_invalid_builtin_engine_raises(self):
+        invalid_js = self._write(
+            "adapters/defaults/scripts/invalid.js",
+            'const builtin_engine = "monolith";\n',
+        )
+        self._write("adapters/config.jsonc", json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults",
+                          "source": "./defaults/adapters.jsonc"}]
+        }))
+        self._write("adapters/defaults/adapters.jsonc", json.dumps({
+            "domains": {
+                "example.com": {
+                    "snapshot": {
+                        "scripts": [
+                            {"path": invalid_js, "hook": "before"}
+                        ]
+                    }
+                }
+            }
+        }))
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            from site_adapters.services.config.resolver import get_snapshot_config
+            from bookmarks.services.snapshot_processor import _run_snapshot_with_hooks
+
+            config = get_snapshot_config("https://example.com/page")
+            with self.assertRaises(singlefile.SingleFileError):
+                _run_snapshot_with_hooks(
+                    "https://example.com/page", os.path.join(self.base_dir, "out.html"),
+                    config, config["scripts"]
+                )
 
 
 class ScriptRunnerHookDispatchTestCase(TestCase):
@@ -577,11 +794,11 @@ class ScriptsExecutionOrderTestCase(TestCase):
         """Multiple before hooks execute in array order, config accumulates."""
         self._write("adapters/defaults/scripts/b1.py", """
 def before(url, config):
-    config['step1'] = 'done'
+    return {'step1': 'done'}
 """)
         self._write("adapters/defaults/scripts/b2.py", """
 def before(url, config):
-    config['step2'] = config.get('step1', 'missed') + '->done2'
+    return {'step2': config.get('step1', 'missed') + '->done2'}
 """)
         self._write("adapters/defaults/scripts/replace.py", """
 def replace(url, config):

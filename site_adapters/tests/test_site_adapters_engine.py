@@ -172,3 +172,35 @@ class ApplyTogglesTestCase(TestCase):
         remove, keep = _apply_toggles(section, {"_domain_key": "example.com"}, "user")
         self.assertEqual(remove, [".ad"])
         self.assertEqual(keep, [".article"])
+
+    def test_apply_toggles_applies_default_false_without_username(self):
+        from site_adapters.services.config.resolver import _apply_toggles
+        section = {
+            "toggles": {
+                "comments": {
+                    "selector": "span#content",
+                    "default": False,
+                }
+            }
+        }
+        remove, keep = _apply_toggles(
+            section, {"_domain_key": "example.com"}, ""
+        )
+        self.assertIn("span#content", remove)
+        self.assertNotIn("span#content", keep)
+
+    def test_apply_toggles_applies_default_true_without_username(self):
+        from site_adapters.services.config.resolver import _apply_toggles
+        section = {
+            "toggles": {
+                "comments": {
+                    "selector": "span#content",
+                    "default": True,
+                }
+            }
+        }
+        remove, keep = _apply_toggles(
+            section, {"_domain_key": "example.com"}, ""
+        )
+        self.assertNotIn("span#content", remove)
+        self.assertIn("span#content", keep)

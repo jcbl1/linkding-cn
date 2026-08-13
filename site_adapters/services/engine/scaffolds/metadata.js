@@ -10,9 +10,9 @@
  *   output_path: string | null            — file output path (for snapshot hooks)
  *
  * Output (stdout JSON):
- *   For before hooks: null (continue) or string (snapshot HTML)
+ *   For before hooks: null (continue) or partial config dict
  *   For replace hooks: { title, description, image, url }
- *   For after hooks: null (modify result in place via the returned object)
+ *   For after hooks: null or modified result dict
  *
  * Define functions: before(url, config), replace(url, config), after(result, url, config)
  * Only define the hooks you actually use.
@@ -32,10 +32,10 @@ if (html_path && fs.existsSync(html_path)) {
 function before(url, config) {
   /*
    * Executes before the main metadata pipeline.
-   * Modify config in-place to affect downstream stages.
+   * Return a partial config dict to affect downstream stages, or null.
    *
    * Example - set a custom request URL:
-   *   config.request_url = 'https://api.example.com/v2/articles';
+   *   return { request_url: 'https://api.example.com/v2/articles' };
    */
   return null;
 }
@@ -55,12 +55,13 @@ function replace(url, config) {
 
 function after(result, url, config) {
   /*
-   * Executes after metadata extraction. Modify result in-place.
+   * Executes after metadata extraction. Return the modified result dict.
    *
    * Example - strip site name:
    *   result.title = result.title.replace(' - Example', '');
+   *   return result;
    */
-  return null;
+  return result;
 }
 
 // --- Dispatch ---
@@ -75,7 +76,7 @@ function after(result, url, config) {
         output = await replace(url, config);
         break;
       case 'after':
-        after(result, url, config);
+        output = after(result, url, config);
         break;
       default:
         throw new Error('Unknown hook: ' + hook);

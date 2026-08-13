@@ -1,84 +1,95 @@
 /**
- * Snapshot hook scripts for site-adapters.
+ * Snapshot SingleFile browser hook (site-adapters).
  *
- * Input (stdin JSON):
- *   hook: "before" | "after" | "replace"  — which hook function to call
- *   url: string                           — URL being processed
- *   config: object                        — merged config (user-facing keys)
- *   html_path: string | null              — path to saved HTML
- *   output_path: string | null            — file path for snapshot output
+ * This template runs inside the SingleFile browser context. It is the default
+ * template for snapshot JavaScript before/after hooks.
  *
- * Output (stdout JSON):
- *   For before hooks: null (fetch URL normally) or string (HTML to feed SingleFile)
- *   For replace hooks: null (result written to output_path)
- *   For after hooks: null (modify output_path in-place)
+ * ---------------------------------------------------------------------------
+ * Built-in engine declaration
+ * ---------------------------------------------------------------------------
  *
- * Define functions: before(url, config), replace(url, config, output_path),
- *                     after(output_path, config)
+ * const builtin_engine = "singlefile";
+ *
+ * Allowed values:
+ *   "singlefile" - run inside SingleFile (this template)
+ *   "" or null  - external Node mode (use snapshot_node.js)
+ *   any other value is an error.
+ *
+ * This variable is only used by snapshot JavaScript scripts. Python snapshot
+ * scripts are always external and do not declare it.
+ *
+ * ---------------------------------------------------------------------------
+ * Runtime behavior
+ * ---------------------------------------------------------------------------
+ *
+ * The framework wraps this file, dispatches
+ * `single-file-user-script-init`, and registers the SingleFile capture events.
+ * You only define `before` and `after`.
+ *
+ *   before(url, config) runs when `single-file-on-before-capture-request`
+ *   fires, before SingleFile captures the page.
+ *
+ *   after(url, config) runs when `single-file-on-after-capture-request`
+ *   fires, after SingleFile processes the DOM and before serialization.
+ *
+ * Both functions may be async. The framework always calls `preventDefault()`
+ * and waits for the matching `-response` event, so sync and async code both
+ * work.
+ *
+ * This template runs in the page, so `document`, `window`, `fetch`, and DOM
+ * APIs are available. Node APIs such as `require`, `fs`, and `process` are
+ * NOT available here. For external Node hooks that need those APIs, use the
+ * `snapshot_node.js` scaffold.
+ *
+ * ---------------------------------------------------------------------------
+ * Config keys available in every hook
+ * ---------------------------------------------------------------------------
+ *
+ * The framework injects the sanitized config and URL. Common keys:
+ *
+ *   headers            object         HTTP request headers
+ *   timeout            number|null    Timeout in seconds
+ *   proxy              string|null    HTTP proxy URL
+ *   request_url        string|null    Resolved request URL
+ *   user_cookie        string|null    Best available cookie string
+ *   keep_elements      string[]       CSS selectors to keep
+ *   remove_elements    string[]       CSS selectors to remove
+ *   process_lazy_images boolean|string[]
+ *   remove_classes     object         CSS classes to remove
+ *   set_styles         object         Inline styles to set
+ *   singlefile_args    object         SingleFile CLI args
+ *   toggles            object         User-toggleable controls
  */
 
-const fs = require('fs');
-const input = JSON.parse(fs.readFileSync('/dev/stdin', 'utf8'));
-const { hook, url, config, output_path } = input;
+const builtin_engine = "singlefile";
 
-// --- Hook functions (define only what you need) ---
-
-function before(url, config) {
-  /*
-   * Executes before SingleFile. Return HTML string to feed it to SingleFile
-   * instead of re-fetching the URL; return null to let SingleFile fetch normally.
-   */
-  return null;
-}
-
-async function replace(url, config, output_path) {
-  /*
-   * Completely replaces the SingleFile engine.
-   * Write a complete HTML file to output_path.
+async function before(url, config) {
+  /**
+   * Runs before SingleFile captures the page.
+   * Modify the live DOM; changes are included in the snapshot.
    *
-   * Example with Puppeteer:
-   *   const puppeteer = require('puppeteer');
-   *   const browser = await puppeteer.launch();
-   *   const page = await browser.newPage();
-   *   await page.goto(url, { waitUntil: 'networkidle0' });
-   *   const html = await page.content();
-   *   fs.writeFileSync(output_path, html);
-   *   await browser.close();
+   * Example - expand collapsed content:
+   *   document.querySelectorAll('.RichContent.is-collapsed').forEach((el) => {
+   *     el.classList.remove('is-collapsed');
+   *   });
+   *
+   * Example - lazy-load images from custom attributes:
+   *   document.querySelectorAll('img[data-src]').forEach((img) => {
+   *     if (!img.getAttribute('src')) {
+   *       img.setAttribute('src', img.getAttribute('data-src'));
+   *     }
+   *   });
    */
 }
 
-function after(output_path, config) {
-  /*
-   * Executes after the snapshot HTML is written. Modify the file in-place.
+async function after(url, config) {
+  /**
+   * Runs after SingleFile processes the DOM, before serialization.
+   * Use it for DOM-level final adjustments.
    *
    * Example - inject dark mode:
-   *   let html = fs.readFileSync(output_path, 'utf8');
-   *   html = html.replace('</head>', '<style>body{background:#111}</style></head>');
-   *   fs.writeFileSync(output_path, html);
+   *   const style = document.createElement('style');
+   *   style.textContent = 'body { background: #111; color: #eee; }';
+   *   document.head.appendChild(style);
    */
 }
-
-// --- Dispatch ---
-(async () => {
-  try {
-    switch (hook) {
-      case 'before':
-        const html = before(url, config);
-        console.log(JSON.stringify(html));
-        break;
-      case 'replace':
-        await replace(url, config, output_path);
-        console.log('null');
-        break;
-      case 'after':
-        after(output_path, config);
-        console.log('null');
-        break;
-      default:
-        throw new Error('Unknown hook: ' + hook);
-    }
-  } catch (e) {
-    fs.writeSync(process.stderr.fd, 'Script error: ' + e.message + '\n');
-    console.log('null');
-  }
-})();

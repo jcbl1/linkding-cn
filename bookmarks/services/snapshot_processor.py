@@ -33,18 +33,38 @@ def _run_snapshot(url: str, filepath: str, config: dict | None):
 def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: list):
     """Execute snapshot pipeline with hook scripts.
 
-    Order: before hooks → [replace or SingleFile] → after hooks
+    Order: external before hooks → [replace or SingleFile with browser hooks]
+           → external after hooks
     """
     import tempfile
     before_html_path = None
+    external_before = []
+    external_after = []
+    replace_scripts = []
+    browser_before = []
+    browser_after = []
 
-    # 1. Run before hooks
     for entry in scripts:
-        if entry.get('hook') != 'before':
-            continue
         script_path = entry.get('path', '')
         if not script_path or not os.path.exists(script_path):
             continue
+        hook = entry.get('hook')
+        if hook == 'replace':
+            replace_scripts.append(script_path)
+        elif hook == 'before':
+            if script_path.endswith('.js') and singlefile.uses_builtin_engine(script_path, 'before'):
+                browser_before.append(script_path)
+            else:
+                external_before.append(entry)
+        elif hook == 'after':
+            if script_path.endswith('.js') and singlefile.uses_builtin_engine(script_path, 'after'):
+                browser_after.append(script_path)
+            else:
+                external_after.append(entry)
+
+    # 1. Run external before hooks
+    for entry in external_before:
+        script_path = entry.get('path', '')
         logger.debug("Running snapshot before hook: %s", script_path)
         result = run_script(script_path, hook_name='before', url=url, config=dict(config))
         if isinstance(result, str):
@@ -55,36 +75,32 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
             logger.debug("Before hook returned HTML, saved to: %s", before_html_path)
 
     # 2. Run replace hook or built-in engine
-    has_replace = any(e.get('hook') == 'replace' for e in scripts)
-    snapshot_url = before_html_path if before_html_path else url
-
-    if has_replace:
-        for entry in scripts:
-            if entry.get('hook') != 'replace':
-                continue
-            script_path = entry.get('path', '')
-            if not script_path or not os.path.exists(script_path):
-                continue
+    if replace_scripts:
+        if browser_before or browser_after:
+            logger.warning(
+                "Snapshot SingleFile browser hooks are ignored when a replace hook is present"
+            )
+        for script_path in replace_scripts:
             logger.debug("Running snapshot replace hook: %s", script_path)
             run_script(script_path, hook_name='replace', url=url,
                        config=dict(config), output_path=filepath)
             break  # Only one replace allowed
     else:
         # Built-in engine: SingleFile
+        config_copy = dict(config)
+        if browser_before:
+            config_copy['_browser_before_scripts'] = browser_before
+        if browser_after:
+            config_copy['_browser_after_scripts'] = browser_after
         if before_html_path:
-            config_copy = dict(config)
             config_copy['_before_html_path'] = before_html_path
             _create_snapshot(url, filepath, config_copy)
         else:
-            _create_snapshot(url, filepath, config)
+            _create_snapshot(url, filepath, config_copy)
 
-    # 3. Run after hooks
-    for entry in scripts:
-        if entry.get('hook') != 'after':
-            continue
+    # 3. Run external after hooks
+    for entry in external_after:
         script_path = entry.get('path', '')
-        if not script_path or not os.path.exists(script_path):
-            continue
         logger.debug("Running snapshot after hook: %s", script_path)
         run_script(script_path, hook_name='after', output_path=filepath,
                    config=dict(config))
