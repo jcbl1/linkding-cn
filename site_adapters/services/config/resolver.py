@@ -102,10 +102,12 @@ def _apply_toggles(section_data: dict, full_config: dict, username: str) -> tupl
     remove_elements = list(section_data.get('remove_elements') or [])
     keep_elements = list(section_data.get('keep_elements') or [])
     toggles = section_data.get('toggles', {})
+    user_prefs = {}
     if toggles and username:
-        from site_adapters.services.auth.credentials import get_user_domain_preferences
         domain_key = full_config.get('_domain_key', '')
+        from site_adapters.services.auth.credentials import get_user_domain_preferences
         user_prefs = get_user_domain_preferences(username, domain_key)
+    if toggles:
         for toggle_id, toggle_def in toggles.items():
             if not isinstance(toggle_def, dict):
                 continue
