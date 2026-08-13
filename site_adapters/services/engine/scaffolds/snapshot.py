@@ -16,7 +16,6 @@ Config keys available in every hook
     timeout            int|None       Timeout in seconds
     proxy              str|None       HTTP proxy URL
     request_url        str|None       Resolved request URL
-    rewrite_url        str|None       Resolved rewrite URL
     auth               dict           Merged auth config
     cookie             dict           Cookie configuration
     user_cookie        str|None       Best available cookie string
