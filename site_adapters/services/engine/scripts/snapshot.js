@@ -1,7 +1,5 @@
 /**
- * 快照渲染脚本（构建期确定引擎：CloakBrowser 或 Playwright-core）
- *
- * 引擎由环境变量 LD_BROWSER_ENGINE 决定，不再运行时探测。
+ * 快照渲染脚本（引擎由 LD_BROWSER_ENGINE 在运行时选择：CloakBrowser 或 Playwright-core）
  *
  * 输入（stdin JSON）：
  *   {
@@ -11,9 +9,10 @@
  *   }
  *
  * 清理逻辑：
- *   有 script → 完全接管
- *   没有但有 remove → 内置默认清理
- *   removeHidden → 通过 CSS 隐藏标记
+ *   先执行声明式 remove（可命中 open shadow roots）
+ *   removeHidden 移除计算样式为隐藏的元素
+ *   自定义 script 随后执行
+ *   之后本地化图片并注入 <base>
  */
 
 const { readFileSync, writeFileSync, existsSync } = require("fs");
@@ -44,7 +43,7 @@ function findChromium() {
 }
 
 /**
- * 根据 LD_BROWSER_ENGINE 启动浏览器（构建期已确定，不再 try-catch 回退）
+ * 根据 LD_BROWSER_ENGINE 启动浏览器（运行时选择，不再 try-catch 回退）
  */
 async function getLauncher() {
   const engine = process.env.LD_BROWSER_ENGINE || "cloakbrowser";
@@ -107,14 +106,28 @@ async function getLauncher() {
     // 1. 声明式移除
     if (remove.length > 0) {
       await page.evaluate(selectors => {
+        const queryAll = (root, selector) => {
+          const matches = Array.from(root.querySelectorAll(selector));
+          root.querySelectorAll("*").forEach(el => {
+            if (el.shadowRoot) matches.push(...queryAll(el.shadowRoot, selector));
+          });
+          return matches;
+        };
         for (const sel of selectors) {
-          document.querySelectorAll(sel).forEach(el => el.remove());
+          queryAll(document, sel).forEach(el => el.remove());
         }
       }, remove);
     }
     if (removeHidden) {
       await page.evaluate(() => {
-        document.querySelectorAll("*").forEach(el => {
+        const queryAll = (root, selector) => {
+          const matches = Array.from(root.querySelectorAll(selector));
+          root.querySelectorAll("*").forEach(el => {
+            if (el.shadowRoot) matches.push(...queryAll(el.shadowRoot, selector));
+          });
+          return matches;
+        };
+        queryAll(document, "*").forEach(el => {
           const style = window.getComputedStyle(el);
           if (style.display === "none" || style.visibility === "hidden") el.remove();
         });
@@ -130,7 +143,14 @@ async function getLauncher() {
 
     // 图片本地化
     await page.evaluate(async () => {
-      const imgs = Array.from(document.querySelectorAll("img[src]"));
+      const queryAll = (root, selector) => {
+        const matches = Array.from(root.querySelectorAll(selector));
+        root.querySelectorAll("*").forEach(el => {
+          if (el.shadowRoot) matches.push(...queryAll(el.shadowRoot, selector));
+        });
+        return matches;
+      };
+      const imgs = Array.from(queryAll(document, "img[src]"));
       for (const img of imgs) {
         const src = img.src;
         if (!src || src.startsWith("data:")) continue;

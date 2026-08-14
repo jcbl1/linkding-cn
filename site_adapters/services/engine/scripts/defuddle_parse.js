@@ -60,11 +60,6 @@ function resolveContentSelector(sel, htmlStr) {
   return sel[0]; // fallback
 }
 
-if (options.contentSelector && Array.isArray(options.contentSelector)) {
-  // html may already be loaded; if so resolve now, otherwise defer
-  // (for htmlPath case, we can resolve immediately after reading)
-}
-
 const defuddleOpts = {
   ...options,
   url: url,

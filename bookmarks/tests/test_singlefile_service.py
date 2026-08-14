@@ -227,6 +227,7 @@ class SingleFileServiceTestCase(TestCase):
         self.assertIn('"keep": [".article"]', script)
         self.assertIn("shadowRoot", script)
         self.assertIn("queryAll", script)
+        self.assertIn("protectedNodes", script)
 
     def _write_js(self, content):
         fd, path = tempfile.mkstemp(suffix=".js")
