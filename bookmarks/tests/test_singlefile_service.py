@@ -225,6 +225,8 @@ class SingleFileServiceTestCase(TestCase):
         self.assertIn("window.__linkding_cleanup_config", script)
         self.assertIn("single-file-on-before-capture-request", script)
         self.assertIn('"keep": [".article"]', script)
+        self.assertIn("shadowRoot", script)
+        self.assertIn("queryAll", script)
 
     def _write_js(self, content):
         fd, path = tempfile.mkstemp(suffix=".js")

@@ -7,6 +7,7 @@ import requests
 from django.test import TestCase
 
 from bookmarks.services import website_loader
+from site_adapters.services.execution_log import collect_executions
 
 
 class MockStreamingResponse:
@@ -585,6 +586,40 @@ class WebsiteLoaderTestCase(TestCase):
         self.assertEqual(sources["description"]["selector"], ".desc")
         self.assertIs(returned_config, config)
 
+    def test_load_website_metadata_for_test_uses_script_hooks(self):
+        script_path = os.path.join(tempfile.gettempdir(), "reddit_metadata.py")
+        config = {
+            "scripts": [{"path": script_path, "hook": "replace"}],
+            "headers": {},
+        }
+        metadata = website_loader.WebsiteMetadata(
+            "https://example.com/post", "Example title", None, None
+        )
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch(
+                "bookmarks.services.website_loader._load_with_hooks",
+                return_value=metadata,
+            ) as mock_load_with_hooks,
+        ):
+            result, sources, returned_config = website_loader.load_website_metadata_for_test(
+                "https://example.com/post"
+            )
+
+        self.assertIs(result, metadata)
+        self.assertEqual(sources["scripts"], [script_path])
+        self.assertIs(returned_config, config)
+        mock_load_with_hooks.assert_called_once_with(
+            "https://example.com/post",
+            config,
+            config["scripts"],
+            username="",
+        )
+
 
 class ContentTypeDetectionTestCase(TestCase):
     def test_detect_content_type_returns_content_type_from_head_request(self):
@@ -872,3 +907,50 @@ class MetadataRetryTestCase(TestCase):
             metadata = website_loader.load_website_metadata("https://example.com")
         self.assertIsNone(metadata.title)
         mock_sleep.assert_not_called()
+
+    def test_load_page_records_command_on_http_error(self):
+        fail_response = MockStreamingResponse(num_chunks=1, chunk_size=10, status_code=403)
+
+        with (
+            mock.patch("requests.get", return_value=fail_response),
+            mock.patch("bookmarks.services.website_loader._wait_for_domain"),
+            collect_executions() as entries,
+        ):
+            with self.assertRaises(website_loader.NonRetryableMetadataError):
+                website_loader.load_page("https://example.com")
+
+        self.assertTrue(
+            any(
+                e.get("step") == "metadata" and e.get("cmd")
+                for e in entries
+            )
+        )
+
+    def test_load_website_metadata_for_test_returns_http_error(self):
+        config = {
+            "select_title": [".title"],
+            "headers": {},
+            "_request_url": "https://example.com/post",
+            "load_full_page": True,
+        }
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch.object(
+                website_loader,
+                "load_page",
+                side_effect=website_loader.NonRetryableMetadataError(
+                    "Non-retryable metadata response: 403", 403
+                ),
+            ),
+        ):
+            metadata, sources, returned_config = website_loader.load_website_metadata_for_test(
+                "https://example.com/post"
+            )
+
+        self.assertIsNone(metadata.title)
+        self.assertEqual(sources["error"], "Non-retryable metadata response: 403")
+        self.assertIs(returned_config, config)

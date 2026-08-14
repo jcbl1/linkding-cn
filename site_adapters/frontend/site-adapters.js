@@ -987,13 +987,14 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
   }
 
   function renderTestResult(r, elapsed, testType) {
-    var isError = !!r.error;
-    testStatus.innerHTML = renderStatusBar(testType || r.type, isError, elapsed);
+    var isFatalError = !!r.error;
+    var isFailed = isFatalError || !!r.failed;
+    testStatus.innerHTML = renderStatusBar(testType || r.type, isFailed, elapsed, '');
     testStatus.style.color = '';
 
     document.getElementById('test-raw').textContent = JSON.stringify(r, null, 2);
 
-    if (isError) {
+    if (isFatalError) {
       testOutput.innerHTML = '<div class="wa-result-section"><div class="wa-result-error">' + esc(r.error) + '</div></div>';
       return;
     }
@@ -1133,21 +1134,27 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     h += renderSummaryRows(metaUrlRows);
     h += renderMatchedConfig(r);
     h += renderCredentialSources(r.credential_sources);
-    h += renderCommandInfo(filterExecutions(r.executions, ['metadata', 'metadata_script']));
+    h += renderCommandInfo(filterExecutions(r.executions, ['metadata', 'metadata_script', 'before_hook', 'replace_hook', 'after_hook']));
     h += '</div>';
     if (r.result) {
       var fields = r.result;
-      if (fields && Object.keys(fields).length) {
-        h += '<div class="wa-result-block">';
-        h += '<h3 class="wa-result-heading">' + gettext('Result') + '</h3>';
-        var orderedKeys = ['title', 'description', 'preview_image'];
-        var restKeys = Object.keys(fields).filter(function (k) { return orderedKeys.indexOf(k) < 0 && k !== 'url'; });
-        var allKeys = orderedKeys.concat(restKeys);
-        var orderedFields = {};
-        allKeys.forEach(function (k) { if (k in fields) orderedFields[k] = fields[k]; });
-        h += renderResultRows(orderedFields);
-        h += '</div>';
+      h += '<div class="wa-result-block">';
+      h += '<h3 class="wa-result-heading">' + gettext('Result') + '</h3>';
+      if (r.metadata_error) {
+        h += '<div class="wa-result-error">' + esc(r.metadata_error) + '</div>';
       }
+      var orderedKeys = ['title', 'description', 'preview_image'];
+      var restKeys = fields ? Object.keys(fields).filter(function (k) { return orderedKeys.indexOf(k) < 0 && k !== 'url'; }) : [];
+      var allKeys = orderedKeys.concat(restKeys);
+      var orderedFields = {};
+      allKeys.forEach(function (k) { if (fields && k in fields) orderedFields[k] = fields[k]; });
+      var fieldRows = renderResultRows(orderedFields);
+      if (fieldRows) {
+        h += fieldRows;
+      } else if (!r.metadata_error) {
+        h += '<div class="wa-result-empty">' + gettext('No metadata extracted') + '</div>';
+      }
+      h += '</div>';
     }
     if (r.config && Object.keys(r.config).length) {
       h += renderCollapsible(gettext('Merged Config'), renderConfigJSON(r.merged_config), false);
@@ -1349,15 +1356,23 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       h += renderSummaryRows(pipeMetaUrlRows);
       h += renderMatchedConfig(m);
       h += renderCredentialSources(m.credential_sources);
+      if (m.metadata_error) {
+        h += '<div class="wa-result-error">' + esc(m.metadata_error) + '</div>';
+      }
       if (m.result) {
         var orderedKeys = ['title', 'description', 'preview_image'];
         var restKeys = Object.keys(m.result).filter(function (k) { return orderedKeys.indexOf(k) < 0 && k !== 'url'; });
         var allKeys = orderedKeys.concat(restKeys);
         var orderedFields = {};
         allKeys.forEach(function (k) { if (k in m.result) orderedFields[k] = m.result[k]; });
-        h += renderResultRows(orderedFields);
+        var fieldRows = renderResultRows(orderedFields);
+        if (fieldRows) {
+          h += fieldRows;
+        } else if (!m.metadata_error) {
+          h += '<div class="wa-result-empty">' + gettext('No metadata extracted') + '</div>';
+        }
       }
-      h += renderCommandInfo(filterExecutions(r.executions, ['metadata', 'metadata_script']));
+      h += renderCommandInfo(filterExecutions(r.executions, ['metadata', 'metadata_script', 'before_hook', 'replace_hook', 'after_hook']));
       h += '</div>';
     }
     if (r.snapshot) {

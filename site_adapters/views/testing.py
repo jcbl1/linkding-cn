@@ -324,6 +324,9 @@ def _test_metadata(url, base_dir, username, entries):
     if not config:
         no_match = True
     metadata, sources, config = load_website_metadata_for_test(url, username=username)
+    metadata_error = None
+    if isinstance(sources, dict):
+        metadata_error = sources.pop('error', None)
     match_info = _extract_match_info(config)
 
     credential_sources = _compute_credential_sources(config, username, hostname, before)
@@ -345,6 +348,9 @@ def _test_metadata(url, base_dir, username, entries):
     }
     if no_match:
         result['default_config'] = _make_default_metadata_config()
+    if metadata_error:
+        result['metadata_error'] = metadata_error
+        result['failed'] = True
     return _test_response(result, entries=entries)
 
 
@@ -595,6 +601,9 @@ def _test_pipeline(url, base_dir, username, entries):
     before_reader = _snapshot_credential_state(reader_config, username, hostname) if reader_config else {}
 
     metadata, sources, _ = load_website_metadata_for_test(url, username=username)
+    metadata_error = None
+    if isinstance(sources, dict):
+        metadata_error = sources.pop('error', None)
 
     credential_sources_meta = _compute_credential_sources(meta_config, username, hostname, before_meta)
 
@@ -636,6 +645,7 @@ def _test_pipeline(url, base_dir, username, entries):
             'request_url': meta_config.get('_request_url', url) if meta_config else url,
             'result': metadata.to_dict(),
             'sources': sources,
+            'metadata_error': metadata_error,
         },
         'snapshot': {
             'config': snap_config,
@@ -682,6 +692,9 @@ def _test_pipeline(url, base_dir, username, entries):
         result['snapshot']['default_config'] = _make_default_snapshot_config()
     if reader_no_match:
         result['reader']['default_config'] = _make_default_reader_config()
+    if metadata_error:
+        result['metadata_error'] = metadata_error
+        result['failed'] = True
     return _test_response(result, entries=entries)
 
 

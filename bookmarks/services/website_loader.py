@@ -70,11 +70,15 @@ def _record_domain_request(domain: str):
     _domain_last_request[domain] = time.monotonic()
 
 class RetryableMetadataError(Exception):
-    pass
+    def __init__(self, message="", status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class NonRetryableMetadataError(Exception):
-    pass
+    def __init__(self, message="", status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 @dataclass
@@ -371,18 +375,18 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
         except NonRetryableMetadataError as exc:
             logger.info("Metadata request failed without retry. url=%s", exc_info=exc)
             if include_sources:
-                return _empty_metadata(url), {}
+                return _empty_metadata(url), {"error": str(exc)}
             return _empty_metadata(url)
         except Exception as exc:
             logger.error("Unexpected metadata request failure. url=%s", exc_info=exc)
             if include_sources:
-                return _empty_metadata(url), {}
+                return _empty_metadata(url), {"error": str(exc)}
             return _empty_metadata(url)
 
     if last_exc is not None:
         logger.warning("All %d retries exhausted, returning empty metadata. url=%s", _METADATA_MAX_RETRIES, url)
         if include_sources:
-            return _empty_metadata(url), {}
+            return _empty_metadata(url), {"error": str(last_exc)}
         return _empty_metadata(url)
 
     try:
@@ -418,7 +422,7 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
     except Exception as exc:
         logger.error("Unexpected metadata parsing failure. url=%s", url, exc_info=exc)
         if include_sources:
-            return _empty_metadata(url), {}
+            return _empty_metadata(url), {"error": str(exc)}
         return _empty_metadata(url)
 
     if config:
@@ -578,10 +582,22 @@ def _extract_with_selector_source(soup, selectors, url: str = "", field: str = "
 
 def load_website_metadata_for_test(url: str, username: str = ''):
     config = get_metadata_config(url, username=username)
+    if config and config.get("scripts"):
+        metadata = _load_with_hooks(url, config, config["scripts"], username=username)
+        script_paths = [
+            entry.get("path")
+            for entry in config["scripts"]
+            if entry.get("path")
+        ]
+        return metadata, {"scripts": script_paths}, config
+
     if config and config.get("script"):
         script_path = config["script"]
         load_full = config.get("load_full_page", True) if config else True
-        body = load_page(config.get("_request_url", url), config, load_full_page=load_full)
+        try:
+            body = load_page(config.get("_request_url", url), config, load_full_page=load_full)
+        except (RetryableMetadataError, NonRetryableMetadataError) as exc:
+            return _empty_metadata(url), {"error": str(exc)}, config
         result = run_script(script_path, url=url, config=config, html_content=body)
         if result and isinstance(result, dict):
             metadata = WebsiteMetadata(
@@ -641,13 +657,13 @@ def load_page(url: str, config: dict = None, load_full_page: bool = False):
                 if domain:
                     _record_domain_request(domain)
                 raise RetryableMetadataError(
-                    f"Retryable metadata response: {status_code}"
+                    f"Retryable metadata response: {status_code}", status_code
                 )
             if status_code >= 400:
                 if domain:
                     _record_domain_request(domain)
                 raise NonRetryableMetadataError(
-                    f"Non-retryable metadata response: {status_code}"
+                    f"Non-retryable metadata response: {status_code}", status_code
                 )
 
             for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
@@ -670,7 +686,17 @@ def load_page(url: str, config: dict = None, load_full_page: bool = False):
                 if size > MAX_CONTENT_LIMIT:
                     logger.debug("Cancel reading document after %d bytes", size)
                     break
-    except (RetryableMetadataError, NonRetryableMetadataError):
+    except (RetryableMetadataError, NonRetryableMetadataError) as exc:
+        duration_ms = int((time.monotonic() - _page_start) * 1000)
+        log_execution(
+            url=url,
+            domain_key="",
+            step="metadata",
+            cmd=curl_cmd,
+            returncode=exc.status_code if exc.status_code is not None else 1,
+            stderr=str(exc)[:500],
+            duration_ms=duration_ms,
+        )
         raise
     except requests.exceptions.RequestException as exc:
         duration_ms = int((time.monotonic() - _page_start) * 1000)
