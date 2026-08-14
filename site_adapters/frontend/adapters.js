@@ -568,7 +568,7 @@ function initAdapters() {
           var item = document.createElement('div');
           item.className = 'wa-url-dropdown-item';
           var labels = [];
-          if (d.c || d.needs_cookie) { var cookieLabel = (d.ct === 'login') ? 'Cookie' : 'Cookie (auto)'; labels.push(cookieLabel); }
+          if (d.c || d.needs_cookie) { var cookieType = d.ct || d.cookie_type || ''; var cookieLabel = (cookieType === 'login') ? 'Cookie (login)' : 'Cookie (auto)'; labels.push(cookieLabel); }
           if ((d.h && d.h.length) || (d.needs_headers && d.needs_headers.length)) labels.push('Header');
           if (d.t || d.needs_oauth2) labels.push('Token');
           if (d.b || d.needs_basic_auth) labels.push('Basic Auth');

@@ -13,29 +13,8 @@ from site_adapters.views.helpers import (
     _get_base_dir,
     site_adapters_required,
 )
-from site_adapters.services.auth.credentials import (
-    get_auth_requirements_for_domain_key,
-    list_shared_credentials,
-)
-from site_adapters.services.config.loader import _cache
-
-
-def _get_domains_needing_auth(base_dir):
-    """Return list of {domain, needs_cookie, needs_headers, needs_token}."""
-    domains = []
-    if not base_dir or not os.path.isdir(base_dir):
-        return domains
-    all_config = _cache.load(base_dir)
-    for key in sorted(k for k in all_config if k != 'defaults' and not k.startswith('_')):
-        auth = get_auth_requirements_for_domain_key(key, base_dir=base_dir)
-        if auth['cookie'] or auth['headers'] or auth['token']:
-            domains.append({
-                'domain': key,
-                'needs_cookie': auth['cookie'],
-                'needs_headers': auth['headers'],
-                'needs_token': auth['token'],
-            })
-    return domains
+from site_adapters.views.credentials import _get_domains_needing_auth
+from site_adapters.services.auth.credentials import list_shared_credentials
 
 
 @site_adapters_required
@@ -70,7 +49,20 @@ def site_adapters_page(request):
         'cred_q': '',
         'credentials_json': json.dumps(credentials, ensure_ascii=False),
         'auth_domains_json': json.dumps([
-            {'d': d['domain'], 'c': d['needs_cookie'], 'h': d['needs_headers'], 't': d['needs_token']}
+            {
+                'd': d['domain'],
+                'c': d['needs_cookie'],
+                'h': d['needs_headers'],
+                't': d.get('needs_oauth2', d.get('needs_token', False)),
+                'b': d.get('needs_basic_auth', False),
+                'ct': d.get('cookie_type', 'auto'),
+                'help': {
+                    'c': d.get('cookie_help', ''),
+                    'h': d.get('headers_help', ''),
+                    't': d.get('oauth2_help', ''),
+                    'b': d.get('basic_help', ''),
+                },
+            }
             for d in domains_needing_auth
         ], ensure_ascii=False),
     })

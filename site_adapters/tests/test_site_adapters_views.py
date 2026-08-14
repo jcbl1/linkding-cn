@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import tempfile
 import json
@@ -82,6 +83,42 @@ class SiteAdaptersViewsTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "site-adapters.css")
 
+    def test_site_adapters_page_passes_cookie_type_to_credentials_ui(self):
+        self._write_jsonc(
+            "adapters/config.jsonc",
+            {
+                "_adapters": [
+                    {
+                        "id": "custom",
+                        "name": "custom",
+                        "source": "./custom/adapters.jsonc",
+                        "enabled": True,
+                    }
+                ]
+            },
+        )
+        self._write_jsonc(
+            "adapters/custom/adapters.jsonc",
+            {
+                "_meta": {"id": "custom", "name": "custom"},
+                "domains": {
+                    "example.com": {
+                        "auth": {"cookie": {"type": "login"}}
+                    }
+                },
+            },
+        )
+        _cache.invalidate()
+
+        response = self.client.get(reverse("linkding:settings.site_adapters"))
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode("utf-8")
+        match = re.search(r"window\.__ld_auth_domains = (\[.*?\]);", html, re.S)
+        self.assertIsNotNone(match)
+        domains = json.loads(match.group(1))
+        self.assertEqual(domains[0]["d"], "example.com")
+        self.assertEqual(domains[0]["ct"], "login")
+
 
     def test_domain_crud_rejects_unsafe_inputs_and_invalid_json(self):
         os.makedirs(os.path.join(self.base_dir, "domains"))
@@ -159,6 +196,36 @@ class SiteAdaptersViewsTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["type"], "metadata")
         self.assertEqual(response.json()["error"], "blocked")
+
+    def test_action_metadata_returns_non_retryable_error_message(self):
+        from bookmarks.services.website_loader import WebsiteMetadata
+
+        config = {"_domain_key": "example.com", "_request_url": "https://example.com/post"}
+        metadata = WebsiteMetadata("https://example.com/post", None, None, None)
+        sources = {"error": "Non-retryable metadata response: 403"}
+        with (
+            mock.patch(
+                "site_adapters.views.testing.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch(
+                "site_adapters.views.testing.show_config",
+                return_value={},
+            ),
+            mock.patch(
+                "site_adapters.views.testing.load_website_metadata_for_test",
+                return_value=(metadata, sources, config),
+            ),
+        ):
+            response = self.client.post(
+                reverse("linkding:settings.site_adapters.action"),
+                {"action": "test", "test_type": "metadata", "url": "https://example.com/post"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["metadata_error"], "Non-retryable metadata response: 403")
+        self.assertTrue(data["failed"])
 
     def test_credential_test_uses_snapshot_cookie_scripts_and_refreshes_status(self):
         cookie_config = {"type": "anon"}
