@@ -216,7 +216,10 @@ class SingleFileServiceTestCase(TestCase):
         self.assertFalse(any(arg.startswith("--browser-cookies-file=") for arg in mock_popen.call_args.args[0]))
 
     def test_generated_browser_script_reads_vendor_file(self):
-        script_path = singlefile._build_browser_script({"keep_elements": [".article"]})
+        script_path = singlefile._build_browser_script({
+            "keep_elements": [".article"],
+            "process_carousels": ["faceplate-carousel"],
+        })
         self.addCleanup(lambda: os.path.exists(script_path) and os.remove(script_path))
 
         with open(script_path, encoding="utf-8") as f:
@@ -228,6 +231,8 @@ class SingleFileServiceTestCase(TestCase):
         self.assertIn("shadowRoot", script)
         self.assertIn("queryAll", script)
         self.assertIn("protectedNodes", script)
+        self.assertIn('"carousels": ["faceplate-carousel"]', script)
+        self.assertIn("ld-carousel", script)
 
     def _write_js(self, content):
         fd, path = tempfile.mkstemp(suffix=".js")

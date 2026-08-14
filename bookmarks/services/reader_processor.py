@@ -14,6 +14,25 @@ def _extract_defuddle_options(config: dict) -> dict:
     return {k: v for k, v in args.items() if is_known_defuddle_param(k)}
 
 
+def _normalize_html_for_reader(html_content: str) -> str:
+    """Unwrap serialized shadow DOM templates for reader extraction.
+
+    The original snapshot is not modified; this function returns a temporary
+    normalized copy that Defuddle can parse as ordinary HTML.
+    """
+    if not html_content:
+        return html_content
+
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html_content, "html.parser")
+    for template in soup.find_all("template", attrs={"shadowrootmode": True}):
+        for child in list(template.contents):
+            template.insert_before(child)
+        template.decompose()
+    return str(soup)
+
+
 def parse_html(html_content: str, url: str = "", username: str = "") -> dict:
     """
     Extract content from HTML.
@@ -24,6 +43,7 @@ def parse_html(html_content: str, url: str = "", username: str = "") -> dict:
     """
     from bookmarks.services import defuddle
 
+    html_content = _normalize_html_for_reader(html_content)
     config = get_reader_config(url, username=username)
 
     if config:

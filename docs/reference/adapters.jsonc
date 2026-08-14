@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — Complete Field Reference
-//  Auto-generated from fields.py (single source of truth)  |  2026-08-13 10:30:08
+//  Auto-generated from fields.py (single source of truth)  |  2026-08-15 05:48:47
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -177,6 +177,7 @@
         "keep_elements": [],                               // CSS selectors of elements to KEEP in the snapshot. Everything else is removed.
         "remove_elements": [],                             // CSS selectors of elements to REMOVE from the snapshot.
         "process_lazy_images": true,                       // Fix lazy-loaded images. true = built-in attr list; ["data-actualsrc"] = custom attrs.
+        "process_carousels": ["faceplate-carousel"],       // CSS selectors of carousel containers to replace with a horizontal media list. Carousel conversion is opt-in.
         "remove_classes": {},                              // Remove CSS classes from elements. Format: {"selector": ["class1", "class2"]}.
         "set_styles": {},                                  // Set inline styles on elements. Format: {"selector": {"prop": "value"}}.
         "singlefile_args": {},                             // SingleFile CLI arguments, e.g. {"--browser-wait-delay": 2000}.

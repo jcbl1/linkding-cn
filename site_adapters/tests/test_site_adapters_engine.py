@@ -10,7 +10,7 @@ from site_adapters.services.config.loader import (
     load_domain_config,
 )
 from site_adapters.services.config import parse_jsonc
-from site_adapters.services.config.resolver import get_metadata_config
+from site_adapters.services.config.resolver import get_metadata_config, get_snapshot_config
 from site_adapters.services.auth.oauth2 import _resolve_json_path
 
 
@@ -148,6 +148,16 @@ class SiteAdaptersEngineTestCase(TestCase):
         self.assertEqual(config["headers"]["Accept"], "text/html")
         self.assertEqual(config["_request_url"], "https://example.com/api/post/123")
         self.assertEqual(config["_rewrite_url"], "https://example.com/article/123")
+
+    def test_snapshot_resolver_includes_process_carousels(self):
+        self.setup_adapter("example.com", {
+            "snapshot": {"process_carousels": ["faceplate-carousel"]}
+        })
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            config = get_snapshot_config("https://example.com/post")
+
+        self.assertEqual(config["process_carousels"], ["faceplate-carousel"])
 
 
 class ExecutionLogTestCase(TestCase):

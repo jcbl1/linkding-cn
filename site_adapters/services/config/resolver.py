@@ -332,6 +332,8 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
     elif section == 'snapshot':
         if 'process_lazy_images' in section_data:
             result['process_lazy_images'] = section_data['process_lazy_images']
+        if 'process_carousels' in section_data:
+            result['process_carousels'] = section_data['process_carousels']
         result['remove_classes'] = section_data.get('remove_classes')
         result['set_styles'] = section_data.get('set_styles')
         result['scripts'] = section_data.get('scripts')

@@ -6,13 +6,15 @@
  *     "keep": ["main#main-content"],
  *     "remove": ["nav", "footer", "button[aria-label='Back']"],
  *     "lazy": true | ["data-src", "data-actualsrc"],
+ *     "carousels": ["faceplate-carousel"],
  *     "removeClasses": { ".RichContent": ["is-collapsed"] },
  *     "setStyles": { ".RichContent-inner": {"maxHeight": "none"} }
  *   }
  *
- * remove/removeClasses/setStyles/lazy selectors are resolved recursively
- * inside open shadow roots. keep_elements is applied to the normal document
- * body and preserves the matched subtree, including shadow DOM inside it.
+ * remove/removeClasses/setStyles/lazy/carousels selectors are resolved
+ * recursively inside open shadow roots. keep_elements is applied to the
+ * normal document body and preserves the matched subtree, including shadow
+ * DOM inside it.
  * remove_elements only operates inside kept subtrees and never removes a
  * keep element or any of its ancestors.
  */
@@ -21,7 +23,7 @@
 
   addEventListener("single-file-on-before-capture-request", () => {
     const config = window.__linkding_cleanup_config || {};
-    const stats = { removed: 0, kept: 0 };
+    const stats = { removed: 0, kept: 0, carousels: 0, media: 0 };
 
     const shadowHosts = new Map();
     const queryAll = (root, selector) => {
@@ -76,16 +78,86 @@
       }
     });
 
-    // Fix lazy-loaded images
-    if (config.lazy) {
-      const attrs = Array.isArray(config.lazy) ? config.lazy : ["data-src", "data-actualsrc", "data-original", "data-lazy-src", "data-original-src", "data-actual-image", "data-lazy", "data-defer-src"];
-      queryAll(document, "img").forEach((img) => {
-        for (const attr of attrs) {
-          const value = img.getAttribute(attr);
-          if (value && !img.getAttribute('src')) { img.setAttribute('src', value); break; }
+    const collectMedia = (root) => {
+      const items = [];
+      const walk = (node) => {
+        if (node.shadowRoot) walk(node.shadowRoot);
+        node.querySelectorAll("img, video, iframe").forEach((el) => items.push(el));
+        node.querySelectorAll("*").forEach((el) => {
+          if (el.shadowRoot) walk(el.shadowRoot);
+        });
+      };
+      walk(root);
+      return items;
+    };
+
+    const resolveMediaUrl = (el) => {
+      if (el.tagName === "VIDEO") {
+        const source = el.querySelector("source");
+        return el.getAttribute("src") || (source && source.getAttribute("src")) || null;
+      }
+      if (el.tagName === "IFRAME") return el.getAttribute("src") || null;
+      const attrs = ["src", "data-src", "data-srcset", "data-actualsrc", "data-original", "data-lazy-src", "data-original-src", "data-actual-image", "data-lazy", "data-defer-src"];
+      for (const attr of attrs) {
+        const value = el.getAttribute(attr);
+        if (value) return value;
+      }
+      const srcset = el.getAttribute("srcset") || el.getAttribute("data-srcset");
+      if (srcset) {
+        const first = srcset.split(",")[0].trim();
+        return first.split(/\s+/)[0] || null;
+      }
+      return null;
+    };
+
+    const processCarousel = (container) => {
+      const seen = new Set();
+      const items = [];
+      collectMedia(container).forEach((el) => {
+        const url = resolveMediaUrl(el);
+        if (el.tagName === "IMG") {
+          if (!url || seen.has(url)) return;
+          seen.add(url);
+          const img = container.ownerDocument.createElement("img");
+          img.src = url;
+          img.alt = el.getAttribute("alt") || "";
+          items.push(img);
+        } else if (el.tagName === "VIDEO") {
+          if (url && seen.has(url)) return;
+          if (!url && !el.querySelector("source")) {
+            const poster = el.getAttribute("poster");
+            if (!poster || seen.has(poster)) return;
+            seen.add(poster);
+            const img = container.ownerDocument.createElement("img");
+            img.src = poster;
+            img.alt = el.getAttribute("alt") || "";
+            items.push(img);
+            return;
+          }
+          if (url) seen.add(url);
+          const video = el.cloneNode(true);
+          if (!video.hasAttribute("controls")) video.setAttribute("controls", "");
+          items.push(video);
+        } else if (el.tagName === "IFRAME") {
+          if (!url || seen.has(url)) return;
+          seen.add(url);
+          items.push(el.cloneNode(true));
         }
       });
-    }
+      if (!items.length) return 0;
+
+      const figure = container.ownerDocument.createElement("figure");
+      figure.setAttribute("aria-label", "ld-carousel");
+      figure.style.cssText = "display:flex;overflow-x:auto;gap:12px;max-width:100%;";
+      items.forEach((item) => {
+        item.style.flex = "0 0 auto";
+        item.style.maxWidth = "80%";
+        if (item.tagName !== "IFRAME") item.style.height = "auto";
+        figure.appendChild(item);
+      });
+      container.replaceWith(figure);
+      return items.length;
+    };
 
     // Remove specified selectors
     for (const selector of config.remove || []) {
@@ -121,6 +193,29 @@
           }
         });
       }
+    }
+
+    // Fix lazy-loaded images after keep/remove to limit work to retained content
+    if (config.lazy) {
+      const attrs = Array.isArray(config.lazy) ? config.lazy : ["data-src", "data-actualsrc", "data-original", "data-lazy-src", "data-original-src", "data-actual-image", "data-lazy", "data-defer-src"];
+      queryAll(document, "img").forEach((img) => {
+        for (const attr of attrs) {
+          const value = img.getAttribute(attr);
+          if (value && !img.getAttribute('src')) { img.setAttribute('src', value); break; }
+        }
+      });
+    }
+
+    // Convert configured carousels into a horizontal media list
+    for (const selector of config.carousels || []) {
+      queryAll(document, selector).forEach((container) => {
+        if (!container.isConnected) return;
+        const count = processCarousel(container);
+        if (count) {
+          stats.carousels += 1;
+          stats.media += count;
+        }
+      });
     }
 
     // Embed stats for diagnostics

@@ -98,6 +98,27 @@ html.reader-mode {
     height: auto;
   }
 
+  /* Processed carousels: compact horizontal media list */
+  figure.ld-carousel {
+    display: flex;
+    overflow-x: auto;
+    gap: 12px;
+    max-width: 100%;
+    margin: 1em 0;
+  }
+
+  figure.ld-carousel img,
+  figure.ld-carousel video {
+    flex: 0 0 auto;
+    max-width: 80%;
+    height: auto;
+  }
+
+  figure.ld-carousel iframe {
+    flex: 0 0 auto;
+    max-width: 80%;
+  }
+
   /* Wide tables: horizontal scroll wrapper */
   .table-scroll-wrapper {
     overflow-x: auto;

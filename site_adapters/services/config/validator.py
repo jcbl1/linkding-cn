@@ -334,6 +334,14 @@ def _validate_domain_config(issues: list[str], label: str, data: dict, file_dir:
             for arg in (args if isinstance(args, dict) else {}):
                 if not is_known_singlefile_arg(arg):
                     issues.append(f"WARN: {label}.snapshot.singlefile_args.{arg} unknown")
+            carousels = sec.get('process_carousels')
+            if carousels is not None:
+                if not isinstance(carousels, list) or not all(
+                    isinstance(item, str) and item.strip() for item in carousels
+                ):
+                    issues.append(
+                        f"ERROR: {label}.snapshot.process_carousels must be an array of selector strings"
+                    )
             scripts = sec.get('scripts')
             has_replace = (
                 isinstance(scripts, list)
@@ -342,7 +350,7 @@ def _validate_domain_config(issues: list[str], label: str, data: dict, file_dir:
             if has_replace:
                 declarative_fields = [
                     'keep_elements', 'remove_elements', 'remove_classes',
-                    'set_styles', 'singlefile_args',
+                    'set_styles', 'singlefile_args', 'process_carousels',
                 ]
                 present = [
                     key for key in declarative_fields

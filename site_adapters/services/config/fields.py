@@ -190,6 +190,12 @@ SNAPSHOT_FIELDS = {
         "zh": "修复懒加载图片。true 使用内置属性列表；数组指定自定义属性名。",
         "example": True,
     },
+    "process_carousels": {
+        "type": "array<str>",
+        "en": "CSS selectors of carousel containers to replace with a horizontal media list. Carousel conversion is opt-in.",
+        "zh": "需要转换为横向媒体列表的轮播容器 CSS 选择器。轮播转换默认关闭。",
+        "example": ["faceplate-carousel"],
+    },
     "remove_classes": {
         "type": "object",
         "en": 'Remove CSS classes from elements. Format: {"selector": ["class1", "class2"]}.',

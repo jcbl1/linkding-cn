@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — 完整字段参考
-//  由 fields.py 自动生成（单一信源）  |  2026-08-13 10:30:08
+//  由 fields.py 自动生成（单一信源）  |  2026-08-15 05:48:47
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -177,6 +177,7 @@
         "keep_elements": [],                               // 快照中保留的元素。其余全部移除。
         "remove_elements": [],                             // 快照中移除的元素。
         "process_lazy_images": true,                       // 修复懒加载图片。true 使用内置属性列表；数组指定自定义属性名。
+        "process_carousels": ["faceplate-carousel"],       // 需要转换为横向媒体列表的轮播容器 CSS 选择器。轮播转换默认关闭。
         "remove_classes": {},                              // 移除指定元素的 CSS class。格式: {"selector": ["class1", "class2"]}。
         "set_styles": {},                                  // 设置指定元素的内联样式。格式: {"selector": {"prop": "value"}}。
         "singlefile_args": {},                             // SingleFile CLI 参数，如 {"--browser-wait-delay": 2000}。

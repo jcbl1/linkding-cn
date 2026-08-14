@@ -436,6 +436,12 @@ function postProcess(articleContent) {
     table.parentNode.insertBefore(wrapper, table);
     wrapper.appendChild(table);
   });
+  articleContent.querySelectorAll('figure[aria-label="ld-carousel"]').forEach((figure) => {
+    figure.classList.add("ld-carousel");
+    figure.querySelectorAll("img, video, iframe").forEach((media) => {
+      media.classList.add("ld-carousel-item");
+    });
+  });
 }
 
 function setupScrollProgress(contentEl, toolbar) {

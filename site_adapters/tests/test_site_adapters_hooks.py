@@ -188,6 +188,28 @@ class ScriptsValidationTestCase(TestCase):
         self.assertGreater(len(errors), 0,
                           f"Expected 'not found' error, got: {issues}")
 
+    def test_validate_rejects_invalid_process_carousels(self):
+        config_data = json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults",
+                          "source": "./defaults/adapters.jsonc"}]
+        })
+        self._write("adapters/config.jsonc", config_data)
+        self._write(
+            "adapters/defaults/adapters.jsonc",
+            json.dumps({
+                "domains": {
+                    "example.com": {
+                        "snapshot": {"process_carousels": "faceplate-carousel"}
+                    }
+                }
+            }),
+        )
+
+        issues = validate_config(self.base_dir)
+        errors = [i for i in issues if "process_carousels must be an array" in i]
+        self.assertGreater(len(errors), 0,
+                          f"Expected process_carousels error, got: {issues}")
+
 
 class MetadataHookDispatchTestCase(TestCase):
     """Test that hook functions are called correctly in metadata pipeline."""

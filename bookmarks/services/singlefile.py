@@ -189,6 +189,7 @@ def _build_browser_script(config: dict, url: str = '') -> str | None:
         cleanup = {
             "keep": _as_list(config.get("keep_elements")),
             "remove": _as_list(config.get("remove_elements")),
+            "carousels": _as_list(config.get("process_carousels")),
             "lazy": lazy_config,
             "removeClasses": config.get("remove_classes") or {},
             "setStyles": config.get("set_styles") or {},
