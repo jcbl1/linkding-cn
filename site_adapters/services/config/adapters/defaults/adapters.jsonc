@@ -44,8 +44,10 @@
     },
     "snapshot": {
       "process_lazy_images": true,
-      "timeout": 120,
-      "singlefile_args": {}
+      "singlefile_args": {
+        "--browser-arg": "--disable-blink-features=AutomationControlled",
+        "--block-fonts": true
+      }
     },
     "reader": {
       "defuddle_args": {}

@@ -341,10 +341,10 @@ LD_PREVIEW_MAX_SIZE = int(os.getenv("LD_PREVIEW_MAX_SIZE", 5242880))
 LD_PREVIEW_ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp"]
 
 # Website loader / snapshot settings
-LD_DEFAULT_USER_AGENT = os.getenv(
-    "LD_DEFAULT_USER_AGENT",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0",
-)
+
+# Recommended: configure at `_builtin_overrides.defaults.http.User-Agent`
+# in data/site-adapters/adapters/defaults/adapters.jsonc.
+LD_DEFAULT_USER_AGENT = os.getenv("LD_DEFAULT_USER_AGENT","",)
 
 
 # Asset / snapshot settings

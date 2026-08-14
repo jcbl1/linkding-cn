@@ -276,9 +276,7 @@ def create_snapshot(url: str, filepath: str, config: dict = None):
     global_options = shlex.split(settings.LD_SINGLEFILE_OPTIONS)
     ublock_options = shlex.split(settings.LD_SINGLEFILE_UBLOCK_OPTIONS)
     required_options = [
-        "--browser-arg=--disable-blink-features=AutomationControlled",
-        f"--user-agent={settings.LD_DEFAULT_USER_AGENT}",
-        "--block-fonts=true",
+        # see the field `_builtin.snapshot.single_args` in `site_adapters/services/config/adapters/defaults/adapters.jsonc`
     ]
     # 自动解析 cloakbrowser 路径（最低优先级，允许显式覆盖）
     browser_path = _resolve_browser_path()
