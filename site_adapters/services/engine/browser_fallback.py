@@ -4,7 +4,7 @@ Browser fallback — 浏览器兜底模式
 当没有域名配置匹配时，使用浏览器加载页面并提取元数据。
 默认关闭，通过 LD_BROWSER_FALLBACK_ENABLED=true 启用。
 
-引擎由 LD_BROWSER_ENGINE 决定（构建期已固化），不再运行时回退。
+引擎由 LD_BROWSER_ENGINE 在运行时选择，不再运行时回退。
 
 资源控制：
 - 按需启动浏览器实例（不常驻）

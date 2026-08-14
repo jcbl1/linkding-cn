@@ -1,8 +1,8 @@
 """
-浏览器引擎提供者 — 构建期确定唯一引擎，运行期零探测
+浏览器引擎提供者 — 运行期按 LD_BROWSER_ENGINE 选择引擎
 
-构建期由 Dockerfile 根据 LD_BROWSER_ENGINE + LD_BROWSER_CLOAKBROWSER_LICENSE_TYPE
-下载并固化二进制到镜像内。运行期只读配置启动对应引擎。
+CloakBrowser 二进制由构建期下载并固化；Chromium 模式会在运行期发现
+可执行路径。运行期根据配置启动对应引擎。
 
 Public API:
     get_browser_config()  → dict with engine, binary_path, etc.

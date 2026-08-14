@@ -1,7 +1,5 @@
 /**
- * Cookie 刷新脚本（构建期确定引擎：CloakBrowser 或 Playwright-core）
- *
- * 引擎由环境变量 LD_BROWSER_ENGINE 决定，不再运行时探测。
+ * Cookie 刷新脚本（引擎由 LD_BROWSER_ENGINE 在运行时选择：CloakBrowser 或 Playwright-core）
  *
  * 输入（stdin JSON）：
  *   { "url": "...", "cookie_file": "...", "wait_cookie": "...", "chromium_path": "", "timeout": 30000 }
@@ -68,7 +66,7 @@ function findChromium() {
 }
 
 /**
- * 根据 LD_BROWSER_ENGINE 启动浏览器（构建期已确定，不再 try-catch 回退）
+ * 根据 LD_BROWSER_ENGINE 启动浏览器（运行时选择，不再 try-catch 回退）
  */
 async function getLauncher() {
   const engine = process.env.LD_BROWSER_ENGINE || "cloakbrowser";
