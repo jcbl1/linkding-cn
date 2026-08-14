@@ -735,7 +735,7 @@ class BookmarkItem extends Behavior {
 
     tagsContainer._editing = true;
     const currentTags = Array.from(tagsContainer.querySelectorAll("a")).map(
-      (tag) => tag.textContent.replace("#", ""),
+      (tag) => tag.textContent,
     );
 
     tagsContainer.style.display = "none";
@@ -846,7 +846,7 @@ class BookmarkItem extends Behavior {
     const tagsContainer = this.element.querySelector(".tags");
     if (!tagsContainer) return [];
     return Array.from(tagsContainer.querySelectorAll("a"))
-      .map((a) => a.textContent.replace(/^#/, "").trim())
+      .map((a) => a.textContent.trim())
       .filter(Boolean);
   }
 
@@ -1012,7 +1012,7 @@ class BookmarkItem extends Behavior {
 
       const link = document.createElement("a");
       link.href = `?q=%23${encodeURIComponent(tag)}`;
-      link.textContent = `#${tag}`;
+      link.textContent = tag;
       tagsContainer.appendChild(link);
     });
     tagsContainer.style.display = "";

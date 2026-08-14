@@ -453,7 +453,7 @@ export class ReaderSidebar extends LitElement {
                 input-placeholder="${gettext('Click to edit tags')}"
               ></ld-tag-autocomplete>`
             : html`<div class="info-tags-view" @click=${() => this._clickTags()}>
-                ${bm.tag_names?.length ? html`<span class="info-tags">${bm.tag_names.map(t => html`<span class="info-tag">#${t}</span>`)}</span>` : html`<span class="info-placeholder">${gettext("Click to edit tags")}</span>`}
+                ${bm.tag_names?.length ? html`<span class="info-tags">${bm.tag_names.map(t => html`<span class="info-tag">${t}</span>`)}</span>` : html`<span class="info-placeholder">${gettext("Click to edit tags")}</span>`}
               </div>`
           }
         </div>
@@ -582,7 +582,7 @@ export class ReaderSidebar extends LitElement {
       </div>
 
       <div class="info-section">
-        ${bm.tag_names?.length ? html`<span class="info-tags">${bm.tag_names.map(t => html`<span class="info-tag">#${t}</span>`)}</span>` : html`<span class="info-placeholder">${gettext("No tags")}</span>`}
+        ${bm.tag_names?.length ? html`<span class="info-tags">${bm.tag_names.map(t => html`<span class="info-tag">${t}</span>`)}</span>` : html`<span class="info-placeholder">${gettext("No tags")}</span>`}
       </div>
 
       ${bm.description ? html`

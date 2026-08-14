@@ -1794,6 +1794,10 @@ html.reader-mode {
     color: var(--alternative-color);
   }
 
+  .info-tag::before {
+    content: "#";
+  }
+
   /* Info title (bold) */
   .info-title {
     font-weight: 600;

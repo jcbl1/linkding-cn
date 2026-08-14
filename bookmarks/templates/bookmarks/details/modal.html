@@ -134,7 +134,7 @@
                 {% if details.tags %}
                   <span class="info-tags">
                     {% for tag in details.tags %}
-                      <span class="info-tag">#{{ tag.name }}</span>
+                      <span class="info-tag">{{ tag.name }}</span>
                     {% endfor %}
                   </span>
                 {% else %}
@@ -145,7 +145,7 @@
           {% else %}
             <div>
               {% for tag in details.tags %}
-                <a href="{% url 'linkding:bookmarks.index' %}?{{ tag.query_string }}">#{{ tag.name }}</a>
+                <a href="{% url 'linkding:bookmarks.index' %}?{{ tag.query_string }}">{{ tag.name }}</a>
               {% endfor %}
             </div>
           {% endif %}

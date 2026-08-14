@@ -291,7 +291,7 @@ class DetailsModal extends Modal {
             if (i > 0) tagsContainer.appendChild(document.createTextNode(" "));
             const link = document.createElement("a");
             link.href = `?q=%23${encodeURIComponent(tag)}`;
-            link.textContent = `#${tag}`;
+            link.textContent = tag;
             tagsContainer.appendChild(link);
           });
         }
@@ -571,7 +571,7 @@ class DetailsModal extends Modal {
     const view = this.querySelector(".detail-tags-view");
     if (!view) return;
     if (tagNames.length) {
-      view.innerHTML = `<span class="info-tags">${tagNames.map((t) => `<span class="info-tag">#${t}</span>`).join("")}</span>`;
+      view.innerHTML = `<span class="info-tags">${tagNames.map((t) => `<span class="info-tag">${t}</span>`).join("")}</span>`;
     } else {
       view.innerHTML = `<span class="info-placeholder">${gettext("Click to edit tags")}</span>`;
     }
