@@ -1319,6 +1319,21 @@ class ArticleTasksTestCase(TestCase, BookmarkFactoryMixin):
         with open(filepath, "w", encoding="utf-8") as snapshot_file:
             snapshot_file.write(self.snapshot_html)
 
+    def test_requires_snapshot_before_article_detects_snapshot_config(self):
+        with mock.patch(
+            "site_adapters.services.config.resolver.get_snapshot_config",
+            return_value={
+                "_raw": {
+                    "snapshot": {
+                        "process_carousels": ["faceplate-carousel"]
+                    }
+                }
+            },
+        ):
+            self.assertTrue(
+                tasks._requires_snapshot_before_article("https://example.com/article")
+            )
+
     def test_create_article_task_retries_direct_parse_with_generated_snapshot(self):
         bookmark = self.setup_bookmark(url="https://example.com/article")
         article_asset = create_article_asset_pending(bookmark)
@@ -1336,7 +1351,7 @@ class ArticleTasksTestCase(TestCase, BookmarkFactoryMixin):
                 return_value=self.parsed_article,
             ) as mock_parse_html,
             mock.patch(
-                "bookmarks.services.tasks._has_custom_snapshot_processor",
+                "bookmarks.services.tasks._requires_snapshot_before_article",
                 return_value=False,
             ),
             mock.patch(
@@ -1377,7 +1392,7 @@ class ArticleTasksTestCase(TestCase, BookmarkFactoryMixin):
                 side_effect=RuntimeError("snapshot parse failed"),
             ) as mock_parse_html,
             mock.patch(
-                "bookmarks.services.tasks._has_custom_snapshot_processor",
+                "bookmarks.services.tasks._requires_snapshot_before_article",
                 return_value=False,
             ),
             mock.patch(

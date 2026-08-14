@@ -1000,16 +1000,16 @@ def _load_snapshot_html(bookmark: Bookmark) -> str | None:
     return _load_snapshot_asset_html(bookmark.latest_snapshot)
 
 
-def _has_custom_snapshot_processor(url: str) -> bool:
-    """检查该域名是否配置了自定义快照处理器。"""
-    from bookmarks.utils import search_config_for_domain
+def _requires_snapshot_before_article(url: str) -> bool:
+    """检查站点是否有需要先生成快照的快照配置。
 
-    settings_path = settings.LD_CUSTOM_SNAPSHOT_PROCESSOR_SETTINGS
-    if not settings_path or not os.path.exists(settings_path):
-        return False
+    包括自定义脚本和所有声明式 snapshot 字段，因为 Reader 需要从
+    site-adapters 处理后的快照中提取内容。
+    """
+    from site_adapters.services.config.resolver import get_snapshot_config
 
-    config = search_config_for_domain(url, settings_path)
-    return config is not None
+    config = get_snapshot_config(url)
+    return bool(config and (config.get("_raw") or {}).get("snapshot"))
 
 
 def _create_snapshot_for_article(
@@ -1071,9 +1071,9 @@ def _create_article_task(asset_id: int):
             result = reader_processor.parse_html(
                 raw_html, url=bookmark.url, username=_bookmark_username(bookmark)
             )
-        elif _has_custom_snapshot_processor(bookmark.url):
-            # 2. Custom snapshot_processor → create snapshot first, then parse
-            logger.info("Creating snapshot via custom processor. url=%s", bookmark.url)
+        elif _requires_snapshot_before_article(bookmark.url):
+            # 2. Site-specific snapshot config → create snapshot first, then parse
+            logger.info("Creating snapshot via site adapters. url=%s", bookmark.url)
             _snapshot, raw_html = _create_snapshot_for_article(bookmark)
             if not raw_html:
                 raise Exception("Failed to create snapshot via custom processor")
