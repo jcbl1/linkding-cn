@@ -724,6 +724,17 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     try { var s = JSON.parse(localStorage.getItem(RESULT_KEY)); if (s && s.data) { resultsSection.removeAttribute('hidden'); document.getElementById('test-bar').removeAttribute('hidden'); renderTestResult(s.data, s.elapsed || 0, s.testType || ''); } } catch (e) {}
   }
   function saveResult(data, elapsed, testType) { try { localStorage.setItem(RESULT_KEY, JSON.stringify({ data: data, elapsed: elapsed, testType: testType })); } catch (e) {} }
+  function renderTestFailure(message, elapsed, testType) {
+    var errorResult = { type: testType || 'test', error: String(message || gettext('Request failed')) };
+    try {
+      renderTestResult(errorResult, elapsed || 0, errorResult.type);
+    } catch (e) {
+      testStatus.innerHTML = '<span class="wa-status-tag wa-status-tag-error">' + esc(errorResult.type) + '</span> ' + gettext('Error');
+      testStatus.style.color = 'var(--ld-error,#dc2626)';
+      testOutput.innerHTML = '<div class="wa-result-section"><pre class="wa-result-raw">' + esc(errorResult.error) + '</pre></div>';
+    }
+    saveResult(errorResult, elapsed || 0, errorResult.type);
+  }
 
   function restoreTestPrefs() {
     try {
@@ -775,19 +786,21 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     var type = this.test_type.value, username = this.test_username.value.trim();
     var startTime = Date.now();
     saveTestPrefs();
+    try { localStorage.removeItem(RESULT_KEY); } catch (ex) {}
     resultsSection.removeAttribute('hidden'); document.getElementById('test-bar').removeAttribute('hidden'); testStatus.innerHTML = '<span class="wa-status-tag wa-status-tag-running">' + esc(type) + '</span> ' + gettext('Running\u2026'); testStatus.style.color = ''; testOutput.innerHTML = '';
     apiPost(urls.action, { action: 'test', url: url, test_type: type, test_username: username || '' })
       .then(function (r) {
         var elapsed = Date.now() - startTime;
-        renderTestResult(r, elapsed, type);
-        saveResult(r, elapsed, type);
+        try {
+          renderTestResult(r, elapsed, type);
+          saveResult(r, elapsed, type);
+        } catch (err) {
+          renderTestFailure(err && err.message ? err.message : String(err), elapsed, type);
+        }
       })
       .catch(function (err) {
         var elapsed = Date.now() - startTime;
-        var msg = String(err);
-        testStatus.innerHTML = '<span class="wa-status-tag wa-status-tag-error">Error</span> ' + gettext('Request failed');
-        testStatus.style.color = 'var(--ld-error,#dc2626)';
-        testOutput.innerHTML = '<div class="wa-result-section"><pre class="wa-result-raw">' + esc(msg) + '</pre></div>';
+        renderTestFailure(err && err.message ? err.message : String(err), elapsed, type);
       });
   });
   document.getElementById('btn-show-details').addEventListener('click', function () {
