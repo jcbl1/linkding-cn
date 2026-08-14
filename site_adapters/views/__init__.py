@@ -4,15 +4,23 @@ Site Adapters management views.
 Split into submodules by responsibility:
   - helpers.py       Shared utilities, decorators, global config
   - page.py          Main page rendering
+  - adapters.py      User settings adapters page
+  - credentials.py   Credential endpoints
+  - snapshot_toggles.py Snapshot toggle endpoint
   - domains.py       Domain CRUD + rename
   - testing.py       Test panel + validation + save_cookie
   - subscriptions.py Subscription management
-  - credentials.py   User credential management
   - snapshot.py      Snapshot preview
 """
 
 # Re-export all public view functions for URL routing compatibility.
-from site_adapters.views.page import site_adapters_page
+from site_adapters.views.adapters import adapters_page
+from site_adapters.views.credentials import (
+    shared_credential_delete,
+    shared_credential_list,
+    shared_credential_save,
+    user_credentials,
+)
 from site_adapters.views.domains import (
     domain_create,
     domain_delete,
@@ -20,10 +28,9 @@ from site_adapters.views.domains import (
     domain_rename,
     domain_save,
 )
-from site_adapters.views.testing import (
-    action,
-    save_cookie,
-)
+from site_adapters.views.page import site_adapters_page
+from site_adapters.views.snapshot import view_snapshot
+from site_adapters.views.snapshot_toggles import snapshot_toggles
 from site_adapters.views.subscriptions import (
     all_domains,
     local_domain_toggle,
@@ -31,15 +38,10 @@ from site_adapters.views.subscriptions import (
     subscription_domain_toggle,
     subscription_manage,
 )
-from site_adapters.views.credentials import (
-    adapters_page,
-    user_credentials,
-    snapshot_toggles,
-    shared_credential_list,
-    shared_credential_save,
-    shared_credential_delete,
+from site_adapters.views.testing import (
+    action,
+    save_cookie,
 )
-from site_adapters.views.snapshot import view_snapshot
 
 __all__ = [
     'site_adapters_page',

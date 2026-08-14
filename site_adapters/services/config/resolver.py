@@ -15,24 +15,29 @@ HTTP sub-objects are merged: defaults.http + section.http -> section overrides.
 Auth sub-objects are merged: top.auth + defaults.auth + section.auth -> section overrides.
 """
 
+import json
 import logging
 import os
 
+from bookmarks.utils import atomic_write
 from site_adapters.services.auth.cookies import (
     COOKIE_DEFAULTS,
     merge_cookie,
 )
 from site_adapters.services.auth.credentials import (
+    get_best_basic_auth,
     get_best_cookie,
     get_best_header,
     get_best_token,
-    get_best_basic_auth,
 )
 from site_adapters.services.auth.oauth2 import (
     get_token_header,
     get_valid_token,
+)
+from site_adapters.services.auth.oauth2 import (
     refresh_token as _refresh_token,
 )
+from site_adapters.services.base import _get_base_dir
 from site_adapters.services.config import (
     apply_request_url,
     apply_rewrite_url,
@@ -45,8 +50,6 @@ from site_adapters.services.config.loader import (
 
 logger = logging.getLogger(__name__)
 
-
-from site_adapters.services.base import _get_base_dir
 
 # ---------------------------------------------------------------------------
 # Merge helpers
@@ -96,6 +99,67 @@ def _merge_auth(*auth_blocks: dict) -> dict:
     return result
 
 
+# ---------------------------------------------------------------------------
+# User toggle preferences
+# ---------------------------------------------------------------------------
+
+def _get_user_toggles_path(username: str) -> str:
+    return os.path.join(
+        _get_base_dir(), 'preferences', 'users', username, 'toggles.json'
+    )
+
+
+def get_user_preferences(username: str) -> dict:
+    """Get all user toggle preferences keyed by domain."""
+    path = _get_user_toggles_path(username)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def get_user_domain_preferences(username: str, domain_key: str) -> dict:
+    """Get user toggle preferences for a specific domain."""
+    prefs = get_user_preferences(username)
+    domain_prefs = prefs.get(domain_key, {})
+    return domain_prefs if isinstance(domain_prefs, dict) else {}
+
+
+def save_user_preferences(
+    username: str, domain_key: str, toggle_id: str, enabled: bool
+):
+    """Save a single user toggle preference."""
+    prefs = get_user_preferences(username)
+    if domain_key not in prefs:
+        prefs[domain_key] = {}
+    prefs[domain_key][toggle_id] = enabled
+    path = _get_user_toggles_path(username)
+    atomic_write(path, json.dumps(prefs, indent=2, ensure_ascii=False))
+
+
+def list_domains_with_toggles(base_dir: str) -> list[dict]:
+    """List all domains that declare toggles and their toggle definitions."""
+    from site_adapters.services.config.loader import _cache
+    all_config = _cache.load(base_dir)
+    result = []
+    for key, config in all_config.items():
+        if key == 'defaults' or key.startswith('_'):
+            continue
+        if not isinstance(config, dict):
+            continue
+        toggles = config.get('snapshot', {}).get('toggles', {})
+        if toggles and isinstance(toggles, dict):
+            result.append({
+                'domain': key,
+                'toggles': toggles,
+            })
+    return result
+
+
 
 def _apply_toggles(section_data: dict, full_config: dict, username: str) -> tuple[list, list]:
     """Apply user toggle preferences to remove_elements / keep_elements."""
@@ -105,7 +169,6 @@ def _apply_toggles(section_data: dict, full_config: dict, username: str) -> tupl
     user_prefs = {}
     if toggles and username:
         domain_key = full_config.get('_domain_key', '')
-        from site_adapters.services.auth.credentials import get_user_domain_preferences
         user_prefs = get_user_domain_preferences(username, domain_key)
     if toggles:
         for toggle_id, toggle_def in toggles.items():
