@@ -1243,11 +1243,13 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       h += renderResultRows({
         'title': fields.title,
         'word_count': fields.word_count,
+        'reader_view': fields.reader_view ? extractViewFilename(fields.reader_view) : null,
         'reader_file': fields.view_url ? extractViewFilename(fields.view_url) : null,
         'snapshot_file': fields.snapshot_view_url ? extractViewFilename(fields.snapshot_view_url) : null
       }, {
         'title': function (val) { return esc(val); },
         'word_count': function (val) { return Number(val).toLocaleString(); },
+        'reader_view': function (val) { return '<a href="' + esc(fields.reader_view) + '" target="_blank">' + esc(val) + '</a>'; },
         'reader_file': function (val) { return '<a href="' + esc(fields.view_url) + '" target="_blank">' + esc(val) + '</a> (' + formatBytes(fields.html_size) + ')'; },
         'snapshot_file': function (val) { return '<a href="' + esc(fields.snapshot_view_url) + '" target="_blank">' + esc(val) + '</a> (' + formatBytes(fields.snapshot_size) + ')'; }
       });
@@ -1428,11 +1430,13 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
         h += renderResultRows({
           'title': rd.result.title,
           'word_count': rd.result.word_count,
+          'reader_view': rd.result.reader_view ? extractViewFilename(rd.result.reader_view) : null,
           'reader_file': rd.result.view_url ? extractViewFilename(rd.result.view_url) : null,
           'snapshot_file': rd.result.snapshot_view_url ? extractViewFilename(rd.result.snapshot_view_url) : null
         }, {
           'title': function (val) { return esc(val); },
           'word_count': function (val) { return Number(val).toLocaleString(); },
+          'reader_view': function (val) { return '<a href="' + esc(rd.result.reader_view) + '" target="_blank">' + esc(val) + '</a>'; },
           'reader_file': function (val) { return '<a href="' + esc(rd.result.view_url) + '" target="_blank">' + esc(val) + '</a> (' + formatBytes(rd.result.html_size) + ')'; },
           'snapshot_file': function (val) { return '<a href="' + esc(rd.result.snapshot_view_url) + '" target="_blank">' + esc(val) + '</a> (' + formatBytes(rd.result.snapshot_size) + ')'; }
         });

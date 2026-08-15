@@ -128,6 +128,7 @@ urlpatterns = [
     path("admin/site-adapters/subscription/domain-toggle", views.subscription_domain_toggle, name="settings.site_adapters.subscription_domain_toggle"),
     path("admin/site-adapters/subscription/manage", views.subscription_manage, name="settings.site_adapters.subscription_manage"),
     path("admin/site-adapters/view-snapshot", views.view_snapshot, name="settings.site_adapters.view_snapshot"),
+    path("admin/site-adapters/view-reader", views.view_reader, name="settings.site_adapters.view_reader"),
     path("settings/adapters", views.adapters_page, name="settings.adapters"),
     path("settings/adapters/credentials/api", views.user_credentials, name="settings.credentials_api"),
     path("settings/adapters/snapshot_toggles", views.snapshot_toggles, name="settings.snapshot_toggles"),

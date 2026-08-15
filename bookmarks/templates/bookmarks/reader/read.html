@@ -61,14 +61,29 @@
   <div class="loading-spinner"></div>
   <p class="loading-text">{% translate "Loading article..." %}</p>
 </div>
+{% if reader_preview_data %}
+{{ reader_preview_data|json_script:"reader-preview-data" }}
+{% else %}
 {{ bookmark_data|json_script:"bookmark-data" }}
+{% endif %}
 {{ api_base_url|default:"/api/"|json_script:"reader-api-base-url" }}
 {{ assets_base_url|default:"/assets"|json_script:"reader-assets-base-url" }}
 {{ bookmarks_index_url|default:"/bookmarks"|json_script:"reader-bookmarks-index-url" }}
 <script src="{% url 'javascript-catalog' %}"></script>
-<script src="{% static 'reader.js' %}?v={{ app_version }}" type="application/javascript"></script>
+<script src="{% static 'reader.js' %}?v={{ app_version }}{% if reader_preview_data %}&preview=1{% endif %}" type="application/javascript"></script>
 <script type="application/javascript">
+  {% if reader_preview_data %}
+  var previewData = JSON.parse(document.getElementById("reader-preview-data").textContent);
+  window.renderReaderPreview({
+    title: previewData.title,
+    wordCount: previewData.word_count,
+    content: previewData.content,
+    originalUrl: previewData.original_url,
+    snapshotUrl: previewData.snapshot_url
+  });
+  {% else %}
   window.renderReader({ bookmarkId: {{ bookmark_id }}, assetId: {{ asset_id }}, from: "{{ from_param }}" });
+  {% endif %}
 </script>
 </body>
 </html>

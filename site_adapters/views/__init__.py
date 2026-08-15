@@ -29,7 +29,7 @@ from site_adapters.views.domains import (
     domain_save,
 )
 from site_adapters.views.page import site_adapters_page
-from site_adapters.views.snapshot import view_snapshot
+from site_adapters.views.snapshot import view_reader, view_snapshot
 from site_adapters.views.snapshot_toggles import snapshot_toggles
 from site_adapters.views.subscriptions import (
     all_domains,
@@ -52,4 +52,5 @@ __all__ = [
     'adapters_page', 'user_credentials', 'snapshot_toggles',
     'shared_credential_list', 'shared_credential_save', 'shared_credential_delete',
     'view_snapshot',
+    'view_reader',
 ]

@@ -31,5 +31,6 @@ from site_adapters.views import (
     shared_credential_delete,
     snapshot_toggles,
     view_snapshot,
+    view_reader,
 )
 from .toasts import *

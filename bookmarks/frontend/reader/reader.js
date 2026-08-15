@@ -207,9 +207,11 @@ function renderArticle(bodyHtml, meta, resolvedTitle, bookmarkData, apiBase, ass
   document.body.appendChild(layout);
 
   // --- Snapshot URL (open latest snapshot page directly) ---
-  const snapshotUrl = bookmarkData.snapshot_id
-    ? joinPath(assetsBase, `${bookmarkData.snapshot_id}`)
-    : "";
+  const snapshotUrl = bookmarkData.snapshot_url || (
+    bookmarkData.snapshot_id
+      ? joinPath(assetsBase, `${bookmarkData.snapshot_id}`)
+      : ""
+  );
 
   // --- Toolbar ---
   const toolbar = document.createElement("reader-toolbar");
@@ -261,6 +263,7 @@ function renderArticle(bodyHtml, meta, resolvedTitle, bookmarkData, apiBase, ass
 
   // --- Editable mode ---
   const isEditable = bookmarkData.is_editable !== false;
+  const isPreview = bookmarkData.is_preview === true;
   sidebar.isEditable = isEditable;
   toolbar.isEditable = isEditable;
 
@@ -329,13 +332,13 @@ function renderArticle(bodyHtml, meta, resolvedTitle, bookmarkData, apiBase, ass
 
   // --- Highlighter (owner only) ---
   let highlighter = null;
-  if (isEditable && bookmarkId && Number(assetId) > 0) {
+  if (isEditable && !isPreview && bookmarkId && Number(assetId) > 0) {
     highlighter = initHighlighter(articleContent, bookmarkId, assetId, sidebar, apiBase);
   }
 
   // --- Scroll progress (owner only) ---
   setupScrollProgress(contentArea, toolbar);
-  if (isEditable) {
+  if (isEditable && !isPreview) {
     // Check for pending scroll from "Add to my bookmarks" flow
     try {
       const pending = JSON.parse(localStorage.getItem("ld:reader:pending-scroll") || "null");
@@ -1904,5 +1907,49 @@ function updateColorButtons(popup, currentColor) {
   });
 }
 
+/**
+ * Render a reader article without bookmark/asset state.
+ *
+ * Used by the site-adapters test panel so a URL test can preview the same
+ * article layout as a real bookmark reader page without requiring an existing
+ * bookmark or article asset.
+ */
+function renderReaderPreview(options = {}) {
+  const title = options.title || "";
+  const wordCount = Number(options.wordCount) || 0;
+  const content = options.content || "";
+  const apiBase = normalizeBaseUrl(
+    parseJsonScriptValue("reader-api-base-url", "/api/"),
+  );
+  const assetsBase = parseJsonScriptValue("reader-assets-base-url", "/assets");
+  const bookmarksIndexUrl = parseJsonScriptValue(
+    "reader-bookmarks-index-url",
+    "/bookmarks",
+  );
+  if (title) document.title = title;
+  const bodyMatch = content.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  const bodyHtml = bodyMatch ? bodyMatch[1] : content;
+
+  renderArticle(
+    bodyHtml,
+    { title, wordCount },
+    title || gettext("Reader"),
+    {
+      is_editable: true,
+      is_preview: true,
+      title,
+      url: options.originalUrl || "",
+      snapshot_url: options.snapshotUrl || "",
+    },
+    apiBase,
+    assetsBase,
+    bookmarksIndexUrl,
+    0,
+    0,
+    "",
+  );
+}
+
 // Expose to global scope for inline template scripts
 window.renderReader = renderReader;
+window.renderReaderPreview = renderReaderPreview;

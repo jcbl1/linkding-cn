@@ -395,6 +395,32 @@ def _test_snapshot(url, base_dir, username, entries):
     return _test_response(result, entries=entries)
 
 
+def _write_reader_test_asset(
+    reader_html: str,
+    url: str,
+    metadata: dict | None = None,
+    original_url: str = "",
+    snapshot_view_url: str = "",
+) -> tuple[str, str]:
+    """Write a reader preview file plus companion metadata used by the preview page."""
+    metadata = metadata or {}
+    reader_filename = 'article_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
+    reader_path = os.path.join(TEST_ASSETS_DIR, reader_filename)
+    with open(reader_path, 'w', encoding='utf-8') as f:
+        f.write(reader_html)
+
+    reader_meta_path = os.path.splitext(reader_path)[0] + '.json'
+    with open(reader_meta_path, 'w', encoding='utf-8') as f:
+        json.dump({
+            'title': metadata.get('title', ''),
+            'word_count': metadata.get('wordCount', 0),
+            'original_url': original_url or url,
+            'snapshot_url': snapshot_view_url,
+        }, f, ensure_ascii=False)
+
+    return reader_filename, reader_path
+
+
 def _test_reader(url, base_dir, username, entries):
     hostname = urlparse(url).hostname or ''
     config = get_reader_config(url, username=username)
@@ -414,10 +440,10 @@ def _test_reader(url, base_dir, username, entries):
         html = f.read()
     result = reader_processor.parse_html(html, url=url, username=username)
     reader_html = result.get('content', '')
-    reader_filename = 'article_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
-    reader_path = os.path.join(TEST_ASSETS_DIR, reader_filename)
-    with open(reader_path, 'w', encoding='utf-8') as f:
-        f.write(reader_html)
+    snapshot_view_url = f'/admin/site-adapters/view-snapshot?file={snap_filename}'
+    reader_filename, reader_path = _write_reader_test_asset(
+        reader_html, url, result, url, snapshot_view_url
+    )
 
     credential_sources = _compute_credential_sources(config, username, hostname, before)
 
@@ -437,10 +463,11 @@ def _test_reader(url, base_dir, username, entries):
         'result': {
             'title': result.get('title', ''),
             'word_count': result.get('wordCount', 0),
+            'reader_view': f'/admin/site-adapters/view-reader?file={reader_filename}',
             'html_size': os.path.getsize(reader_path),
             'view_url': f'/admin/site-adapters/view-snapshot?file={reader_filename}',
             'snapshot_size': os.path.getsize(snap_path),
-            'snapshot_view_url': f'/admin/site-adapters/view-snapshot?file={snap_filename}',
+            'snapshot_view_url': snapshot_view_url,
         },
         'defuddle_args': config.get('defuddle_args') if config else None,
     }
@@ -615,10 +642,10 @@ def _test_pipeline(url, base_dir, username, entries):
         html = f.read()
     article = reader_processor.parse_html(html, url=url, username=username)
     reader_html = article.get('content', '')
-    reader_filename = 'article_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
-    reader_path = os.path.join(TEST_ASSETS_DIR, reader_filename)
-    with open(reader_path, 'w', encoding='utf-8') as f:
-        f.write(reader_html)
+    snapshot_view_url = f'/admin/site-adapters/view-snapshot?file={snap_filename}'
+    reader_filename, reader_path = _write_reader_test_asset(
+        reader_html, url, article, url, snapshot_view_url
+    )
     metadata_no_match = not meta_config
     snapshot_no_match = not snap_config
     reader_no_match = not reader_config
@@ -678,10 +705,11 @@ def _test_pipeline(url, base_dir, username, entries):
             'result': {
                 'title': article.get('title', ''),
                 'word_count': article.get('wordCount', 0),
+                'reader_view': f'/admin/site-adapters/view-reader?file={reader_filename}',
                 'html_size': os.path.getsize(reader_path),
                 'view_url': f'/admin/site-adapters/view-snapshot?file={reader_filename}',
                 'snapshot_size': os.path.getsize(snap_path),
-                'snapshot_view_url': f'/admin/site-adapters/view-snapshot?file={snap_filename}',
+                'snapshot_view_url': snapshot_view_url,
             },
             'defuddle_args': reader_config.get('defuddle_args') if reader_config else None,
         },

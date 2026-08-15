@@ -260,6 +260,76 @@ class SiteAdaptersViewsTestCase(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_reader_test_includes_reader_view(self):
+        def fake_create_snapshot(url, out_path, username=""):
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write("<html><body><article><p>Hello</p></article></body></html>")
+
+        with (
+            mock.patch("site_adapters.views.testing.get_reader_config", return_value={}),
+            mock.patch("site_adapters.views.testing.show_config", return_value={}),
+            mock.patch("site_adapters.views.testing.TEST_ASSETS_DIR", self.base_dir),
+            mock.patch(
+                "bookmarks.services.snapshot_processor.create_snapshot",
+                side_effect=fake_create_snapshot,
+            ),
+            mock.patch(
+                "bookmarks.services.reader_processor.parse_html",
+                return_value={
+                    "title": "Example",
+                    "wordCount": 123,
+                    "content": "<article><p>Hello</p></article>",
+                },
+            ),
+        ):
+            response = self.client.post(
+                reverse("linkding:settings.site_adapters.action"),
+                {"action": "test", "test_type": "reader", "url": "https://example.com/post"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.json()["result"]
+        self.assertIn("reader_view", result)
+        self.assertTrue(result["reader_view"].startswith("/admin/site-adapters/view-reader?file="))
+        metadata_files = [
+            f
+            for f in os.listdir(self.base_dir)
+            if f.startswith("article_") and f.endswith(".json")
+        ]
+        self.assertEqual(len(metadata_files), 1)
+        with open(os.path.join(self.base_dir, metadata_files[0]), encoding="utf-8") as f:
+            metadata = json.load(f)
+        self.assertEqual(metadata["original_url"], "https://example.com/post")
+        self.assertTrue(metadata["snapshot_url"].startswith("/admin/site-adapters/view-snapshot?file="))
+
+    def test_view_reader_renders_preview_page(self):
+        with mock.patch("site_adapters.views.snapshot.TEST_ASSETS_DIR", self.base_dir):
+            os.makedirs(self.base_dir, exist_ok=True)
+            with open(os.path.join(self.base_dir, "article_test.html"), "w", encoding="utf-8") as f:
+                f.write("<article><p>Preview content</p></article>")
+            with open(os.path.join(self.base_dir, "article_test.json"), "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "title": "Preview",
+                        "word_count": 42,
+                        "original_url": "https://example.com/original",
+                        "snapshot_url": "/admin/site-adapters/view-snapshot?file=snapshot_test.html",
+                    },
+                    f,
+                )
+
+            response = self.client.get(
+                reverse("linkding:settings.site_adapters.view_reader"),
+                {"file": "article_test.html"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response.context["reader_preview_data"], dict)
+        self.assertContains(response, "Preview content")
+        self.assertContains(response, "reader.js")
+        self.assertContains(response, "snapshot_test.html")
+
     def test_subscription_list_preserves_order_and_initializes_defaults(self):
         self._setup_two_adapters(defaults_first=False)
 
