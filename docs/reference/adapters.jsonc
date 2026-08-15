@@ -163,13 +163,13 @@
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},
 //           {"path": "example_after.py", "hook": "after"}
-        ],                                                 // Script hooks. hook: "before" | "replace" | "after". before/after run alongside the built-in engine; replace bypasses it.
+        ],                                                 // Script hooks. hook: "before" | "replace" | "after". before runs inside the built-in engine; after modifies the saved snapshot HTML; replace bypasses the engine.
         "timeout": 30,                                     // Request timeout in seconds.
         "proxy": null,                                     // HTTP proxy URL.
       },
 
       // snapshot — HTML snapshot via SingleFile + DOM cleanup
-      // A snapshot script with hook "replace" bypasses SingleFile and the declarative fields keep_elements / remove_elements / remove_classes / set_styles / singlefile_args. before/after hooks can coexist with those fields.
+      // A snapshot script with hook "replace" bypasses SingleFile and the declarative fields keep_elements / remove_elements / remove_classes / set_styles / singlefile_args. before hooks run inside SingleFile; after hooks modify the saved snapshot HTML.
       "snapshot": {
         "auth": null,                                      // Authentication config.
         "http": {},                                        // Custom HTTP request headers. Every key-value pair is passed as a header.
@@ -186,7 +186,7 @@
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},
 //           {"path": "example_after.py", "hook": "after"}
-        ],                                                 // Script hooks. hook: "before" | "replace" | "after". before/after run alongside SingleFile; replace bypasses SingleFile and declarative fields.
+        ],                                                 // Script hooks. hook: "before" | "replace" | "after". before runs inside SingleFile; after modifies the saved snapshot HTML; replace bypasses SingleFile and declarative fields.
         "timeout": 30,                                     // Snapshot timeout in seconds.
         "proxy": null,                                     // HTTP proxy URL.
       },

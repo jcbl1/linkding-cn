@@ -273,24 +273,16 @@ class SingleFileServiceTestCase(TestCase):
         with self.assertRaises(singlefile.SingleFileError):
             singlefile.uses_builtin_engine(path, "before")
 
-    def test_build_browser_script_embeds_user_hooks(self):
+    def test_build_browser_script_embeds_user_before_hook(self):
         before_path = self._write_js(
             'const builtin_engine = "singlefile";\n'
             "async function before(url, config) {\n"
             "  document.querySelectorAll('.collapsed').forEach((el) => el.classList.remove('collapsed'));\n"
             "}\n"
         )
-        after_path = self._write_js(
-            'const builtin_engine = "singlefile";\n'
-            "async function after(url, config) {\n"
-            "  const style = document.createElement('style');\n"
-            "  document.head.appendChild(style);\n"
-            "}\n"
-        )
         script_path = singlefile._build_browser_script(
             {
                 "_browser_before_scripts": [before_path],
-                "_browser_after_scripts": [after_path],
                 "keep_elements": [".article"],
             },
             url="https://example.com",
@@ -303,11 +295,9 @@ class SingleFileServiceTestCase(TestCase):
         self.assertIn("window.__linkdingHooks", script)
         self.assertIn("single-file-user-script-init", script)
         self.assertIn("single-file-on-before-capture-request", script)
-        self.assertIn("single-file-on-after-capture-request", script)
         self.assertIn("single-file-on-before-capture-response", script)
-        self.assertIn("single-file-on-after-capture-response", script)
+        self.assertNotIn("single-file-on-after-capture-request", script)
         self.assertIn("el.classList.remove", script)
-        self.assertIn("document.head.appendChild", script)
         self.assertIn('"url": "https://example.com"', script)
         self.assertLess(
             script.index("el.classList.remove"),

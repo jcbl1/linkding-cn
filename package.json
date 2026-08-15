@@ -37,6 +37,7 @@
     "defuddle": "^0.19.1",
     "esbuild": "^0.28.1",
     "iconify-icon": "^3.0.2",
+    "linkedom": "^0.18.13",
     "lit": "^3.3.3",
     "playwright-core": "^1.62.1",
     "postcss": "^8.5.16",

@@ -128,11 +128,11 @@ _BROWSER_HOOK_BOILERPLATE = r"""
 (() => {
   dispatchEvent(new CustomEvent("single-file-user-script-init"));
 
-  const runHook = async (name, event, responseEvent) => {
+  const runHook = async (event) => {
     event.preventDefault();
     try {
       for (const hook of window.__linkdingHooks || []) {
-        const fn = hook[name];
+        const fn = hook["before"];
         if (typeof fn === "function") {
           await fn(
             window.__linkding_snapshot_config.url,
@@ -141,34 +141,23 @@ _BROWSER_HOOK_BOILERPLATE = r"""
         }
       }
     } finally {
-      dispatchEvent(new CustomEvent(responseEvent));
+      dispatchEvent(new CustomEvent("single-file-on-before-capture-response"));
     }
   };
 
   addEventListener(
     "single-file-on-before-capture-request",
-    (event) => runHook("before", event, "single-file-on-before-capture-response")
-  );
-  addEventListener(
-    "single-file-on-after-capture-request",
-    (event) => runHook("after", event, "single-file-on-after-capture-response")
+    (event) => runHook(event)
   );
 })();
 """
 
 
-def _wrap_user_hook_script(source: str, include_before: bool, include_after: bool) -> str:
-    checks = []
-    if include_before:
-        checks.append(
-            "if (typeof before === 'function') "
-            "window.__linkdingHooks.push({ before: before, after: undefined });"
-        )
-    if include_after:
-        checks.append(
-            "if (typeof after === 'function') "
-            "window.__linkdingHooks.push({ before: undefined, after: after });"
-        )
+def _wrap_user_hook_script(source: str) -> str:
+    checks = [
+        "if (typeof before === 'function') "
+        "window.__linkdingHooks.push({ before: before });"
+    ]
     return "(() => {\n" + source + "\n" + "\n".join(checks) + "\n})();\n"
 
 
@@ -200,9 +189,8 @@ def _build_browser_script(config: dict, url: str = '') -> str | None:
 
     parts = []
     before_paths = _as_list(config.get('_browser_before_scripts'))
-    after_paths = _as_list(config.get('_browser_after_scripts'))
 
-    if before_paths or after_paths:
+    if before_paths:
         from site_adapters.services.engine.script_runner import _sanitize_config
         injected_url = url or config.get('_request_url') or config.get('_url') or ''
         parts.append(
@@ -217,11 +205,7 @@ def _build_browser_script(config: dict, url: str = '') -> str | None:
         for script_path in before_paths:
             with open(script_path, encoding='utf-8') as f:
                 source = f.read()
-            parts.append(_wrap_user_hook_script(source, include_before=True, include_after=False))
-        for script_path in after_paths:
-            with open(script_path, encoding='utf-8') as f:
-                source = f.read()
-            parts.append(_wrap_user_hook_script(source, include_before=False, include_after=True))
+            parts.append(_wrap_user_hook_script(source))
         parts.append(_BROWSER_HOOK_BOILERPLATE)
 
     preamble = "window.__linkding_cleanup_config = " + json.dumps(cleanup) + ";\n"

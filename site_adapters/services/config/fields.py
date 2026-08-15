@@ -130,8 +130,8 @@ METADATA_FIELDS = {
     },
     "scripts": {
         "type": "array<{path, hook}>",
-        "en": 'Script hooks. hook: "before" | "replace" | "after". before/after run alongside the built-in engine; replace bypasses it.',
-        "zh": "自定义脚本钩子。hook: before | replace | after。before/after 与内置引擎并存；replace 完全接管内置引擎。",
+        "en": 'Script hooks. hook: "before" | "replace" | "after". before runs inside the built-in engine; after modifies the saved snapshot HTML; replace bypasses the engine.',
+        "zh": "自定义脚本钩子。hook: before | replace | after。before 在内置引擎中运行，after 修改保存后的快照 HTML；replace 完全接管内置引擎。",
         "example": [],
         "example_items": [
             {"path": "example_before.py", "hook": "before"},
@@ -218,8 +218,8 @@ SNAPSHOT_FIELDS = {
     },
     "scripts": {
         "type": "array<{path, hook}>",
-        "en": 'Script hooks. hook: "before" | "replace" | "after". before/after run alongside SingleFile; replace bypasses SingleFile and declarative fields.',
-        "zh": "自定义脚本钩子。hook: before | replace | after。before/after 与 SingleFile 并存；replace 接管 SingleFile，并绕过声明式快照字段。",
+        "en": 'Script hooks. hook: "before" | "replace" | "after". before runs inside SingleFile; after modifies the saved snapshot HTML; replace bypasses SingleFile and declarative fields.',
+        "zh": "自定义脚本钩子。hook: before | replace | after。before 在 SingleFile 内运行，after 修改保存后的快照 HTML；replace 接管 SingleFile，并绕过声明式快照字段。",
         "example": [],
         "example_items": [
             {"path": "example_before.py", "hook": "before"},

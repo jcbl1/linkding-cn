@@ -577,6 +577,61 @@ def after(output_path, config):
                 self.assertIn("Modified by After", content)
                 os.unlink(output_path)
 
+    def test_js_singlefile_after_hook_modifies_saved_output(self):
+        """built-in JS after hook can modify the saved snapshot HTML."""
+        after_js = self._write(
+            "adapters/defaults/scripts/after.js",
+            'const builtin_engine = "singlefile";\n'
+            "const after = async (url, config) => {\n"
+            "  const paragraph = document.createElement('p');\n"
+            "  paragraph.textContent = 'Modified by JS After';\n"
+            "  const video = document.createElement('video');\n"
+            "  video.setAttribute('src', 'https://example.com/video.mp4');\n"
+            "  document.body.appendChild(video);\n"
+            "  document.body.appendChild(paragraph);\n"
+            "};\n",
+        )
+        self._write("adapters/defaults/scripts/replace_snap.py", """
+def replace(url, config, output_path):
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write('<html><head></head><body>Original</body></html>')
+""")
+        self._write("adapters/config.jsonc", json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults",
+                          "source": "./defaults/adapters.jsonc"}]
+        }))
+        self._write("adapters/defaults/adapters.jsonc", json.dumps({
+            "domains": {
+                "example.com": {
+                    "snapshot": {
+                        "scripts": [
+                            {"path": "replace_snap.py", "hook": "replace"},
+                            {"path": after_js, "hook": "after"},
+                        ]
+                    }
+                }
+            }
+        }))
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            from site_adapters.services.config.resolver import get_snapshot_config
+            from bookmarks.services.snapshot_processor import _run_snapshot_with_hooks
+
+            config = get_snapshot_config("https://example.com/page")
+            if config and config.get("scripts"):
+                import tempfile
+                with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False) as tmp:
+                    output_path = tmp.name
+                _run_snapshot_with_hooks(
+                    "https://example.com/page", output_path, config,
+                    config["scripts"]
+                )
+                with open(output_path, "r") as f:
+                    content = f.read()
+                self.assertIn("Modified by JS After", content)
+                self.assertIn('src="https://example.com/video.mp4"', content)
+                os.unlink(output_path)
+
     def test_js_singlefile_hooks_are_passed_to_singlefile(self):
         before_js = self._write(
             "adapters/defaults/scripts/before.js",
@@ -621,15 +676,21 @@ def after(output_path, config):
                 with mock.patch(
                     "bookmarks.services.snapshot_processor._create_snapshot"
                 ) as mock_create:
-                    _run_snapshot_with_hooks(
-                        "https://example.com/page", output_path, config,
-                        config["scripts"]
-                    )
+                    with mock.patch(
+                        "bookmarks.services.snapshot_processor._run_builtin_after_hook"
+                    ) as mock_after:
+                        _run_snapshot_with_hooks(
+                            "https://example.com/page", output_path, config,
+                            config["scripts"]
+                        )
 
             mock_run.assert_not_called()
             passed_config = mock_create.call_args.args[2]
             self.assertIn(before_js, passed_config["_browser_before_scripts"])
-            self.assertIn(after_js, passed_config["_browser_after_scripts"])
+            self.assertNotIn("_browser_after_scripts", passed_config)
+            mock_after.assert_called_once_with(
+                after_js, "https://example.com/page", output_path, config
+            )
 
     def test_js_external_node_before_stays_external(self):
         external_js = self._write(

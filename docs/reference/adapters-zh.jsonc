@@ -163,13 +163,13 @@
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},
 //           {"path": "example_after.py", "hook": "after"}
-        ],                                                 // 自定义脚本钩子。hook: before | replace | after。before/after 与内置引擎并存；replace 完全接管内置引擎。
+        ],                                                 // 自定义脚本钩子。hook: before | replace | after。before 在内置引擎中运行，after 修改保存后的快照 HTML；replace 完全接管内置引擎。
         "timeout": 30,                                     // 请求超时时间（秒）。
         "proxy": null,                                     // HTTP 代理地址。
       },
 
       // snapshot — HTML 快照生成（SingleFile + DOM 清理）
-      // 仅 hook 为 "replace" 的快照脚本会绕过 SingleFile，并旁路 keep_elements / remove_elements / remove_classes / set_styles / singlefile_args；before/after hook 可与这些字段并存。
+      // 仅 hook 为 "replace" 的快照脚本会绕过 SingleFile，并旁路 keep_elements / remove_elements / remove_classes / set_styles / singlefile_args；before hook 在 SingleFile 内运行，after hook 修改保存后的快照 HTML。
       "snapshot": {
         "auth": null,                                      // 认证配置。
         "http": {},                                        // 自定义 HTTP 请求头。所有键值对都会作为 header 透传。
@@ -186,7 +186,7 @@
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},
 //           {"path": "example_after.py", "hook": "after"}
-        ],                                                 // 自定义脚本钩子。hook: before | replace | after。before/after 与 SingleFile 并存；replace 接管 SingleFile，并绕过声明式快照字段。
+        ],                                                 // 自定义脚本钩子。hook: before | replace | after。before 在 SingleFile 内运行，after 修改保存后的快照 HTML；replace 接管 SingleFile，并绕过声明式快照字段。
         "timeout": 30,                                     // 快照超时时间（秒）。
         "proxy": null,                                     // HTTP 代理地址。
       },

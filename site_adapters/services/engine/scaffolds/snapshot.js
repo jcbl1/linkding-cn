@@ -1,8 +1,9 @@
 /**
  * Snapshot SingleFile browser hook (site-adapters).
  *
- * This template runs inside the SingleFile browser context. It is the default
- * template for snapshot JavaScript before/after hooks.
+ * This template is the default for snapshot JavaScript hooks.
+ * `before` runs inside the SingleFile browser context.
+ * `after` runs against the saved snapshot HTML after SingleFile writes it.
  *
  * ---------------------------------------------------------------------------
  * Built-in engine declaration
@@ -11,7 +12,7 @@
  * const builtin_engine = "singlefile";
  *
  * Allowed values:
- *   "singlefile" - run inside SingleFile (this template)
+ *   "singlefile" - before runs inside SingleFile; after runs on saved HTML
  *   "" or null  - external Node mode (use snapshot_node.js)
  *   any other value is an error.
  *
@@ -22,24 +23,27 @@
  * Runtime behavior
  * ---------------------------------------------------------------------------
  *
- * The framework wraps this file, dispatches
- * `single-file-user-script-init`, and registers the SingleFile capture events.
- * You only define `before` and `after`.
+ * The framework wraps `before` into the SingleFile browser script. `after`
+ * is executed separately against the saved HTML. The current implementation
+ * uses Linkedom.
  *
  *   before(url, config) runs when `single-file-on-before-capture-request`
  *   fires, before SingleFile captures the page.
  *
- *   after(url, config) runs when `single-file-on-after-capture-request`
- *   fires, after SingleFile processes the DOM and before serialization.
+ *   after(url, config) runs after the snapshot HTML file is written. DOM
+ *   changes are serialized back into the saved file.
  *
- * Both functions may be async. The framework always calls `preventDefault()`
- * and waits for the matching `-response` event, so sync and async code both
- * work.
+ * `before` may be async; the framework calls `preventDefault()` and waits for
+ * the matching `-response` event. `after` may also be async and is awaited by
+ * the Node runner.
  *
- * This template runs in the page, so `document`, `window`, `fetch`, and DOM
- * APIs are available. Node APIs such as `require`, `fs`, and `process` are
- * NOT available here. For external Node hooks that need those APIs, use the
- * `snapshot_node.js` scaffold.
+ * `before` runs in the page, so browser DOM APIs are available. `after` runs
+ * in Node with a Linkedom `document`/`window`, so DOM changes are possible but
+ * Linkedom is not a real browser: property reflection is incomplete. Use
+ * `setAttribute()`/`getAttribute()` for attributes that must persist, e.g.
+ * `video.setAttribute("src", url)` rather than `video.src = url`. Node APIs
+ * such as `require`, `fs`, and `process` are not exposed to user code. For
+ * external Node hooks that need those APIs, use `snapshot_node.js`.
  *
  * ---------------------------------------------------------------------------
  * Config keys available in every hook
@@ -84,8 +88,10 @@ async function before(url, config) {
 
 async function after(url, config) {
   /**
-   * Runs after SingleFile processes the DOM, before serialization.
-   * Use it for DOM-level final adjustments.
+   * Runs after the snapshot HTML file is written. DOM changes are saved back.
+   * The current implementation runs in a Linkedom DOM, not a real browser:
+   * property reflection is incomplete, so use setAttribute()/getAttribute()
+   * for attributes that must persist.
    *
    * Example - inject dark mode:
    *   const style = document.createElement('style');

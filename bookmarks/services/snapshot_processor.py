@@ -1,5 +1,7 @@
+import json
 import logging
 import os
+import subprocess
 from contextlib import suppress
 
 from bookmarks.services import singlefile
@@ -42,7 +44,7 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
     external_after = []
     replace_scripts = []
     browser_before = []
-    browser_after = []
+    builtin_after = []
 
     for entry in scripts:
         script_path = entry.get('path', '')
@@ -58,7 +60,7 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
                 external_before.append(entry)
         elif hook == 'after':
             if script_path.endswith('.js') and singlefile.uses_builtin_engine(script_path, 'after'):
-                browser_after.append(script_path)
+                builtin_after.append(script_path)
             else:
                 external_after.append(entry)
 
@@ -76,7 +78,7 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
 
     # 2. Run replace hook or built-in engine
     if replace_scripts:
-        if browser_before or browser_after:
+        if browser_before:
             logger.warning(
                 "Snapshot SingleFile browser hooks are ignored when a replace hook is present"
             )
@@ -90,15 +92,17 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
         config_copy = dict(config)
         if browser_before:
             config_copy['_browser_before_scripts'] = browser_before
-        if browser_after:
-            config_copy['_browser_after_scripts'] = browser_after
         if before_html_path:
             config_copy['_before_html_path'] = before_html_path
             _create_snapshot(url, filepath, config_copy)
         else:
             _create_snapshot(url, filepath, config_copy)
 
-    # 3. Run external after hooks
+    # 3. Run built-in after hooks against the saved HTML
+    for script_path in builtin_after:
+        _run_builtin_after_hook(script_path, url, filepath, config)
+
+    # 4. Run external after hooks
     for entry in external_after:
         script_path = entry.get('path', '')
         logger.debug("Running snapshot after hook: %s", script_path)
@@ -109,6 +113,41 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
     if before_html_path:
         with suppress(OSError):
             os.unlink(before_html_path)
+
+
+def _run_builtin_after_hook(script_path: str, url: str, filepath: str, config: dict):
+    """Run a SingleFile built-in after hook against the saved snapshot HTML."""
+    import site_adapters.services as _sa_services
+    from site_adapters.services.engine.script_runner import _sanitize_config
+
+    runner = os.path.join(
+        os.path.dirname(_sa_services.__file__),
+        "engine",
+        "scripts",
+        "snapshot_browser_after.js",
+    )
+    payload = {
+        "scriptPath": script_path,
+        "url": url,
+        "config": _sanitize_config(config),
+        "outputPath": filepath,
+    }
+    try:
+        result = subprocess.run(
+            ["node", runner],
+            input=json.dumps(payload, ensure_ascii=False),
+            capture_output=True,
+            text=True,
+            timeout=config.get("timeout") or 30,
+        )
+        if result.returncode != 0:
+            logger.error(
+                "Snapshot built-in after hook failed: %s stderr=%s",
+                script_path,
+                result.stderr[:500],
+            )
+    except subprocess.TimeoutExpired:
+        logger.error("Snapshot built-in after hook timed out: %s", script_path)
 
 
 
