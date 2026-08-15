@@ -40,7 +40,7 @@ class ReaderProcessorTestCase(TestCase):
             result = reader_processor.parse_html("<p>original</p>", "https://example.com")
 
         self.assertEqual(result, {"title": "ok"})
-        mock_defuddle.assert_called_once_with("<p>normalized</p>", url="https://example.com")
+        mock_defuddle.assert_called_once_with("<p>normalized</p>", url="https://example.com", options=None)
 
     def test_reader_defuddle_args_are_passed_to_defuddle(self):
         config = {"defuddle_args": {"contentSelector": ".article", "ignored": True}}
@@ -51,14 +51,11 @@ class ReaderProcessorTestCase(TestCase):
                 return_value=config,
             ),
             mock.patch(
-                "bookmarks.services.reader_processor._parse_url_with_options",
+                "bookmarks.services.defuddle.parse_url",
                 return_value={"title": "ok"},
             ) as mock_parse,
         ):
             result = reader_processor.parse_url("https://example.com")
 
         self.assertEqual(result, {"title": "ok"})
-        mock_parse.assert_called_once_with(
-            "https://example.com",
-            {"contentSelector": ".article"},
-        )
+        mock_parse.assert_called_once_with("https://example.com", options={"contentSelector": ".article"})

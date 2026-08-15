@@ -25,6 +25,25 @@
     const config = window.__linkding_cleanup_config || {};
     const stats = { removed: 0, kept: 0, carousels: 0, media: 0 };
 
+    const PRESERVE_WHITE_SPACE = new Set(["pre", "pre-wrap", "break-spaces", "pre-line"]);
+    const BLOCK_TAGS = new Set([
+      "address", "article", "aside", "blockquote", "body", "caption", "dd",
+      "details", "dialog", "div", "dl", "dt", "fieldset", "figcaption",
+      "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6",
+      "header", "hgroup", "hr", "html", "legend", "li", "main", "menu",
+      "nav", "ol", "p", "pre", "section", "table", "tbody", "td", "tfoot",
+      "th", "thead", "tr", "ul",
+    ]);
+    const PRESERVED_INLINE_TAGS = new Set([
+      "a", "abbr", "b", "br", "cite", "code", "em", "i", "img", "mark",
+      "q", "s", "small", "strong", "sub", "sup", "time", "u",
+    ]);
+    const CAN_CONTAIN_BLOCK = new Set([
+      "article", "aside", "blockquote", "body", "dd", "details", "div",
+      "figcaption", "figure", "footer", "form", "header", "li", "main",
+      "nav", "ol", "section", "td", "th", "ul",
+    ]);
+
     const shadowHosts = new Map();
     const queryAll = (root, selector) => {
       const matches = Array.from(root.querySelectorAll(selector));
@@ -56,6 +75,102 @@
       }
       return false;
     };
+
+    const hasBlockDescendant = (node) => {
+      if (!node.querySelectorAll) return false;
+      return Array.from(node.querySelectorAll("*")).some((el) =>
+        BLOCK_TAGS.has(el.tagName.toLowerCase())
+      );
+    };
+
+    const rebuildParagraphs = (root) => {
+      const doc = root.ownerDocument;
+      const original = Array.from(root.childNodes);
+      root.replaceChildren();
+      let currentParagraph = null;
+
+      const ensureParagraph = () => {
+        if (!currentParagraph) {
+          currentParagraph = doc.createElement("p");
+          root.appendChild(currentParagraph);
+        }
+        return currentParagraph;
+      };
+
+      const closeParagraph = () => {
+        currentParagraph = null;
+      };
+
+      const appendInline = (node) => {
+        ensureParagraph().appendChild(node);
+      };
+
+      const processText = (text) => {
+        if (!text) return;
+        if (!/\n|\r/.test(text)) {
+          if (text.trim() || currentParagraph) appendInline(doc.createTextNode(text));
+          return;
+        }
+        const lines = text.split(/\r?\n/);
+        for (let index = 0; index < lines.length; index++) {
+          const line = lines[index];
+          if (!line.trim()) {
+            closeParagraph();
+            continue;
+          }
+          appendInline(doc.createTextNode(line.replace(/^[ \t]+/, "")));
+          if (index < lines.length - 1 && lines[index + 1].trim()) {
+            ensureParagraph().appendChild(doc.createElement("br"));
+          }
+        }
+      };
+
+      const processNode = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+          processText(node.textContent || "");
+          return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+        const tag = node.tagName.toLowerCase();
+        if (["pre", "code", "script", "style", "textarea"].includes(tag)) {
+          closeParagraph();
+          root.appendChild(node);
+          return;
+        }
+        if (BLOCK_TAGS.has(tag) || hasBlockDescendant(node)) {
+          closeParagraph();
+          root.appendChild(node);
+          return;
+        }
+        if (PRESERVED_INLINE_TAGS.has(tag)) {
+          appendInline(node);
+          return;
+        }
+        Array.from(node.childNodes).forEach(processNode);
+      };
+
+      original.forEach(processNode);
+    };
+
+    const normalizePreservedWhitespace = () => {
+      const preserving = queryAll(document, "*").filter((el) =>
+        PRESERVE_WHITE_SPACE.has(getComputedStyle(el).whiteSpace)
+      );
+      const roots = preserving.filter((el) =>
+        !preserving.some((parent) => parent !== el && parent.contains(el))
+      );
+
+      roots.forEach((root) => {
+        const tag = root.tagName.toLowerCase();
+        if (["html", "head", "pre", "code", "script", "style", "textarea"].includes(tag)) return;
+        if (!CAN_CONTAIN_BLOCK.has(tag)) return;
+        if (!/[\n\r]/.test(root.textContent || "")) return;
+        rebuildParagraphs(root);
+      });
+    };
+
+    normalizePreservedWhitespace();
 
     const keep = [];
     for (const selector of config.keep || []) {
