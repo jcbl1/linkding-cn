@@ -226,7 +226,7 @@ def _run_defuddle(input_data: dict, options: dict = None, timeout: int = 60) -> 
     return parsed
 
 
-def parse_html(html_content: str, url: str = "") -> dict:
+def parse_html(html_content: str, url: str = "", options: dict = None) -> dict:
     """
     Parse raw HTML with defuddle and return clean article content.
 
@@ -242,15 +242,15 @@ def parse_html(html_content: str, url: str = "") -> dict:
         tmp_path = tmp.name
 
     try:
-        return _run_defuddle({"htmlPath": tmp_path, "url": url}, timeout=30)
+        return _run_defuddle({"htmlPath": tmp_path, "url": url}, options=options, timeout=30)
     finally:
         os.unlink(tmp_path)
 
 
-def parse_url(url: str) -> dict:
+def parse_url(url: str, options: dict = None) -> dict:
     """
     Parse a URL directly with defuddle (defuddle handles fetching).
     Returns dict with keys: title, content, description, author, site, wordCount
     Raises DefuddleError on failure.
     """
-    return _run_defuddle({"url": url})
+    return _run_defuddle({"url": url}, options=options)

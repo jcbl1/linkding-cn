@@ -1,6 +1,4 @@
 import logging
-import tempfile
-import os
 
 from site_adapters.services.config.resolver import get_reader_config
 
@@ -46,12 +44,9 @@ def parse_html(html_content: str, url: str = "", username: str = "") -> dict:
     html_content = _normalize_html_for_reader(html_content)
     config = get_reader_config(url, username=username)
 
-    if config:
-        defuddle_opts = _extract_defuddle_options(config)
-        if defuddle_opts:
-            return _parse_html_with_options(html_content, url, defuddle_opts)
+    defuddle_opts = _extract_defuddle_options(config) if config else {}
 
-    return defuddle.parse_html(html_content, url=url)
+    return defuddle.parse_html(html_content, url=url, options=defuddle_opts or None)
 
 
 def parse_url(url: str, username: str = "") -> dict:
@@ -66,34 +61,6 @@ def parse_url(url: str, username: str = "") -> dict:
 
     config = get_reader_config(url, username=username)
 
-    if config:
-        defuddle_opts = _extract_defuddle_options(config)
-        if defuddle_opts:
-            return _parse_url_with_options(url, defuddle_opts)
+    defuddle_opts = _extract_defuddle_options(config) if config else {}
 
-    return defuddle.parse_url(url)
-
-
-def _parse_html_with_options(html_content: str, url: str, options: dict) -> dict:
-    """Call defuddle module API via Node.js wrapper (supports contentSelector etc.)."""
-    from bookmarks.services.defuddle import _inject_base_tag, _run_defuddle
-
-    html_content = _inject_base_tag(html_content, url)
-
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".html", delete=False, encoding="utf-8"
-    ) as tmp:
-        tmp.write(html_content)
-        tmp_path = tmp.name
-
-    try:
-        return _run_defuddle({"htmlPath": tmp_path, "url": url}, options=options, timeout=30)
-    finally:
-        os.unlink(tmp_path)
-
-
-def _parse_url_with_options(url: str, options: dict) -> dict:
-    """Call defuddle module API directly via Node.js wrapper."""
-    from bookmarks.services.defuddle import _run_defuddle
-
-    return _run_defuddle({"url": url}, options=options)
+    return defuddle.parse_url(url, options=defuddle_opts or None)
