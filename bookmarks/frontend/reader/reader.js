@@ -440,6 +440,19 @@ function postProcess(articleContent) {
     figure.classList.add("ld-carousel");
     figure.querySelectorAll("img, video, iframe").forEach((media) => {
       media.classList.add("ld-carousel-item");
+      const width = parseFloat(media.getAttribute("width"));
+      const height = parseFloat(media.getAttribute("height"));
+      media.style.flex = "0 0 auto";
+      media.style.maxWidth = "none";
+      if (media.tagName === "IFRAME") {
+        if (width) media.style.width = `${width}px`;
+        if (height) media.style.height = `${height}px`;
+      } else {
+        media.style.width = "auto";
+        media.style.height = "auto";
+        media.style.maxHeight = "80vh";
+        media.style.objectFit = "contain";
+      }
     });
   });
 }

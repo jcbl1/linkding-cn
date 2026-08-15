@@ -100,12 +100,18 @@ html.reader-mode {
 
   /* Processed carousels: compact horizontal media list */
   figure.ld-carousel {
+    all: initial;
+    box-sizing: border-box;
     display: flex;
+    flex-direction: row;
     overflow-x: auto;
+    overflow-y: hidden;
     gap: 12px;
     max-width: 100%;
+    max-height: 80vh;
     margin: 1em 0;
     scrollbar-width: thin;
+    scrollbar-gutter: stable;
     scrollbar-color: var(--secondary-border-color) transparent;
     align-items: center;
   }
@@ -126,18 +132,17 @@ html.reader-mode {
   }
 
   figure.ld-carousel img,
-  figure.ld-carousel video {
+  figure.ld-carousel video,
+  figure.ld-carousel iframe {
+    all: initial;
+    box-sizing: border-box;
+    display: block;
     flex: 0 0 auto;
-    max-width: 80%;
+    max-width: none;
     max-height: 80vh;
     width: auto;
     height: auto;
     object-fit: contain;
-  }
-
-  figure.ld-carousel iframe {
-    flex: 0 0 auto;
-    max-width: 80%;
   }
 
   /* Wide tables: horizontal scroll wrapper */

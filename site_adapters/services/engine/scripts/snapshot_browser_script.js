@@ -206,42 +206,220 @@
       return items;
     };
 
+    // Ignore common lazy-load placeholders when resolving real media URLs.
+    const isPlaceholderSrc = (value) => {
+      if (!value) return true;
+      const trimmed = value.trim();
+      if (!trimmed || trimmed === "data:,") return true;
+      return /^data:image\/(?:gif|png);base64,(?:R0lGODlhAQAB|iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB)/i.test(
+        trimmed
+      );
+    };
+
+    // Prefer the highest-resolution srcset candidate.
+    const selectSrcset = (value) => {
+      let best = null;
+      for (const raw of String(value || "").split(",")) {
+        const [urlPart, descriptor = ""] = raw.trim().split(/\s+/);
+        const url = urlPart && urlPart.trim();
+        if (!url || isPlaceholderSrc(url)) continue;
+        let rank = 1;
+        if (/w$/i.test(descriptor)) {
+          rank = parseInt(descriptor, 10) || 0;
+        } else if (/x$/i.test(descriptor)) {
+          rank = (parseFloat(descriptor) || 0) * 1000;
+        }
+        if (!best || rank > best.rank) best = { url, rank };
+      }
+      return best ? best.url : null;
+    };
+
+    const toAbsoluteUrl = (value) => {
+      if (!value || /^(?:data:|blob:|about:|#)/i.test(value)) return value;
+      try {
+        return new URL(value, window.location.href).href;
+      } catch {
+        return value;
+      }
+    };
+
+    // Shared by lazy-image fixing and carousel extraction.
     const resolveMediaUrl = (el) => {
       if (el.tagName === "VIDEO") {
         const source = el.querySelector("source");
-        return el.getAttribute("src") || (source && source.getAttribute("src")) || null;
+        const candidates = [
+          el.currentSrc,
+          el.getAttribute("src"),
+          source && (source.currentSrc || source.getAttribute("src") || source.getAttribute("data-src")),
+        ];
+        const value = candidates.find((candidate) => !isPlaceholderSrc(candidate));
+        return value ? toAbsoluteUrl(value) : null;
       }
-      if (el.tagName === "IFRAME") return el.getAttribute("src") || null;
-      const attrs = ["src", "data-src", "data-srcset", "data-actualsrc", "data-original", "data-lazy-src", "data-original-src", "data-actual-image", "data-lazy", "data-defer-src"];
+      if (el.tagName === "IFRAME") return toAbsoluteUrl(el.getAttribute("src"));
+
+      const srcset = el.getAttribute("srcset") || el.getAttribute("data-srcset");
+      const srcsetUrl = selectSrcset(srcset);
+      if (srcsetUrl) return toAbsoluteUrl(srcsetUrl);
+
+      const attrs = ["data-src", "data-actualsrc", "data-original", "data-lazy-src", "data-original-src", "data-actual-image", "data-lazy", "data-defer-src", "src"];
       for (const attr of attrs) {
         const value = el.getAttribute(attr);
-        if (value) return value;
+        if (value && !isPlaceholderSrc(value)) return toAbsoluteUrl(value);
       }
-      const srcset = el.getAttribute("srcset") || el.getAttribute("data-srcset");
-      if (srcset) {
-        const first = srcset.split(",")[0].trim();
-        return first.split(/\s+/)[0] || null;
+
+      const currentSrc = el.currentSrc;
+      if (currentSrc && !isPlaceholderSrc(currentSrc)) return toAbsoluteUrl(currentSrc);
+      return null;
+    };
+
+    const setImportantStyles = (element, styles) => {
+      for (const [property, value] of Object.entries(styles)) {
+        element.style.setProperty(property, value, "important");
+      }
+    };
+
+    // Use the rendered media box when possible, then natural/container size.
+    const getMediaSize = (el, fallbackRect) => {
+      let width = 0;
+      let height = 0;
+      try {
+        const rect = el.getBoundingClientRect();
+        if (rect.width && rect.height) {
+          width = rect.width;
+          height = rect.height;
+        }
+      } catch {}
+      if (!width) width = el.offsetWidth || 0;
+      if (!height) height = el.offsetHeight || 0;
+      if ((!width || !height) && el.naturalWidth) {
+        width = width || el.naturalWidth;
+        height = height || el.naturalHeight;
+      }
+      if ((!width || !height) && fallbackRect) {
+        width = width || fallbackRect.width || 0;
+        height = height || fallbackRect.height || 0;
+      }
+      return { width: Math.round(width) || 0, height: Math.round(height) || 0 };
+    };
+
+    const prepareCarouselMediaForMeasurement = (el) => {
+      if (el.tagName === "IFRAME") {
+        el.style.width = "100%";
+        el.style.height = "100%";
+        return;
+      }
+      el.style.display = "block";
+      el.style.width = "100%";
+      el.style.height = "100%";
+      el.style.maxWidth = "none";
+      el.style.maxHeight = "none";
+      el.style.objectFit = "contain";
+    };
+
+    const applyCarouselItemStyle = (item, size) => {
+      item.style.cssText = [
+        "box-sizing:border-box",
+        "display:block",
+        "flex:0 0 auto",
+        "width:auto",
+        "height:100%",
+        "max-height:100%",
+        "max-width:none",
+        "min-height:0",
+        "object-fit:contain",
+        "object-position:center",
+      ].join(";");
+      if (item.tagName === "IFRAME" && size.width) {
+        item.style.width = `${size.width}px`;
+      }
+      if (size.width && size.height) {
+        item.setAttribute("width", String(size.width));
+        item.setAttribute("height", String(size.height));
+      } else {
+        item.removeAttribute("width");
+        item.removeAttribute("height");
+      }
+    };
+
+    const getInlineMaxHeight = (element) => {
+      let current = element;
+      while (current && current.nodeType === 1) {
+        const styleText = current.getAttribute("style") || "";
+        const match = styleText.match(/max-height:\s*([\d.]+)px/i);
+        if (match) return parseFloat(match[1]);
+        const parent = current.parentNode;
+        if (parent && parent.nodeType === 11) {
+          current = parent.host || null;
+        } else {
+          current = parent;
+        }
       }
       return null;
     };
 
-    const ensureCarouselStyles = () => {
-      if (document.getElementById("ld-carousel-style")) return;
-      const style = document.createElement("style");
-      style.id = "ld-carousel-style";
-      style.textContent = [
-        '[aria-label="ld-carousel"]{scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.35) rgba(0,0,0,.08);align-items:center}',
-        '[aria-label="ld-carousel"]::-webkit-scrollbar{width:8px;height:8px;display:block}',
-        '[aria-label="ld-carousel"]::-webkit-scrollbar-thumb{background:rgba(0,0,0,.35);border-radius:8px}',
-        '[aria-label="ld-carousel"]::-webkit-scrollbar-track{background:rgba(0,0,0,.08)}'
-      ].join("");
-      document.head.appendChild(style);
+    // Some carousel wrappers constrain a descendant (for example Reddit's
+    // faceplate-carousel). Preserve that ceiling in the snapshot.
+    const getDescendantMaxHeight = (root) => {
+      let maxHeight = null;
+      const walk = (node) => {
+        node.querySelectorAll("*").forEach((el) => {
+          if (el.shadowRoot) walk(el.shadowRoot);
+          const styleText = el.getAttribute("style") || "";
+          const inline = styleText.match(/max-height:\s*([\d.]+)px/i);
+          if (inline) {
+            const parsed = parseFloat(inline[1]);
+            if (parsed > 0 && (maxHeight === null || parsed < maxHeight)) {
+              maxHeight = parsed;
+            }
+          }
+          const computed = parseFloat(getComputedStyle(el).maxHeight);
+          if (computed > 0 && (maxHeight === null || computed < maxHeight)) {
+            maxHeight = computed;
+          }
+        });
+      };
+      walk(root);
+      return maxHeight;
+    };
+
+    // Keep the original container as the layout host and isolate the media
+    // list inside an open shadow root so page CSS cannot leak into it.
+    const mountCarousel = (container, figure) => {
+      const root = container.shadowRoot || container;
+      while (root.firstChild) root.removeChild(root.firstChild);
+      const host = container.ownerDocument.createElement("ld-carousel");
+      setImportantStyles(host, {
+        "box-sizing": "border-box",
+        display: "block",
+        width: "100%",
+        height: "100%",
+        "min-height": "0",
+        "max-width": "100%",
+      });
+      root.appendChild(host);
+      host.attachShadow({ mode: "open" }).appendChild(figure);
     };
 
     const processCarousel = (container) => {
       const seen = new Set();
       const items = [];
+      let containerRect = null;
+      let fixedMaxHeight = null;
+      try {
+        const rect = container.getBoundingClientRect();
+        if (rect.width || rect.height) {
+          containerRect = { width: rect.width, height: rect.height };
+        }
+        const computed = getComputedStyle(container);
+        const parsedMaxHeight = parseFloat(computed.maxHeight);
+        fixedMaxHeight =
+          parsedMaxHeight > 0
+            ? parsedMaxHeight
+            : getInlineMaxHeight(container);
+        if (!fixedMaxHeight) fixedMaxHeight = getDescendantMaxHeight(container);
+      } catch {}
       collectMedia(container).forEach((el) => {
+        prepareCarouselMediaForMeasurement(el);
         const url = resolveMediaUrl(el);
         if (el.tagName === "IMG") {
           if (!url || seen.has(url)) return;
@@ -249,6 +427,7 @@
           const img = container.ownerDocument.createElement("img");
           img.src = url;
           img.alt = el.getAttribute("alt") || "";
+          applyCarouselItemStyle(img, getMediaSize(el, containerRect));
           items.push(img);
         } else if (el.tagName === "VIDEO") {
           if (url && seen.has(url)) return;
@@ -259,37 +438,72 @@
             const img = container.ownerDocument.createElement("img");
             img.src = poster;
             img.alt = el.getAttribute("alt") || "";
+            applyCarouselItemStyle(img, getMediaSize(el, containerRect));
             items.push(img);
             return;
           }
           if (url) seen.add(url);
           const video = el.cloneNode(true);
           if (!video.hasAttribute("controls")) video.setAttribute("controls", "");
+          applyCarouselItemStyle(video, getMediaSize(el, containerRect));
           items.push(video);
         } else if (el.tagName === "IFRAME") {
           if (!url || seen.has(url)) return;
           seen.add(url);
-          items.push(el.cloneNode(true));
+          const frame = el.cloneNode(true);
+          applyCarouselItemStyle(frame, getMediaSize(el, containerRect));
+          items.push(frame);
         }
       });
       if (!items.length) return 0;
 
-      ensureCarouselStyles();
       const figure = container.ownerDocument.createElement("figure");
       figure.setAttribute("aria-label", "ld-carousel");
-      figure.style.cssText = "display:flex;overflow-x:auto;gap:12px;max-width:100%;";
+      const capturedHeight =
+        containerRect && containerRect.height
+          ? Math.round(containerRect.height)
+          : 0;
+      // Prefer dynamic height in the snapshot, but keep fixed containers that
+      // explicitly constrain their carousel. Reader uses the height attribute.
+      const containerHeightStyle = (container.style.height || "").trim();
+      const figureHeight =
+        fixedMaxHeight && capturedHeight
+          ? `${Math.min(capturedHeight, Math.round(fixedMaxHeight))}px`
+          : containerHeightStyle &&
+            containerHeightStyle !== "auto" &&
+            !containerHeightStyle.includes("calc(") &&
+            !containerHeightStyle.includes("%")
+          ? containerHeightStyle
+          : "100%";
+      const figureMaxHeight =
+        fixedMaxHeight && capturedHeight
+          ? `${Math.min(capturedHeight, Math.round(fixedMaxHeight))}px`
+          : figureHeight;
+      figure.style.cssText = [
+        "box-sizing:border-box",
+        "display:flex",
+        "flex-direction:row",
+        "overflow-x:auto",
+        "overflow-y:hidden",
+        "gap:12px",
+        "width:100%",
+        `height:${figureHeight}`,
+        `max-height:${figureMaxHeight}`,
+        "max-width:100%",
+        "min-height:0",
+        "margin:0",
+        "align-items:center",
+        "scrollbar-width:thin",
+        "scrollbar-color:rgba(0,0,0,.35) rgba(0,0,0,.08)",
+        "scrollbar-gutter:stable",
+      ].join(";");
+      if (capturedHeight) {
+        figure.setAttribute("height", String(capturedHeight));
+      }
       items.forEach((item) => {
-        item.style.flex = "0 0 auto";
-        item.style.maxWidth = "80%";
-        item.style.maxHeight = "80vh";
-        item.style.width = "auto";
-        if (item.tagName !== "IFRAME") {
-          item.style.height = "auto";
-          item.style.objectFit = "contain";
-        }
         figure.appendChild(item);
       });
-      container.replaceWith(figure);
+      mountCarousel(container, figure);
       return items.length;
     };
 
@@ -331,11 +545,20 @@
 
     // Fix lazy-loaded images after keep/remove to limit work to retained content
     if (config.lazy) {
-      const attrs = Array.isArray(config.lazy) ? config.lazy : ["data-src", "data-actualsrc", "data-original", "data-lazy-src", "data-original-src", "data-actual-image", "data-lazy", "data-defer-src"];
       queryAll(document, "img").forEach((img) => {
-        for (const attr of attrs) {
-          const value = img.getAttribute(attr);
-          if (value && !img.getAttribute('src')) { img.setAttribute('src', value); break; }
+        const currentSrc = img.getAttribute("src");
+        if (!isPlaceholderSrc(currentSrc)) return;
+        if (Array.isArray(config.lazy)) {
+          for (const attr of config.lazy) {
+            const value = img.getAttribute(attr);
+            if (value && !isPlaceholderSrc(value)) {
+              img.setAttribute("src", toAbsoluteUrl(value));
+              break;
+            }
+          }
+        } else {
+          const resolved = resolveMediaUrl(img);
+          if (resolved) img.setAttribute("src", resolved);
         }
       });
     }

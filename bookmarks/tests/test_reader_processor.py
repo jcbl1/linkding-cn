@@ -42,6 +42,26 @@ class ReaderProcessorTestCase(TestCase):
         self.assertEqual(result, {"title": "ok"})
         mock_defuddle.assert_called_once_with("<p>normalized</p>", url="https://example.com", options=None)
 
+    def test_restore_missing_carousels_keeps_carousel_before_text(self):
+        html = """
+        <main>
+          <figure aria-label="ld-carousel"><img src="/image.jpg"></figure>
+          <p>article text</p>
+        </main>
+        """
+        extracted = "<article><p>article text</p></article>"
+
+        carousels = reader_processor._collect_carousels(html)
+        restored = reader_processor._restore_missing_carousels(
+            html, extracted, carousels
+        )
+
+        self.assertIn('<figure aria-label="ld-carousel"', restored)
+        self.assertLess(
+            restored.index('<figure aria-label="ld-carousel"'),
+            restored.index("<p>article text</p>"),
+        )
+
     def test_reader_defuddle_args_are_passed_to_defuddle(self):
         config = {"defuddle_args": {"contentSelector": ".article", "ignored": True}}
 
