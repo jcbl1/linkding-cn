@@ -2,7 +2,6 @@ import os
 import tempfile
 from unittest import mock
 
-from django.conf import settings
 from django.test import TestCase, override_settings
 
 from bookmarks.services import singlefile
@@ -70,11 +69,6 @@ class SingleFileServiceTestCase(TestCase):
             self.assertEqual(called_args[0], "single-file")
             self.assertEqual(called_args[-2], "http://example.com")
             self.assertEqual(called_args[-1], self.temp_html_filepath)
-            self.assertIn(
-                "--browser-arg=--disable-blink-features=AutomationControlled",
-                called_args,
-            )
-            self.assertIn(f"--user-agent={settings.LD_DEFAULT_USER_AGENT}", called_args)
             self.assertEqual(
                 called_args.count("--browser-arg=--headless=new"),
                 1,
@@ -111,11 +105,32 @@ class SingleFileServiceTestCase(TestCase):
             self.assertIn("--another-option", called_args)
             self.assertIn("another value", called_args)
             self.assertIn("--third-option=third value", called_args)
-            self.assertIn(
-                "--browser-arg=--disable-blink-features=AutomationControlled",
-                called_args,
-            )
-            self.assertIn(f"--user-agent={settings.LD_DEFAULT_USER_AGENT}", called_args)
+
+    def test_snapshot_processor_default_config_includes_migrated_args(self):
+        mock_process = self.successful_singlefile_process()
+        self.create_test_file()
+
+        from site_adapters.services.config.loader import _cache as adapter_cache
+
+        adapter_cache.invalidate()
+        try:
+            with mock.patch(
+                "bookmarks.services.singlefile.subprocess.Popen",
+                return_value=mock_process,
+            ) as mock_popen:
+                from bookmarks.services.snapshot_processor import create_snapshot
+
+                create_snapshot("http://example.com", self.temp_html_filepath)
+
+                called_args = mock_popen.call_args.args[0]
+                self.assertIn(
+                    "--browser-arg=--disable-blink-features=AutomationControlled",
+                    called_args,
+                )
+                self.assertTrue(any(arg.startswith("--user-agent=") for arg in called_args))
+                self.assertIn("--block-fonts", called_args)
+        finally:
+            adapter_cache.invalidate()
 
     def test_create_snapshot_default_timeout_setting(self):
         mock_process = self.successful_singlefile_process()
