@@ -105,13 +105,34 @@ html.reader-mode {
     gap: 12px;
     max-width: 100%;
     margin: 1em 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--secondary-border-color) transparent;
+    align-items: center;
+  }
+
+  figure.ld-carousel::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    display: block;
+  }
+
+  figure.ld-carousel::-webkit-scrollbar-thumb {
+    background: var(--secondary-border-color);
+    border-radius: 4px;
+  }
+
+  figure.ld-carousel::-webkit-scrollbar-track {
+    background: transparent;
   }
 
   figure.ld-carousel img,
   figure.ld-carousel video {
     flex: 0 0 auto;
     max-width: 80%;
+    max-height: 80vh;
+    width: auto;
     height: auto;
+    object-fit: contain;
   }
 
   figure.ld-carousel iframe {

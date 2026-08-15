@@ -110,6 +110,19 @@
       return null;
     };
 
+    const ensureCarouselStyles = () => {
+      if (document.getElementById("ld-carousel-style")) return;
+      const style = document.createElement("style");
+      style.id = "ld-carousel-style";
+      style.textContent = [
+        '[aria-label="ld-carousel"]{scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.35) rgba(0,0,0,.08);align-items:center}',
+        '[aria-label="ld-carousel"]::-webkit-scrollbar{width:8px;height:8px;display:block}',
+        '[aria-label="ld-carousel"]::-webkit-scrollbar-thumb{background:rgba(0,0,0,.35);border-radius:8px}',
+        '[aria-label="ld-carousel"]::-webkit-scrollbar-track{background:rgba(0,0,0,.08)}'
+      ].join("");
+      document.head.appendChild(style);
+    };
+
     const processCarousel = (container) => {
       const seen = new Set();
       const items = [];
@@ -146,13 +159,19 @@
       });
       if (!items.length) return 0;
 
+      ensureCarouselStyles();
       const figure = container.ownerDocument.createElement("figure");
       figure.setAttribute("aria-label", "ld-carousel");
       figure.style.cssText = "display:flex;overflow-x:auto;gap:12px;max-width:100%;";
       items.forEach((item) => {
         item.style.flex = "0 0 auto";
         item.style.maxWidth = "80%";
-        if (item.tagName !== "IFRAME") item.style.height = "auto";
+        item.style.maxHeight = "80vh";
+        item.style.width = "auto";
+        if (item.tagName !== "IFRAME") {
+          item.style.height = "auto";
+          item.style.objectFit = "contain";
+        }
         figure.appendChild(item);
       });
       container.replaceWith(figure);
