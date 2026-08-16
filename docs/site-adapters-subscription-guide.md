@@ -655,6 +655,9 @@ toggle 最终会影响 `remove_elements` 和 `keep_elements`：
 
 阅读模式使用 defuddle 引擎从页面中提取正文内容，所有配置通过 `defuddle_args` 完成。reader 区块不支持自定义脚本。
 
+`contentSelector` 支持 CSS、XPath 和 JSONPath：HTML/XML 快照使用 CSS 或 XPath，JSON 快照使用 CSS 或 JSONPath。
+例如 HTML/XML 可写 `["//main/article", ".article-body"]`，JSON 可写 `["$.data.children[0].data.selftext"]`。
+
 ### 8.1 defuddle_args 配置
 
 ```jsonc
@@ -1511,7 +1514,7 @@ cp data/site_adapters/etc/templates/metadata_py.py data/site_adapters/adapters/l
 
 | 参数 | 说明 |
 |------|------|
-| `contentSelector` | 内容区域选择器 |
+| `contentSelector` | 内容区域选择器；HTML/XML 支持 CSS/XPath，JSON 支持 CSS/JSONPath |
 | `debug` | 调试模式 |
 | `fetch` | 抓取配置 |
 | `includeReplies` | 包含回复内容 |

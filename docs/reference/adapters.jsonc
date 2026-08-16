@@ -202,7 +202,7 @@
         "auth": null,                                      // Authentication config.
       // Defuddle options; only contentSelector is shown, all other options are commented out
         "defuddle_args": {
-          "contentSelector": [".article"],                 // Main content selector. An array is tried in order and the first matching selector wins. Bypasses automatic content detection.
+          "contentSelector": [".article"],                 // Main content selector. HTML/XML snapshots support CSS and XPath; JSON snapshots support CSS and JSONPath. An array is tried in order and the first matching selector wins. Bypasses automatic content detection.
 //           "markdown": true,                                // Convert extracted content to Markdown. Defaults to false.
 //           "separateMarkdown": false,                       // Include Markdown in the response alongside HTML. Defaults to false.
 //           "includeReplies": "extractors",                  // Include replies. "extractors" includes replies from site-specific extractors; true includes all replies; false excludes all replies.

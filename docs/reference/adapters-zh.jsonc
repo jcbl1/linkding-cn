@@ -202,7 +202,7 @@
         "auth": null,                                      // 认证配置。
       // Defuddle 参数；仅展示 contentSelector，其余参数均已注释
         "defuddle_args": {
-          "contentSelector": [".article"],                 // 正文内容选择器。数组会按顺序尝试，使用第一个匹配项，并绕过自动正文识别。
+          "contentSelector": [".article"],                 // 正文内容选择器。HTML/XML 快照支持 CSS 和 XPath；JSON 快照支持 CSS 和 JSONPath。数组会按顺序尝试，使用第一个匹配项，并绕过自动正文识别。
 //           "markdown": true,                                // 将提取内容转换为 Markdown。默认为 false。
 //           "separateMarkdown": false,                       // 在响应中同时包含 HTML 和 Markdown。默认为 false。
 //           "includeReplies": "extractors",                  // 是否包含回复。"extractors" 包含站点提取器的回复；true 包含全部回复；false 排除回复。

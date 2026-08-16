@@ -649,7 +649,8 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
             f"""
             <a href="{snapshot_url}"
                class="date-link date-link-exists"
-               title="View latest snapshot" target="_blank" rel="noopener">
+               title="View latest snapshot" target="_blank"
+               data-turbo="false" rel="noopener">
                 {formatted_date}
             </a>
             """,

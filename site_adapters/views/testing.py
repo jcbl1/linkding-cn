@@ -434,6 +434,7 @@ def _write_reader_test_asset(
 def _test_reader(url, base_dir, username, entries):
     hostname = urlparse(url).hostname or ''
     config = get_reader_config(url, username=username)
+    snapshot_config = get_snapshot_config(url, username=username)
     before = _snapshot_credential_state(config, username, hostname) if config else {}
 
     show_cfg = show_config(url, base_dir)
@@ -443,12 +444,29 @@ def _test_reader(url, base_dir, username, entries):
     from bookmarks.services import reader_processor
     from bookmarks.services.snapshot_processor import create_snapshot
     os.makedirs(TEST_ASSETS_DIR, exist_ok=True)
-    snap_filename = 'snapshot_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
+    snapshot_extension = (
+        normalize_content_type((snapshot_config or {}).get('content_type')) or 'html'
+    )
+    snap_filename = (
+        'snapshot_'
+        + _timestamp()
+        + '_'
+        + _sanitize_url_for_filename(url)
+        + '.'
+        + snapshot_extension
+    )
     snap_path = os.path.join(TEST_ASSETS_DIR, snap_filename)
     create_snapshot(url, snap_path, username=username)
     with open(snap_path, encoding='utf-8') as f:
-        html = f.read()
-    result = reader_processor.parse_html(html, url=url, username=username)
+        raw_content = f.read()
+    if snapshot_extension in ('json', 'xml'):
+        result = reader_processor.parse_content(
+            raw_content, snapshot_extension, url=url, username=username
+        )
+    else:
+        result = reader_processor.parse_html(
+            raw_content, url=url, username=username
+        )
     reader_html = result.get('content', '')
     snapshot_view_url = f'/admin/site-adapters/view-snapshot?file={snap_filename}'
     reader_filename, reader_path = _write_reader_test_asset(
@@ -645,12 +663,29 @@ def _test_pipeline(url, base_dir, username, entries):
     credential_sources_meta = _compute_credential_sources(meta_config, username, hostname, before_meta)
 
     os.makedirs(TEST_ASSETS_DIR, exist_ok=True)
-    snap_filename = 'snapshot_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
+    snapshot_extension = (
+        normalize_content_type((snap_config or {}).get('content_type')) or 'html'
+    )
+    snap_filename = (
+        'snapshot_'
+        + _timestamp()
+        + '_'
+        + _sanitize_url_for_filename(url)
+        + '.'
+        + snapshot_extension
+    )
     snap_path = os.path.join(TEST_ASSETS_DIR, snap_filename)
     create_snapshot(url, snap_path, username=username)
     with open(snap_path, encoding='utf-8') as f:
-        html = f.read()
-    article = reader_processor.parse_html(html, url=url, username=username)
+        raw_content = f.read()
+    if snapshot_extension in ('json', 'xml'):
+        article = reader_processor.parse_content(
+            raw_content, snapshot_extension, url=url, username=username
+        )
+    else:
+        article = reader_processor.parse_html(
+            raw_content, url=url, username=username
+        )
     reader_html = article.get('content', '')
     snapshot_view_url = f'/admin/site-adapters/view-snapshot?file={snap_filename}'
     reader_filename, reader_path = _write_reader_test_asset(

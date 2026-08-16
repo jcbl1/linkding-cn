@@ -81,6 +81,7 @@
                          class="date-link date-link-exists"
                          title="{% translate 'View latest snapshot' %}"
                          target="{{ bookmark_list.link_target }}"
+                         data-turbo="false"
                          rel="noopener">{{ bookmark_item.display_date }}</a>
                     {% else %}
                       <span class="date-link"

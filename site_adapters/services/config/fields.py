@@ -617,8 +617,8 @@ SINGLEFILE_ARG_NAMES = frozenset({
 DEFUDDLE_ARG_FIELDS = {
     "contentSelector": {
         "type": "str | array<str>",
-        "en": "Main content selector. An array is tried in order and the first matching selector wins. Bypasses automatic content detection.",
-        "zh": "正文内容选择器。数组会按顺序尝试，使用第一个匹配项，并绕过自动正文识别。",
+        "en": "Main content selector. HTML/XML snapshots support CSS and XPath; JSON snapshots support CSS and JSONPath. An array is tried in order and the first matching selector wins. Bypasses automatic content detection.",
+        "zh": "正文内容选择器。HTML/XML 快照支持 CSS 和 XPath；JSON 快照支持 CSS 和 JSONPath。数组会按顺序尝试，使用第一个匹配项，并绕过自动正文识别。",
         "common": True,
         "example": [".article"],
     },

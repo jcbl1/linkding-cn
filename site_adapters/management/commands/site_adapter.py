@@ -6,23 +6,25 @@ import tempfile
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from site_adapters.services.config.validator import classify_field
+from bookmarks.services.website_loader import (
+    load_website_metadata,
+    normalize_content_type,
+)
 from site_adapters.services.auth.cookies import (
     verify_and_refresh,
 )
 from site_adapters.services.auth.credentials import get_shared_cookie
 from site_adapters.services.config import parse_jsonc
 from site_adapters.services.config.loader import show_config
-from site_adapters.services.config.validator import validate_config
 from site_adapters.services.config.resolver import (
     get_metadata_config,
     get_reader_config,
     get_snapshot_config,
 )
+from site_adapters.services.config.validator import classify_field, validate_config
 from site_adapters.services.subscriptions import (
     fetch_subscription,
 )
-from bookmarks.services.website_loader import load_website_metadata
 
 
 class Command(BaseCommand):
@@ -108,9 +110,10 @@ class Command(BaseCommand):
         from bookmarks.services.snapshot_processor import create_snapshot
 
         url = opts["url"]
+        snapshot_config = get_snapshot_config(url)
         result = {
             "metadata_config": get_metadata_config(url),
-            "snapshot_config": get_snapshot_config(url),
+            "snapshot_config": snapshot_config,
             "reader_config": get_reader_config(url),
             "metadata": load_website_metadata(url, ignore_cache=True).to_dict(),
         }
@@ -118,14 +121,27 @@ class Command(BaseCommand):
         snapshot_path = opts["output"]
         try:
             if not opts["skip_snapshot"]:
+                snapshot_extension = (
+                    normalize_content_type((snapshot_config or {}).get("content_type"))
+                    or "html"
+                )
                 if not snapshot_path:
                     tmp_dir = tempfile.mkdtemp()
-                    snapshot_path = os.path.join(tmp_dir, "snapshot.html")
+                    snapshot_path = os.path.join(
+                        tmp_dir, f"snapshot.{snapshot_extension}"
+                    )
                 create_snapshot(url, snapshot_path)
                 result["snapshot"] = {"path": snapshot_path, "size": os.path.getsize(snapshot_path)}
                 with open(snapshot_path, encoding="utf-8") as f:
-                    html = f.read()
-                result["reader"] = reader_processor.parse_html(html, url=url)
+                    raw_content = f.read()
+                if snapshot_extension in ("json", "xml"):
+                    result["reader"] = reader_processor.parse_content(
+                        raw_content, snapshot_extension, url=url
+                    )
+                else:
+                    result["reader"] = reader_processor.parse_html(
+                        raw_content, url=url
+                    )
             else:
                 result["reader"] = reader_processor.parse_url(url)
             self.stdout.write(json.dumps(result, indent=2, ensure_ascii=False, default=str))

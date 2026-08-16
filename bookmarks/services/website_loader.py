@@ -561,7 +561,7 @@ def _infer_content_type_from_selectors(config: dict | None) -> str | None:
     if not selectors:
         return None
     first = selectors[0]
-    if first.startswith("$"):
+    if first.startswith("$") or first.startswith("["):
         return "json"
     if first.startswith("/"):
         return "xml"
@@ -793,7 +793,12 @@ def _extract_with_json_paths(data, paths):
         if not path or not path.strip():
             continue
         try:
-            nodes = jsonpath_find(path, data)
+            normalized_path = path.strip()
+            if normalized_path.startswith("["):
+                normalized_path = "$" + normalized_path
+            elif not normalized_path.startswith("$"):
+                normalized_path = "$." + normalized_path
+            nodes = jsonpath_find(normalized_path, data)
         except Exception:
             continue
         for node in nodes:

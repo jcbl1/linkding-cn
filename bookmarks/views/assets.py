@@ -51,17 +51,23 @@ def view(request, asset_id: int):
     content = _get_asset_content(asset)
 
     content_type = asset.content_type
-    if "charset" not in content_type.lower() and content_type.startswith("text/"):
+    if "charset" not in content_type.lower() and (
+        content_type.startswith("text/")
+        or content_type in ("application/json", "application/xml")
+    ):
         content_type = f"{content_type}; charset=utf-8"
 
     response = HttpResponse(content, content_type=content_type)
     response["Content-Disposition"] = f'inline; filename="{asset.download_name}"'
+    response["X-Content-Type-Options"] = "nosniff"
     if asset.content_type and asset.content_type.startswith("video/"):
         response["Content-Security-Policy"] = "default-src 'none'; media-src 'self';"
     elif asset.content_type == "application/pdf":
         response["Content-Security-Policy"] = "default-src 'none'; object-src 'self';"
     elif asset.content_type in ("application/json", "application/xml"):
-        response["Content-Security-Policy"] = "default-src 'none';"
+        # Chrome's built-in XML/JSON viewers need the sandbox directive;
+        # default-src 'none' disables their built-in formatting.
+        response["Content-Security-Policy"] = "sandbox"
     else:
         response["Content-Security-Policy"] = "sandbox allow-scripts"
     return response

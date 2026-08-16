@@ -19,7 +19,7 @@
           </div>
           <div class="list-item-actions">
             {% if asset.file %}
-              <a class="btn btn-link" href="{% url 'linkding:assets.view' asset.id %}" target="_blank">{% translate "View" %}</a>
+              <a class="btn btn-link" href="{% url 'linkding:assets.view' asset.id %}" target="_blank" data-turbo="false">{% translate "View" %}</a>
             {% endif %}
             {% if details.is_editable %}
               <button ld-asset-rename type="button" name="rename_asset" value="{{ asset.id }}"  data-asset-id="{{ asset.id }}" class="btn btn-link">

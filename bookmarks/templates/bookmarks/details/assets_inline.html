@@ -7,7 +7,7 @@
           {% include 'bookmarks/details/asset_icon.html' %}
         </div>
         {% if asset.file %}
-          <a class="info-file-link" href="{% url 'linkding:assets.view' asset.id %}" target="_blank" title="{{ asset.display_name }}">
+          <a class="info-file-link" href="{% url 'linkding:assets.view' asset.id %}" target="_blank" data-turbo="false" title="{{ asset.display_name }}">
             {{ asset.display_name }}
             {% if asset.status == 'pending' %}<span class="info-file-status"> ({% translate "queued" %})</span>{% endif %}
             {% if asset.status == 'failure' %}<span class="info-file-status info-file-failed"> ({% translate "failed" %})</span>{% endif %}
@@ -45,4 +45,3 @@
     <span class="info-placeholder">{% translate "No files" %}</span>
   {% endif %}
 {% endif %}
-

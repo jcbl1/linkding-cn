@@ -1054,56 +1054,80 @@ def create_html_articles(bookmark_list: list[Bookmark]):
         _create_article_task(asset.id)
 
 
-def _load_snapshot_asset_html(snapshot: BookmarkAsset | None) -> str | None:
-    """从快照资产文件中读取 HTML 内容，无法读取时返回 None。"""
+def _load_snapshot_asset_content(
+    snapshot: BookmarkAsset | None,
+) -> tuple[str | None, str | None]:
+    """从快照资产文件中读取原始内容，无法读取时返回 (None, None)。"""
     if (
         not snapshot
         or snapshot.status != BookmarkAsset.STATUS_COMPLETE
-        or snapshot.content_type != BookmarkAsset.CONTENT_TYPE_HTML
         or not snapshot.file
     ):
-        return None
+        return None, None
 
     filepath = os.path.join(settings.LD_ASSET_FOLDER, snapshot.file)
     if not os.path.exists(filepath):
-        return None
+        return None, None
 
     try:
         if snapshot.gzip:
             with gzip.open(filepath, "rb") as f:
-                return f.read().decode("utf-8")
+                return f.read().decode("utf-8"), snapshot.content_type
         else:
             with open(filepath, encoding="utf-8") as f:
-                return f.read()
+                return f.read(), snapshot.content_type
     except Exception:
         logger.warning(
             f"Failed to read snapshot for bookmark. url={snapshot.bookmark.url}",
             exc_info=True,
         )
-        return None
+        return None, None
 
 
-def _load_snapshot_html(bookmark: Bookmark) -> str | None:
-    """读取书签最新快照的 HTML 内容，无可用快照时返回 None。"""
-    return _load_snapshot_asset_html(bookmark.latest_snapshot)
+def _load_snapshot_content(
+    bookmark: Bookmark,
+) -> tuple[str | None, str | None]:
+    """读取书签最新快照的原始内容，无可用快照时返回 (None, None)。"""
+    return _load_snapshot_asset_content(bookmark.latest_snapshot)
 
 
 def _requires_snapshot_before_article(url: str) -> bool:
-    """检查站点是否有需要先生成快照的快照配置。
+    """检查站点是否需要先生成快照再提取文章。
 
-    包括自定义脚本和所有声明式 snapshot 字段，因为 Reader 需要从
-    site-adapters 处理后的快照中提取内容。
+    包括自定义脚本、声明式 snapshot 字段，以及使用 XPath/JSONPath
+    的 reader contentSelector，因为 Reader 需要从 site-adapters
+    处理后的快照中提取内容。
     """
     from site_adapters.services.config.resolver import get_snapshot_config
 
     config = get_snapshot_config(url)
-    return bool(config and (config.get("_raw") or {}).get("snapshot"))
+    if config and (config.get("_raw") or {}).get("snapshot"):
+        return True
+
+    from bookmarks.services.reader_processor import (
+        _is_json_path_selector,
+        _is_xpath_selector,
+    )
+    from site_adapters.services.config.resolver import get_reader_config
+
+    reader_config = get_reader_config(url) or {}
+    selectors = (reader_config.get("defuddle_args") or {}).get("contentSelector")
+    if isinstance(selectors, str):
+        selectors = [selectors]
+    return any(
+        isinstance(selector, str)
+        and (
+            _is_xpath_selector(selector)
+            or _is_json_path_selector(selector)
+        )
+        for selector in (selectors or [])
+    )
 
 
 def _create_snapshot_for_article(
     bookmark: Bookmark,
-) -> tuple[BookmarkAsset | None, str | None]:
-    """为文章解析生成快照，返回 (快照资产, HTML内容)；失败时内容为 None。"""
+) -> tuple[BookmarkAsset | None, str | None, str | None]:
+    """为文章解析生成快照，返回 (快照资产, 内容, 类型)；失败时内容为 None。"""
     asset = assets.create_snapshot_asset(bookmark)
     asset.save()
 
@@ -1111,14 +1135,34 @@ def _create_snapshot_for_article(
         assets.create_snapshot(asset)
         asset.refresh_from_db()
         if asset.status == BookmarkAsset.STATUS_COMPLETE:
-            return asset, _load_snapshot_asset_html(asset)
+            content, content_type = _load_snapshot_asset_content(asset)
+            return asset, content, content_type
     except Exception:
         logger.warning(
             f"Failed to create snapshot for article. url={bookmark.url}",
             exc_info=True,
         )
 
-    return asset, None
+    return asset, None, None
+
+
+def _parse_snapshot_for_reader(
+    content: str, content_type: str, bookmark: Bookmark
+) -> dict:
+    """Parse a snapshot with defuddle, dispatching XML/JSON through conversion."""
+    from bookmarks.services import reader_processor
+
+    username = _bookmark_username(bookmark)
+    if content_type == BookmarkAsset.CONTENT_TYPE_HTML:
+        return reader_processor.parse_html(
+            content, url=bookmark.url, username=username
+        )
+    return reader_processor.parse_content(
+        content,
+        content_type,
+        url=bookmark.url,
+        username=username,
+    )
 
 
 @task(retries=2)
@@ -1153,20 +1197,22 @@ def _create_article_task(asset_id: int):
         from bookmarks.services import reader_processor
 
         # 1. Try existing snapshot
-        raw_html = _load_snapshot_html(bookmark)
-        if raw_html:
+        raw_content, snapshot_content_type = _load_snapshot_content(bookmark)
+        if raw_content:
             logger.info("Using existing snapshot. url=%s", bookmark.url)
-            result = reader_processor.parse_html(
-                raw_html, url=bookmark.url, username=_bookmark_username(bookmark)
+            result = _parse_snapshot_for_reader(
+                raw_content, snapshot_content_type, bookmark
             )
         elif _requires_snapshot_before_article(bookmark.url):
             # 2. Site-specific snapshot config → create snapshot first, then parse
             logger.info("Creating snapshot via site adapters. url=%s", bookmark.url)
-            _snapshot, raw_html = _create_snapshot_for_article(bookmark)
-            if not raw_html:
+            _snapshot, raw_content, snapshot_content_type = (
+                _create_snapshot_for_article(bookmark)
+            )
+            if not raw_content:
                 raise Exception("Failed to create snapshot via custom processor")
-            result = reader_processor.parse_html(
-                raw_html, url=bookmark.url, username=_bookmark_username(bookmark)
+            result = _parse_snapshot_for_reader(
+                raw_content, snapshot_content_type, bookmark
             )
         else:
             # 3. No snapshot, no custom processor → let defuddle fetch URL directly.
@@ -1181,13 +1227,15 @@ def _create_article_task(asset_id: int):
                     f"Direct article parsing failed; retrying via generated snapshot. url={bookmark.url}",
                     exc_info=True,
                 )
-                fallback_snapshot, raw_html = _create_snapshot_for_article(bookmark)
-                if not raw_html:
+                fallback_snapshot, raw_content, snapshot_content_type = (
+                    _create_snapshot_for_article(bookmark)
+                )
+                if not raw_content:
                     raise Exception(
                         "Failed to create fallback snapshot for article"
                     ) from direct_error
-                result = reader_processor.parse_html(
-                    raw_html, url=bookmark.url, username=_bookmark_username(bookmark)
+                result = _parse_snapshot_for_reader(
+                    raw_content, snapshot_content_type, bookmark
                 )
 
         # 生成标准 HTML 文档：元数据放 head，正文放 body

@@ -1334,6 +1334,63 @@ class ArticleTasksTestCase(TestCase, BookmarkFactoryMixin):
                 tasks._requires_snapshot_before_article("https://example.com/article")
             )
 
+    def test_requires_snapshot_before_article_detects_reader_structured_selector(self):
+        with (
+            mock.patch(
+                "site_adapters.services.config.resolver.get_snapshot_config",
+                return_value=None,
+            ),
+            mock.patch(
+                "site_adapters.services.config.resolver.get_reader_config",
+                return_value={
+                    "defuddle_args": {
+                        "contentSelector": "//main/article"
+                    }
+                },
+            ),
+        ):
+            self.assertTrue(
+                tasks._requires_snapshot_before_article("https://example.com/article")
+            )
+
+    def test_requires_snapshot_before_article_detects_reader_json_path_selector(self):
+        with (
+            mock.patch(
+                "site_adapters.services.config.resolver.get_snapshot_config",
+                return_value=None,
+            ),
+            mock.patch(
+                "site_adapters.services.config.resolver.get_reader_config",
+                return_value={
+                    "defuddle_args": {
+                        "contentSelector": "$.data.children[0].data.selftext"
+                    }
+                },
+            ),
+        ):
+            self.assertTrue(
+                tasks._requires_snapshot_before_article("https://example.com/api")
+            )
+
+    def test_requires_snapshot_before_article_ignores_css_selector(self):
+        with (
+            mock.patch(
+                "site_adapters.services.config.resolver.get_snapshot_config",
+                return_value=None,
+            ),
+            mock.patch(
+                "site_adapters.services.config.resolver.get_reader_config",
+                return_value={
+                    "defuddle_args": {
+                        "contentSelector": [".article-body", "article"]
+                    }
+                },
+            ),
+        ):
+            self.assertFalse(
+                tasks._requires_snapshot_before_article("https://example.com/article")
+            )
+
     def test_create_article_task_retries_direct_parse_with_generated_snapshot(self):
         bookmark = self.setup_bookmark(url="https://example.com/article")
         article_asset = create_article_asset_pending(bookmark)
@@ -1414,6 +1471,61 @@ class ArticleTasksTestCase(TestCase, BookmarkFactoryMixin):
         self.assertIsNone(bookmark.latest_article)
         self.assertIsNone(bookmark.latest_snapshot)
         mock_parse_html.assert_called_once_with(self.snapshot_html, url=bookmark.url, username="testuser")
+
+    def test_create_article_task_parses_raw_xml_snapshot(self):
+        bookmark = self.setup_bookmark(url="https://example.com/feed.xml")
+        article_asset = create_article_asset_pending(bookmark)
+        xml_content = (
+            '<feed xmlns="http://www.w3.org/2005/Atom">'
+            "<title>XML feed</title>"
+            "<entry><title>Post</title>"
+            '<content type="html">&lt;p&gt;Hello&lt;/p&gt;</content>'
+            "</entry></feed>"
+        )
+        parsed_article = {
+            "title": "Post",
+            "content": "<article><p>Hello</p></article>",
+            "description": "",
+            "author": "",
+            "site": "",
+            "wordCount": 1,
+        }
+
+        def write_xml_snapshot(_url, filepath, **_kwargs):
+            with open(filepath, "w", encoding="utf-8") as snapshot_file:
+                snapshot_file.write(xml_content)
+
+        with (
+            mock.patch(
+                "bookmarks.services.reader_processor.parse_content",
+                return_value=parsed_article,
+            ) as mock_parse_content,
+            mock.patch(
+                "bookmarks.services.tasks._requires_snapshot_before_article",
+                return_value=True,
+            ),
+            mock.patch(
+                "bookmarks.services.assets.detect_content_type",
+                return_value="application/xml",
+            ),
+            mock.patch(
+                "bookmarks.services.snapshot_processor.create_snapshot",
+                side_effect=write_xml_snapshot,
+            ),
+            timezone.override("UTC"),
+        ):
+            tasks._create_article_task.call_local(article_asset.id)
+
+        article_asset.refresh_from_db()
+        self.assertEqual(article_asset.status, BookmarkAsset.STATUS_COMPLETE)
+        snapshot = BookmarkAsset.objects.get(asset_type=BookmarkAsset.TYPE_SNAPSHOT)
+        self.assertEqual(snapshot.content_type, BookmarkAsset.CONTENT_TYPE_XML)
+        mock_parse_content.assert_called_once_with(
+            xml_content,
+            BookmarkAsset.CONTENT_TYPE_XML,
+            url=bookmark.url,
+            username="testuser",
+        )
 
     def test_save_article_content_uses_html_article_default_name_with_iso_date(self):
         bookmark = self.setup_bookmark(url="https://example.com/article")

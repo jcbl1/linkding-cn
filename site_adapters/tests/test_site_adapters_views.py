@@ -304,6 +304,48 @@ class SiteAdaptersViewsTestCase(TestCase):
         self.assertEqual(metadata["original_url"], "https://example.com/post")
         self.assertTrue(metadata["snapshot_url"].startswith("/admin/site-adapters/view-snapshot?file="))
 
+    def test_reader_test_uses_xml_snapshot_extension(self):
+        def fake_create_snapshot(url, out_path, username=""):
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write("<feed><title>XML</title></feed>")
+
+        with (
+            mock.patch("site_adapters.views.testing.get_reader_config", return_value={}),
+            mock.patch(
+                "site_adapters.views.testing.get_snapshot_config",
+                return_value={"content_type": "xml"},
+            ),
+            mock.patch("site_adapters.views.testing.show_config", return_value={}),
+            mock.patch("site_adapters.views.testing.TEST_ASSETS_DIR", self.base_dir),
+            mock.patch(
+                "bookmarks.services.snapshot_processor.create_snapshot",
+                side_effect=fake_create_snapshot,
+            ),
+            mock.patch(
+                "bookmarks.services.reader_processor.parse_content",
+                return_value={
+                    "title": "XML",
+                    "wordCount": 1,
+                    "content": "<article><p>XML</p></article>",
+                },
+            ) as mock_parse_content,
+        ):
+            response = self.client.post(
+                reverse("linkding:settings.site_adapters.action"),
+                {"action": "test", "test_type": "reader", "url": "https://example.com/feed.xml"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.json()["result"]
+        self.assertTrue(result["snapshot_view_url"].endswith(".xml"))
+        mock_parse_content.assert_called_once_with(
+            "<feed><title>XML</title></feed>",
+            "xml",
+            url="https://example.com/feed.xml",
+            username="",
+        )
+
     def test_view_reader_renders_preview_page(self):
         with mock.patch("site_adapters.views.snapshot.TEST_ASSETS_DIR", self.base_dir):
             os.makedirs(self.base_dir, exist_ok=True)

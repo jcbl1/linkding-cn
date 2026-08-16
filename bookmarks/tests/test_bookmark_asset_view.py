@@ -199,6 +199,56 @@ class BookmarkAssetViewTestCase(TestCase, BookmarkFactoryMixin):
             "default-src 'none'; object-src 'self';",
         )
 
+    def test_json_snapshot_download_headers(self):
+        bookmark = self.setup_bookmark()
+        asset = self.setup_asset(
+            bookmark=bookmark,
+            file="temp.json.gz",
+            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
+            content_type=BookmarkAsset.CONTENT_TYPE_JSON,
+            display_name="JSON snapshot from Jan 1, 2025",
+        )
+        self.setup_asset_file(asset.file)
+
+        response = self.client.get(reverse("linkding:assets.view", args=[asset.id]))
+
+        self.assertEqual(
+            response["Content-Type"], "application/json; charset=utf-8"
+        )
+        self.assertEqual(
+            response["Content-Disposition"],
+            f'inline; filename="{asset.display_name}.json"',
+        )
+        self.assertEqual(
+            response["Content-Security-Policy"],
+            "sandbox",
+        )
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+
+    def test_xml_snapshot_download_headers(self):
+        bookmark = self.setup_bookmark()
+        asset = self.setup_asset(
+            bookmark=bookmark,
+            file="temp.xml.gz",
+            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
+            content_type=BookmarkAsset.CONTENT_TYPE_XML,
+            display_name="XML snapshot from Jan 1, 2025",
+        )
+        self.setup_asset_file(asset.file)
+
+        response = self.client.get(reverse("linkding:assets.view", args=[asset.id]))
+
+        self.assertEqual(response["Content-Type"], "application/xml; charset=utf-8")
+        self.assertEqual(
+            response["Content-Disposition"],
+            f'inline; filename="{asset.display_name}.xml"',
+        )
+        self.assertEqual(
+            response["Content-Security-Policy"],
+            "sandbox",
+        )
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+
     def test_uploaded_file_download_name(self):
         bookmark = self.setup_bookmark()
         asset = self.setup_asset_with_uploaded_file(bookmark)

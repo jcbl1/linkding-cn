@@ -493,7 +493,7 @@ export class ReaderSidebar extends LitElement {
           return html`<div class="info-file-item">
             ${isRen ? html`<input class="info-input info-file-rename-input" type="text" .value=${this._renameValue} @input=${e => this._renameValue = e.target.value} @keydown=${e => { if (e.key === "Enter") this._saveRename(a.id); if (e.key === "Escape") { this._renameAssetId = null; this._renameValue = ""; } }} @blur=${() => this._saveRename(a.id)} />`
             : html`<span class="info-file-name" title="${name}" @click=${() => { if (fileUrl) window.open(fileUrl, "_blank"); }}>
-              <span class="truncate">${fileUrl ? html`<a href="${fileUrl}" target="_blank" class="info-file-link" @click=${(e) => e.stopPropagation()}>${name}</a>` : html`<span>${name}</span>`}${a.status === "pending" ? html`<span class="info-file-status"> (${gettext("queued")})</span>` : html``}${a.status === "failure" ? html`<span class="info-file-status info-file-failed"> (${gettext("failed")})</span>` : html``}</span>
+              <span class="truncate">${fileUrl ? html`<a href="${fileUrl}" target="_blank" data-turbo="false" class="info-file-link" @click=${(e) => e.stopPropagation()}>${name}</a>` : html`<span>${name}</span>`}${a.status === "pending" ? html`<span class="info-file-status"> (${gettext("queued")})</span>` : html``}${a.status === "failure" ? html`<span class="info-file-status info-file-failed"> (${gettext("failed")})</span>` : html``}</span>
               ${a.file_size ? html`<span class="info-file-size">${this._fmtSize(a.file_size)}</span>` : html``}
             </span>`}
             <div class="info-file-actions">

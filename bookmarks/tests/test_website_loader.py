@@ -759,6 +759,48 @@ class WebsiteLoaderTestCase(TestCase):
         self.assertEqual(metadata.description, "JSON description")
         self.assertEqual(metadata.preview_image, "https://api.example.com/cover.jpg")
 
+    def test_configured_json_metadata_supports_legacy_bracket_paths(self):
+        body = json.dumps([
+            {
+                "data": {
+                    "children": [
+                        {
+                            "data": {
+                                "title": "Reddit title",
+                                "selftext": "Reddit body",
+                                "thumbnail": "https://preview.redd.it/pic.jpg",
+                            }
+                        }
+                    ]
+                }
+            }
+        ])
+        config = {
+            "content_type": "json",
+            "select_title": ["[0].data.children[0].data.title"],
+            "select_description": ["[0].data.children[0].data.selftext"],
+            "select_image": ["[0].data.children[0].data.thumbnail"],
+            "headers": {},
+        }
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch.object(website_loader, "load_page", return_value=body),
+        ):
+            metadata = website_loader.load_website_metadata(
+                "https://www.reddit.com/r/example/comments/1/post/"
+            )
+
+        self.assertEqual(metadata.title, "Reddit title")
+        self.assertEqual(metadata.description, "Reddit body")
+        self.assertEqual(
+            metadata.preview_image,
+            "https://preview.redd.it/pic.jpg",
+        )
+
     def test_content_type_explicit_wins_over_selectors(self):
         body = json.dumps({"title": "JSON title"})
         config = {
@@ -781,6 +823,7 @@ class WebsiteLoaderTestCase(TestCase):
     def test_content_type_inferred_from_selector_syntax(self):
         configs = [
             ({"select_title": ["$.title"]}, "json"),
+            ({"select_title": ["[0].title"]}, "json"),
             ({"select_title": ["//item/title"]}, "xml"),
             ({"select_title": [".title"]}, "html"),
         ]

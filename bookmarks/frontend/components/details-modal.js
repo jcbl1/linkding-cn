@@ -612,6 +612,7 @@ class DetailsModal extends Modal {
       link.className = "info-file-link";
       link.href = `/assets/${assetId}`;
       link.target = "_blank";
+      link.dataset.turbo = "false";
       link.textContent = newName || currentName;
       link.title = newName || currentName;
       input.replaceWith(link);
