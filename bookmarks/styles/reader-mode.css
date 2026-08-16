@@ -93,9 +93,19 @@ html.reader-mode {
     margin-bottom: 20px;
   }
 
-  img {
+  /* Article media: keep embedded media within the reading viewport */
+  img,
+  video {
     max-width: 100%;
+    max-height: 80vh;
     height: auto;
+  }
+
+  iframe,
+  object,
+  embed {
+    max-width: 100%;
+    max-height: 80vh;
   }
 
   /* Processed carousels: compact horizontal media list */
