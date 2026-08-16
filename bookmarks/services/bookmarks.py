@@ -6,7 +6,12 @@ from django.utils import timezone
 from bookmarks.models import Bookmark, BookmarkAsset, User, parse_tag_string
 from bookmarks.services import auto_tagging, tasks, website_loader
 from bookmarks.services.tags import get_or_create_tags
-from bookmarks.utils import extract_hostname, normalize_url, parse_domain_roots, resolve_favicon_domain
+from bookmarks.utils import (
+    extract_hostname,
+    normalize_url,
+    parse_domain_roots,
+    resolve_favicon_domain,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +99,7 @@ def update_bookmark(bookmark: Bookmark, tag_string, current_user: User):
 
 
 def enhance_with_website_metadata(bookmark: Bookmark):
-    username = bookmark.owner.username if bookmark.owner else ''
+    username = bookmark.owner.username if bookmark.owner else ""
     metadata = website_loader.load_website_metadata(bookmark.url, username=username)
     update_fields = []
 
@@ -284,7 +289,11 @@ def refresh_bookmarks_favicons(bookmark_ids: list[int | str], current_user: User
     domains_seen = set()
     for bookmark in owned_bookmarks:
         domain = _resolve_favicon_domain(bookmark.url, domain_config)
-        if domain and domain not in domains_seen:
+        if (
+            domain
+            and domain not in domains_seen
+            and tasks._set_favicon_pending_for_enqueue(domain, force=True)
+        ):
             domains_seen.add(domain)
             tasks._enqueue_favicon_task(current_user.id, domain)
 

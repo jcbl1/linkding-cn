@@ -23,6 +23,7 @@ from datetime import timedelta
 import waybackpy
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.db import IntegrityError
 from django.db.models import Q
 from django.utils import timezone
 from huey import crontab
@@ -40,6 +41,7 @@ from bookmarks.utils import (
 
 logger = logging.getLogger(__name__)
 HTML_SNAPSHOT_DISPATCHER_LOCK = huey.lock_task("html-snapshot-dispatcher-lock")
+FAVICON_FETCH_LOCK = huey.lock_task("favicon-fetch-global-lock")
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +52,8 @@ HTML_SNAPSHOT_DISPATCHER_LOCK = huey.lock_task("html-snapshot-dispatcher-lock")
 # 参考: https://huey.readthedocs.io/en/latest/guide.html#tips-and-tricks
 # 退避序列: 60 → 240 → 960 → 3840 → 15360 秒
 
-def task(retries=5, retry_delay=15, retry_backoff=4):
+
+def task(retries=5, retry_delay=15, retry_backoff=4, priority=0):
     def deco(fn):
         @functools.wraps(fn)
         def inner(*args, **kwargs):
@@ -69,7 +72,12 @@ def task(retries=5, retry_delay=15, retry_backoff=4):
                     task.retry_delay *= retry_backoff
                 raise exc
 
-        return huey.task(retries=retries, retry_delay=retry_delay, context=True)(inner)
+        return huey.task(
+            retries=retries,
+            retry_delay=retry_delay,
+            context=True,
+            priority=priority,
+        )(inner)
 
     return deco
 
@@ -148,6 +156,7 @@ def is_favicon_feature_active(user: User) -> bool:
 def _resolve_domain(url: str, domain_config=None) -> str:
     """从 URL 提取 hostname 并应用自定义域名归一化。"""
     from bookmarks.utils import extract_hostname, resolve_favicon_domain
+
     hostname = extract_hostname(url)
     if not hostname:
         return ""
@@ -176,11 +185,14 @@ def ensure_favicon(user: User, url: str):
     # 1. 先查 DB（轻量，避免不必要的 os.listdir）
     cache = FaviconCache.objects.filter(domain=domain).first()
 
-    if cache and cache.status == FaviconCache.STATUS_SUCCESS and cache.favicon_file:
-        # DB 有记录 → 验证磁盘文件（isfile 比 os.listdir 快得多）
-        if favicon_loader.get_favicon_path(cache.favicon_file).is_file():
-            return
-        # 磁盘文件丢失 → 继续到步骤 2 重新获取
+    if (
+        cache
+        and cache.status == FaviconCache.STATUS_SUCCESS
+        and cache.favicon_file
+        and favicon_loader.get_favicon_path(cache.favicon_file).is_file()
+    ):
+        return
+    # 磁盘文件丢失 → 继续到步骤 2 重新获取
 
     # 2. 磁盘扫描（仅在 DB 无有效记录时执行，支持旧命名迁移和损坏文件清理）
     cached_file = favicon_loader.find_cached_favicon_file(domain)
@@ -230,7 +242,7 @@ def refresh_favicon_for_url(user: User, url: str):
         return
     domain_config = parse_domain_roots(user.profile.custom_domain_root)
     domain = _resolve_domain(url, domain_config)
-    if domain:
+    if domain and _set_favicon_pending_for_enqueue(domain, force=True):
         _enqueue_favicon_task(user.id, domain)
 
 
@@ -263,7 +275,50 @@ def _enqueue_favicon_task(user_id: int, domain: str):
     _fetch_domain_favicon_task(user_id, domain)
 
 
-@task(retries=3)
+def _set_favicon_pending_for_enqueue(domain: str, force: bool = False) -> bool:
+    """把域名标记为 PENDING，作为跨进程入队去重标记。
+
+    批量任务用 DB 状态而不是进程内缓存判断，因为 web 和 huey 进程默认
+    使用各自独立的 LocMemCache，缓存锁无法在进程间生效。
+    """
+    from bookmarks.models import FaviconCache
+
+    now = timezone.now()
+    cache = FaviconCache.objects.filter(domain=domain).first()
+
+    if cache is None:
+        try:
+            FaviconCache.objects.create(
+                domain=domain, status=FaviconCache.STATUS_PENDING
+            )
+        except IntegrityError:
+            return False
+        return True
+
+    if cache.status == FaviconCache.STATUS_PENDING:
+        return False
+
+    if not force and cache.status == FaviconCache.STATUS_SUCCESS:
+        return False
+
+    if (
+        not force
+        and cache.status in (FaviconCache.STATUS_FAILED, FaviconCache.STATUS_MISSING)
+        and cache.next_retry_at
+        and cache.next_retry_at > now
+    ):
+        return False
+
+    updated = (
+        FaviconCache.objects.filter(id=cache.id)
+        .exclude(status=FaviconCache.STATUS_PENDING)
+        .update(status=FaviconCache.STATUS_PENDING, next_retry_at=None)
+    )
+    return bool(updated)
+
+
+@task(retries=3, priority=-1)
+@FAVICON_FETCH_LOCK
 def _fetch_domain_favicon_task(user_id: int, domain: str):
     """per-domain 的 favicon 获取任务。
 
@@ -277,7 +332,9 @@ def _fetch_domain_favicon_task(user_id: int, domain: str):
     # 分布式锁：任务执行时才加锁（180s 超时覆盖所有 provider 尝试）
     lock_key = f"favicon_task_lock:{domain}"
     if not django_cache.add(lock_key, "1", timeout=180):
-        logger.debug("Skipping favicon fetch for domain=%s, another task is running", domain)
+        logger.debug(
+            "Skipping favicon fetch for domain=%s, another task is running", domain
+        )
         return
 
     try:
@@ -312,7 +369,12 @@ def _fetch_domain_favicon_task(user_id: int, domain: str):
                 idx = min(cache.retry_count, len(MISSING_RETRY_DELAYS) - 1)
                 delay_days = MISSING_RETRY_DELAYS[idx]
                 cache.next_retry_at = timezone.now() + timedelta(days=delay_days)
-                logger.info("Favicon still missing for domain=%s, will retry in %s day(s) (attempt %s)", domain, delay_days, cache.retry_count)
+                logger.info(
+                    "Favicon still missing for domain=%s, will retry in %s day(s) (attempt %s)",
+                    domain,
+                    delay_days,
+                    cache.retry_count,
+                )
                 cache.save()
                 return
             cache.retry_count += 1
@@ -320,13 +382,25 @@ def _fetch_domain_favicon_task(user_id: int, domain: str):
                 cache.status = FaviconCache.STATUS_MISSING
                 # 保留旧的 favicon_file，不清空（过期图标仍可使用）
                 cache.retry_count = 0
-                cache.next_retry_at = timezone.now() + timedelta(days=MISSING_RETRY_DELAYS[0])
-                logger.info("Favicon not found for domain=%s after %s retries, marking as missing (will retry in %s day(s))", domain, MAX_RETRIES, MISSING_RETRY_DELAYS[0])
+                cache.next_retry_at = timezone.now() + timedelta(
+                    days=MISSING_RETRY_DELAYS[0]
+                )
+                logger.info(
+                    "Favicon not found for domain=%s after %s retries, marking as missing (will retry in %s day(s))",
+                    domain,
+                    MAX_RETRIES,
+                    MISSING_RETRY_DELAYS[0],
+                )
             else:
                 cache.status = FaviconCache.STATUS_FAILED
                 delay_seconds = RETRY_DELAYS[cache.retry_count - 1]
                 cache.next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
-                logger.info("Favicon fetch failed for domain=%s, retry #%s in %ss", domain, cache.retry_count, delay_seconds)
+                logger.info(
+                    "Favicon fetch failed for domain=%s, retry #%s in %ss",
+                    domain,
+                    cache.retry_count,
+                    delay_seconds,
+                )
             cache.save()
     finally:
         django_cache.delete(lock_key)
@@ -339,7 +413,7 @@ def schedule_bookmarks_without_favicons(user: User):
     _batch_load_favicons_task(user.id)
 
 
-@task()
+@task(priority=-1)
 def _batch_load_favicons_task(user_id: int):
     from bookmarks.models import FaviconCache
 
@@ -350,9 +424,11 @@ def _batch_load_favicons_task(user_id: int):
     disk_scan = favicon_loader._scan_favicon_folder()
 
     # 收集所有唯一域名，逐个检查是否已有成功缓存（exists 查询走索引，不加载全量到内存）
-    raw_urls = Bookmark.objects.filter(
-        owner=user, is_deleted=False
-    ).values_list("url", flat=True).iterator()
+    raw_urls = (
+        Bookmark.objects.filter(owner=user, is_deleted=False)
+        .values_list("url", flat=True)
+        .iterator()
+    )
     domains_to_fetch = set()
     for url in raw_urls:
         domain = _resolve_domain(url, domain_config)
@@ -364,7 +440,9 @@ def _batch_load_favicons_task(user_id: int):
             continue
 
         # 从预扫描结果中查找（无额外磁盘 I/O）
-        cached_file = favicon_loader._find_cached_favicon_file_from_scan(domain, disk_scan)
+        cached_file = favicon_loader._find_cached_favicon_file_from_scan(
+            domain, disk_scan
+        )
         if cached_file:
             FaviconCache.objects.update_or_create(
                 domain=domain,
@@ -378,7 +456,8 @@ def _batch_load_favicons_task(user_id: int):
             )
             logger.debug(f"Synced manually placed favicon for {domain}: {cached_file}")
         else:
-            domains_to_fetch.add(domain)
+            if _set_favicon_pending_for_enqueue(domain):
+                domains_to_fetch.add(domain)
 
     # 为缺少 favicon 的域名入队
     for domain in domains_to_fetch:
@@ -394,16 +473,22 @@ def schedule_refresh_favicons(user: User):
     _batch_refresh_favicons_task(user.id)
 
 
-@task()
+@task(priority=-1)
 def _batch_refresh_favicons_task(user_id: int):
     """刷新该用户书签涉及的所有域名的 favicon。"""
     user = User.objects.get(id=user_id)
     domain_config = parse_domain_roots(user.profile.custom_domain_root)
 
     domains_seen = set()
-    for bm in Bookmark.objects.filter(owner=user, is_deleted=False).values("url").iterator():
+    for bm in (
+        Bookmark.objects.filter(owner=user, is_deleted=False).values("url").iterator()
+    ):
         domain = _resolve_domain(bm["url"], domain_config)
-        if domain and domain not in domains_seen:
+        if (
+            domain
+            and domain not in domains_seen
+            and _set_favicon_pending_for_enqueue(domain, force=True)
+        ):
             domains_seen.add(domain)
             _enqueue_favicon_task(user.id, domain)
 
@@ -416,7 +501,6 @@ def rename_favicon_for_domain_config(user, old_config_str: str, new_config_str: 
     FaviconCache 是全局的，Bookmark.favicon_file 已移除。
     规则变更只是改变了查询 key，渲染时自动使用新规则查表。
     """
-
 
 
 # ---------------------------------------------------------------------------
@@ -484,10 +568,10 @@ def _cron_interval_seconds(schedule: dict) -> int:
 
     return 7 * 86400
 
-_favicon_refresh_schedule = _parse_cron_schedule(
-    settings.LD_FAVICON_REFRESH_SCHEDULE
-)
+
+_favicon_refresh_schedule = _parse_cron_schedule(settings.LD_FAVICON_REFRESH_SCHEDULE)
 if _favicon_refresh_schedule:
+
     @huey.periodic_task(crontab(**_favicon_refresh_schedule))
     def _scheduled_favicon_refresh_task():
         """定时刷新超过间隔天数的 favicon（基于 cron 估算的间隔）。
@@ -503,6 +587,7 @@ if _favicon_refresh_schedule:
 
         # 检查是否有任何用户启用了 favicon，如果没有则跳过刷新
         from bookmarks.models import FaviconCache, UserProfile
+
         if not UserProfile.objects.filter(enable_favicons=True).exists():
             logger.debug("No users with favicons enabled, skipping scheduled refresh")
             return
@@ -523,7 +608,8 @@ if _favicon_refresh_schedule:
 
         logger.info(
             "Scheduled favicon refresh: enqueued %d domains (stale > %d days)",
-            len(domains), interval // 86400,
+            len(domains),
+            interval // 86400,
         )
 # ---------------------------------------------------------------------------
 # 预览图加载
@@ -755,10 +841,14 @@ def _select_next_html_snapshot_asset(now, next_eligible_at: dict[str, object]):
       - asset 为 None     → 所有 pending 均在冷却中，next_wake_at 为最早可唤醒时间
     """
     # 所有 pending 资产（包括有重试时间的）
-    all_pending = BookmarkAsset.objects.filter(
-        asset_type=BookmarkAsset.TYPE_SNAPSHOT,
-        status=BookmarkAsset.STATUS_PENDING,
-    ).select_related("bookmark").order_by("-date_created", "-id")
+    all_pending = (
+        BookmarkAsset.objects.filter(
+            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
+            status=BookmarkAsset.STATUS_PENDING,
+        )
+        .select_related("bookmark")
+        .order_by("-date_created", "-id")
+    )
 
     # 可立即执行的（无重试时间或重试时间已过）
     executable = all_pending.filter(
@@ -777,9 +867,7 @@ def _select_next_html_snapshot_asset(now, next_eligible_at: dict[str, object]):
             next_wake_at = eligible_at
 
     # 再检查有未来重试时间的资产，更新 next_wake_at
-    waiting = all_pending.filter(
-        next_retry_at__gt=now
-    )
+    waiting = all_pending.filter(next_retry_at__gt=now)
     for asset in waiting:
         if next_wake_at is None or asset.next_retry_at < next_wake_at:
             next_wake_at = asset.next_retry_at
@@ -1104,14 +1192,21 @@ def _create_article_task(asset_id: int):
 
         # 生成标准 HTML 文档：元数据放 head，正文放 body
         from django.utils.html import escape
+
         content = result["content"]
         head_parts = []
         if result.get("title"):
-            head_parts.append(f'<meta name="title" content="{escape(result["title"])}">')
+            head_parts.append(
+                f'<meta name="title" content="{escape(result["title"])}">'
+            )
         if result.get("wordCount"):
-            head_parts.append(f'<meta name="word-count" content="{result["wordCount"]}">')
+            head_parts.append(
+                f'<meta name="word-count" content="{result["wordCount"]}">'
+            )
         head = "".join(head_parts)
-        title_tag = f"<title>{escape(result['title'])}</title>" if result.get("title") else ""
+        title_tag = (
+            f"<title>{escape(result['title'])}</title>" if result.get("title") else ""
+        )
         content = f"<!DOCTYPE html><html><head>{title_tag}{head}</head><body>{content}</body></html>"
 
         # Save parsed content
