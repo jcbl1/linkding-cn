@@ -5,13 +5,16 @@ import time
 
 from django.test import TestCase, override_settings
 
+from site_adapters.services.auth.oauth2 import _resolve_json_path
+from site_adapters.services.config import parse_jsonc
 from site_adapters.services.config.loader import (
     _cache,
     load_domain_config,
 )
-from site_adapters.services.config import parse_jsonc
-from site_adapters.services.config.resolver import get_metadata_config, get_snapshot_config
-from site_adapters.services.auth.oauth2 import _resolve_json_path
+from site_adapters.services.config.resolver import (
+    get_metadata_config,
+    get_snapshot_config,
+)
 
 
 class SiteAdaptersEngineTestCase(TestCase):
@@ -63,7 +66,6 @@ class SiteAdaptersEngineTestCase(TestCase):
 
         self.assertEqual(load_domain_config("https://example.com", self.base_dir)["http"]["timeout"], 1)
 
-        path = os.path.join(self.base_dir, "adapters", "defaults", "adapters.jsonc")
         time.sleep(0.1)
         self.write("adapters/defaults/adapters.jsonc", '{"domains": {"example.com": {"http": {"timeout": 2}}}}')
         _cache._last_check = 0  # force re-check
@@ -124,6 +126,11 @@ class SiteAdaptersEngineTestCase(TestCase):
 
         self.assertEqual(_resolve_json_path(data, "data[0].token"), "abc123")
 
+    def test_resolve_json_path_supports_standard_jsonpath(self):
+        data = {"data": {"token": "abc123"}}
+
+        self.assertEqual(_resolve_json_path(data, "$.data.token"), "abc123")
+
     def test_resolver_merges_http_and_handles_auth_config(self):
         self.setup_adapter("example.com", {
             "auth": {"cookie": {"type": "anon"}},
@@ -149,6 +156,21 @@ class SiteAdaptersEngineTestCase(TestCase):
         self.assertEqual(config["_request_url"], "https://example.com/api/post/123")
         self.assertEqual(config["_rewrite_url"], "https://example.com/article/123")
 
+    def test_metadata_resolver_includes_content_type(self):
+        self.setup_adapter("example.com", {
+            "metadata": {
+                "content_type": "xml",
+                "xmlns": {"atom": "http://www.w3.org/2005/Atom"},
+                "select_title": ["//atom:title"],
+            }
+        })
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            config = get_metadata_config("https://example.com/post")
+
+        self.assertEqual(config["content_type"], "xml")
+        self.assertEqual(config["xmlns"]["atom"], "http://www.w3.org/2005/Atom")
+
     def test_snapshot_resolver_includes_process_carousels(self):
         self.setup_adapter("example.com", {
             "snapshot": {"process_carousels": ["faceplate-carousel"]}
@@ -158,6 +180,40 @@ class SiteAdaptersEngineTestCase(TestCase):
             config = get_snapshot_config("https://example.com/post")
 
         self.assertEqual(config["process_carousels"], ["faceplate-carousel"])
+
+    def test_snapshot_resolver_includes_raw_xml_request_url(self):
+        self.setup_adapter("www.reddit.com", {
+            "snapshot": {
+                "content_type": "xml",
+                "request_url": [
+                    "^(.*?)/?(?:\\?.*)?$",
+                    "\\1/.rss",
+                ],
+                "http": {
+                    "Accept": "application/atom+xml,application/xml;q=0.9,*/*;q=0.8"
+                },
+            }
+        })
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            config = get_snapshot_config("https://www.reddit.com/r/linkding/")
+
+        self.assertEqual(config["content_type"], "xml")
+        self.assertEqual(
+            config["headers"]["Accept"],
+            "application/atom+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+        self.assertEqual(config["_request_url"], "https://www.reddit.com/r/linkding/.rss")
+
+    def test_snapshot_resolver_includes_content_type(self):
+        self.setup_adapter("example.com", {
+            "snapshot": {"content_type": "json"}
+        })
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            config = get_snapshot_config("https://example.com/post")
+
+        self.assertEqual(config["content_type"], "json")
 
 
 class ExecutionLogTestCase(TestCase):

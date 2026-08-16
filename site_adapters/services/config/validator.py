@@ -330,6 +330,27 @@ def _validate_domain_config(issues: list[str], label: str, data: dict, file_dir:
         auth = sec.get('auth')
         if auth is not None:
             _validate_auth_block(issues, f"{label}.{section}.auth", auth, file_dir)
+        if section in ('metadata', 'snapshot'):
+            content_type = sec.get('content_type')
+            if content_type is not None and content_type not in ('html', 'xml', 'json'):
+                issues.append(
+                    f"ERROR: {label}.{section}.content_type must be html/xml/json, got '{content_type}'"
+                )
+        if section == 'metadata':
+            xmlns = sec.get('xmlns')
+            if xmlns is not None and (
+                not isinstance(xmlns, dict)
+                or not all(
+                    isinstance(prefix, str)
+                    and isinstance(uri, str)
+                    and prefix
+                    and uri
+                    for prefix, uri in xmlns.items()
+                )
+            ):
+                issues.append(
+                    f"ERROR: {label}.metadata.xmlns must be a string-to-string prefix map"
+                )
         if section == 'snapshot':
             args = sec.get('singlefile_args', {})
             if args and not isinstance(args, dict):

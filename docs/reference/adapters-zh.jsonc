@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — 完整字段参考
-//  由 fields.py 自动生成（单一信源）  |  2026-08-15 05:48:47
+//  由 fields.py 自动生成（单一信源）  |  2026-08-16 17:17:46
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -115,9 +115,9 @@
           "client_secret": "",                             // OAuth2 client_secret。
           "grant_type": "refresh_token",                   // 授权类型。默认为 "refresh_token"。
           "format": "form",                                // 请求体格式。默认为 "form"。
-          "access_token_path": "access_token",             // 响应中 access_token 的 JSON 路径。默认为 "access_token"。
-          "refresh_token_path": "refresh_token",           // 响应中 refresh_token 的 JSON 路径。默认为 "refresh_token"。
-          "expires_in_path": "expires_in",                 // 响应中 expires_in 的 JSON 路径。默认为 "expires_in"。
+          "access_token_path": "$.access_token",           // 响应中 access_token 的标准 JSONPath。默认为 "$.access_token"。
+          "refresh_token_path": "$.refresh_token",         // 响应中 refresh_token 的标准 JSONPath。默认为 "$.refresh_token"。
+          "expires_in_path": "$.expires_in",               // 响应中 expires_in 的标准 JSONPath。默认为 "$.expires_in"。
           "header": "Authorization",                       // 注入 Token 的 HTTP header 名称。默认为 "Authorization"。
           "header_format": "Bearer {token}",               // Header 值模板，{token} 被替换。默认为 "Bearer {token}"。
           "extra_params": {},                              // Token 请求体中的额外键值对。
@@ -151,9 +151,11 @@
         "http": {},                                        // 自定义 HTTP 请求头。所有键值对都会作为 header 透传。
         "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。用于改写真正发起请求的 URL。
         "rewrite_url": ["^https://m\\.example\\.com/(.*)", "https://www.example.com/\\1"], // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。用于改写最终展示/保存的 URL。
-        "select_title": [],                                // 标题的 CSS 选择器，按顺序尝试，取第一个非空结果。支持 selector@attr。
-        "select_description": [],                          // 描述的 CSS 选择器，按顺序尝试。
-        "select_image": [],                                // 预览图的 CSS 选择器，按顺序尝试。支持 selector@attr。
+        "content_type": "html",                            // 声明式提取的响应格式。"html" 使用 CSS 选择器和 JSON-LD 兜底；"xml" 使用标准 XPath；"json" 使用标准 JSONPath，例如 $.data.items[0].title。
+        "xmlns": {"atom": "http://www.w3.org/2005/Atom"},  // 可选的 XML XPath namespace 前缀映射。Atom/RSS 自动提供 atom/rss 前缀；文档任意层级声明的前缀会自动注册；无前缀元素名自动绑定文档默认 namespace；此字段用于覆盖或补充自定义前缀。
+        "select_title": [],                                // 标题选择器，按顺序尝试，取第一个非空结果。HTML 使用标准 CSS；XML 使用标准 XPath；JSON 使用标准 JSONPath。
+        "select_description": [],                          // 描述选择器，按顺序尝试。HTML 使用标准 CSS；XML 使用标准 XPath；JSON 使用标准 JSONPath。
+        "select_image": [],                                // 预览图选择器，按顺序尝试。HTML 使用标准 CSS；XML 使用标准 XPath；JSON 使用标准 JSONPath。
         "rewrite_title": ["\\s*- Example$", ""],           // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。应用于提取到的标题。
         "rewrite_description": ["\\[read more\\]", ""],    // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。应用于提取到的描述。
         "rewrite_image": ["^http://", "https://"],         // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。应用于提取到的预览图 URL。
@@ -168,9 +170,10 @@
         "proxy": null,                                     // HTTP 代理地址。
       },
 
-      // snapshot — HTML 快照生成（SingleFile + DOM 清理）
-      // 仅 hook 为 "replace" 的快照脚本会绕过 SingleFile，并旁路 keep_elements / remove_elements / remove_classes / set_styles / singlefile_args；before hook 在 SingleFile 内运行，after hook 修改保存后的快照 HTML。
+      // snapshot — HTML 快照生成（SingleFile + DOM 清理），或原始 XML/JSON 捕获
+      // hook 为 "replace" 的快照脚本会绕过 SingleFile 和声明式字段 keep_elements / remove_elements / remove_classes / set_styles / singlefile_args。HTML 清理字段仅对 html 快照生效。before/after hook 可与这些字段并存。
       "snapshot": {
+        "content_type": "html",                            // 快照格式。"html" 使用 SingleFile；"xml" 和 "json" 保存原始响应。
         "auth": null,                                      // 认证配置。
         "http": {},                                        // 自定义 HTTP 请求头。所有键值对都会作为 header 透传。
         "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。用于改写真正发起请求的 URL。
@@ -186,7 +189,7 @@
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},
 //           {"path": "example_after.py", "hook": "after"}
-        ],                                                 // 自定义脚本钩子。hook: before | replace | after。before 在 SingleFile 内运行，after 修改保存后的快照 HTML；replace 接管 SingleFile，并绕过声明式快照字段。
+        ],                                                 // 自定义脚本钩子。hook: before | replace | after。before 在 SingleFile 内运行，after 修改保存后的快照文件；replace 接管 SingleFile，并绕过声明式快照字段。
         "timeout": 30,                                     // 快照超时时间（秒）。
         "proxy": null,                                     // HTTP 代理地址。
       },

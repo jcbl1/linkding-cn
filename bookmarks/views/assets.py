@@ -60,6 +60,8 @@ def view(request, asset_id: int):
         response["Content-Security-Policy"] = "default-src 'none'; media-src 'self';"
     elif asset.content_type == "application/pdf":
         response["Content-Security-Policy"] = "default-src 'none'; object-src 'self';"
+    elif asset.content_type in ("application/json", "application/xml"):
+        response["Content-Security-Policy"] = "default-src 'none';"
     else:
         response["Content-Security-Policy"] = "sandbox allow-scripts"
     return response

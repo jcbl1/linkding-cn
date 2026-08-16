@@ -197,6 +197,8 @@ class BookmarkAsset(models.Model):
 
     CONTENT_TYPE_HTML = "text/html"
     CONTENT_TYPE_PDF = "application/pdf"
+    CONTENT_TYPE_JSON = "application/json"
+    CONTENT_TYPE_XML = "application/xml"
 
     STATUS_PENDING = "pending"
     STATUS_COMPLETE = "complete"
@@ -219,6 +221,10 @@ class BookmarkAsset(models.Model):
         if self.asset_type == BookmarkAsset.TYPE_SNAPSHOT:
             if self.content_type == BookmarkAsset.CONTENT_TYPE_PDF:
                 return f"{self.display_name}.pdf"
+            if self.content_type == BookmarkAsset.CONTENT_TYPE_JSON:
+                return f"{self.display_name}.json"
+            if self.content_type == BookmarkAsset.CONTENT_TYPE_XML:
+                return f"{self.display_name}.xml"
             return f"{self.display_name}.html"
         return self.display_name
 

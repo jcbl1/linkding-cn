@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — Complete Field Reference
-//  Auto-generated from fields.py (single source of truth)  |  2026-08-15 05:48:47
+//  Auto-generated from fields.py (single source of truth)  |  2026-08-16 17:17:46
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -115,9 +115,9 @@
           "client_secret": "",                             // OAuth2 client_secret.
           "grant_type": "refresh_token",                   // Grant type. Defaults to "refresh_token".
           "format": "form",                                // Request body format. Defaults to "form".
-          "access_token_path": "access_token",             // JSON dot-path to access_token in response. Defaults to "access_token".
-          "refresh_token_path": "refresh_token",           // JSON dot-path to refresh_token in response. Defaults to "refresh_token".
-          "expires_in_path": "expires_in",                 // JSON dot-path to expires_in in response. Defaults to "expires_in".
+          "access_token_path": "$.access_token",           // Standard JSONPath to access_token in response. Defaults to "$.access_token".
+          "refresh_token_path": "$.refresh_token",         // Standard JSONPath to refresh_token in response. Defaults to "$.refresh_token".
+          "expires_in_path": "$.expires_in",               // Standard JSONPath to expires_in in response. Defaults to "$.expires_in".
           "header": "Authorization",                       // HTTP header name to inject token into. Defaults to "Authorization".
           "header_format": "Bearer {token}",               // Header value template. {token} is replaced. Defaults to "Bearer {token}".
           "extra_params": {},                              // Extra key-value pairs included in the token request body.
@@ -151,9 +151,11 @@
         "http": {},                                        // Custom HTTP request headers. Every key-value pair is passed as a header.
         "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Changes the URL used for the actual request.
         "rewrite_url": ["^https://m\\.example\\.com/(.*)", "https://www.example.com/\\1"], // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Changes the URL saved/displayed for the bookmark.
-        "select_title": [],                                // CSS selectors for the title, tried in order. First non-empty match wins. Supports "selector@attr".
-        "select_description": [],                          // CSS selectors for the description, tried in order.
-        "select_image": [],                                // CSS selectors for the preview image, tried in order. Supports "selector@attr".
+        "content_type": "html",                            // Response format for declarative extraction. "html" uses CSS selectors and JSON-LD fallback; "xml" uses standard XPath; "json" uses standard JSONPath such as $.data.items[0].title.
+        "xmlns": {"atom": "http://www.w3.org/2005/Atom"},  // Optional namespace prefixes for XML XPath expressions. Atom/RSS use automatic aliases atom/rss; prefixes declared anywhere in the document are auto-registered; unprefixed element names bind to the document default namespace; this overrides or adds custom prefixes.
+        "select_title": [],                                // Selectors for the title, tried in order. HTML uses standard CSS; XML uses standard XPath; JSON uses standard JSONPath.
+        "select_description": [],                          // Selectors for the description, tried in order. HTML uses standard CSS; XML uses standard XPath; JSON uses standard JSONPath.
+        "select_image": [],                                // Selectors for the preview image, tried in order. HTML uses standard CSS; XML uses standard XPath; JSON uses standard JSONPath.
         "rewrite_title": ["\\s*- Example$", ""],           // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Applied to the extracted title.
         "rewrite_description": ["\\[read more\\]", ""],    // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Applied to the extracted description.
         "rewrite_image": ["^http://", "https://"],         // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Applied to the extracted image URL.
@@ -168,9 +170,10 @@
         "proxy": null,                                     // HTTP proxy URL.
       },
 
-      // snapshot — HTML snapshot via SingleFile + DOM cleanup
-      // A snapshot script with hook "replace" bypasses SingleFile and the declarative fields keep_elements / remove_elements / remove_classes / set_styles / singlefile_args. before hooks run inside SingleFile; after hooks modify the saved snapshot HTML.
+      // snapshot — HTML snapshot via SingleFile, or raw XML/JSON capture
+      // A snapshot script with hook "replace" bypasses SingleFile and the declarative fields keep_elements / remove_elements / remove_classes / set_styles / singlefile_args. HTML cleanup fields only apply to html snapshots. before/after hooks can coexist with those fields.
       "snapshot": {
+        "content_type": "html",                            // Snapshot format. "html" uses SingleFile; "xml" and "json" save the raw response.
         "auth": null,                                      // Authentication config.
         "http": {},                                        // Custom HTTP request headers. Every key-value pair is passed as a header.
         "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Changes the URL used for the actual request.
@@ -186,7 +189,7 @@
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},
 //           {"path": "example_after.py", "hook": "after"}
-        ],                                                 // Script hooks. hook: "before" | "replace" | "after". before runs inside SingleFile; after modifies the saved snapshot HTML; replace bypasses SingleFile and declarative fields.
+        ],                                                 // Script hooks. hook: "before" | "replace" | "after". before runs inside SingleFile; after modifies the saved snapshot file; replace bypasses SingleFile and declarative fields.
         "timeout": 30,                                     // Snapshot timeout in seconds.
         "proxy": null,                                     // HTTP proxy URL.
       },

@@ -16,7 +16,9 @@ from bookmarks.services.website_loader import (
     build_request_headers,
     detect_content_type,
     is_pdf_content_type,
+    normalize_content_type,
 )
+from site_adapters.services.config.resolver import get_snapshot_config
 
 MAX_ASSET_FILENAME_LENGTH = 192
 
@@ -51,12 +53,28 @@ def create_snapshot(asset: BookmarkAsset, username: str = ''):
     try:
         url = asset.bookmark.url
         username = username or (asset.bookmark.owner.username if asset.bookmark.owner else '')
-        content_type = detect_content_type(url)
+        config = get_snapshot_config(url, username=username)
+        declared = normalize_content_type((config or {}).get("content_type"))
 
-        if is_pdf_content_type(content_type):
+        if declared == "json":
+            _create_data_snapshot(asset, username=username, content_type="json")
+            return
+        elif declared == "xml":
+            _create_data_snapshot(asset, username=username, content_type="xml")
+            return
+        elif declared == "html":
+            _create_html_snapshot(asset, username=username)
+            return
+
+        detected = detect_content_type(url, config)
+        if is_pdf_content_type(detected):
             _create_pdf_snapshot(asset)
         else:
-            _create_html_snapshot(asset, username=username)
+            format_type = normalize_content_type(detected)
+            if format_type in ("json", "xml"):
+                _create_data_snapshot(asset, username=username, content_type=format_type)
+            else:
+                _create_html_snapshot(asset, username=username)
     except Exception:
         asset.status = BookmarkAsset.STATUS_FAILURE
         asset.save()
@@ -94,8 +112,6 @@ def _create_html_snapshot(asset: BookmarkAsset, username: str = ''):
 
 
 def _create_pdf_snapshot(asset: BookmarkAsset):
-    from site_adapters.services.config.resolver import get_snapshot_config
-
     url = asset.bookmark.url
     request_config = get_snapshot_config(url)
     max_size = settings.LD_SNAPSHOT_PDF_MAX_SIZE
@@ -162,6 +178,52 @@ def _create_pdf_snapshot(asset: BookmarkAsset):
     finally:
         if os.path.exists(temp_filepath):
             os.remove(temp_filepath)
+
+
+def _create_data_snapshot(
+    asset: BookmarkAsset,
+    username: str,
+    content_type: str,
+):
+    url = asset.bookmark.url
+    extension = "json" if content_type == "json" else "xml"
+    mime_type = (
+        BookmarkAsset.CONTENT_TYPE_JSON
+        if content_type == "json"
+        else BookmarkAsset.CONTENT_TYPE_XML
+    )
+
+    temp_filename = _generate_asset_filename(asset, url, "tmp")
+    temp_filepath = os.path.join(settings.LD_ASSET_FOLDER, temp_filename)
+    snapshot_processor.create_snapshot(
+        url,
+        temp_filepath,
+        username=username,
+        content_type=content_type,
+    )
+
+    filename = _generate_asset_filename(asset, url, f"{extension}.gz")
+    filepath = os.path.join(settings.LD_ASSET_FOLDER, filename)
+    with open(temp_filepath, "rb") as temp_file, gzip.open(filepath, "wb") as gz_file:
+        shutil.copyfileobj(temp_file, gz_file)
+    os.remove(temp_filepath)
+
+    timestamp = _format_asset_timestamp(asset.date_created)
+    label = "JSON" if content_type == "json" else "XML"
+
+    asset.status = BookmarkAsset.STATUS_COMPLETE
+    asset.content_type = mime_type
+    asset.display_name = _("%(label)s snapshot from %(timestamp)s") % {
+        "label": label,
+        "timestamp": timestamp,
+    }
+    asset.file = filename
+    asset.gzip = True
+    asset.save()
+
+    asset.bookmark.latest_snapshot = asset
+    asset.bookmark.date_modified = timezone.now()
+    _save_bookmark_updates(asset.bookmark, ["latest_snapshot", "date_modified"])
 
 
 def upload_snapshot(bookmark: Bookmark, html: bytes):

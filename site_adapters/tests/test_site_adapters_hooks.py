@@ -210,6 +210,56 @@ class ScriptsValidationTestCase(TestCase):
         self.assertGreater(len(errors), 0,
                           f"Expected process_carousels error, got: {issues}")
 
+    def test_validate_rejects_invalid_metadata_content_type(self):
+        self._make_adapter("example.com", metadata_config={
+            "content_type": "yaml",
+            "select_title": ["title"],
+        })
+
+        issues = validate_config(self.base_dir)
+        errors = [i for i in issues if "content_type must be html/xml/json" in i]
+        self.assertGreater(
+            len(errors), 0,
+            f"Expected content_type validation error, got: {issues}",
+        )
+
+    def test_validate_rejects_invalid_snapshot_content_type(self):
+        config_data = json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults",
+                          "source": "./defaults/adapters.jsonc"}]
+        })
+        self._write("adapters/config.jsonc", config_data)
+        self._write(
+            "adapters/defaults/adapters.jsonc",
+            json.dumps({
+                "domains": {
+                    "example.com": {
+                        "snapshot": {"content_type": "yaml"}
+                    }
+                }
+            }),
+        )
+
+        issues = validate_config(self.base_dir)
+        errors = [i for i in issues if "snapshot.content_type must be html/xml/json" in i]
+        self.assertGreater(
+            len(errors), 0,
+            f"Expected snapshot content_type validation error, got: {issues}",
+        )
+
+    def test_validate_rejects_invalid_xmlns(self):
+        self._make_adapter("example.com", metadata_config={
+            "xmlns": "http://www.w3.org/2005/Atom",
+            "select_title": ["//atom:title"],
+        })
+
+        issues = validate_config(self.base_dir)
+        errors = [i for i in issues if "metadata.xmlns must be a string-to-string prefix map" in i]
+        self.assertGreater(
+            len(errors), 0,
+            f"Expected xmlns validation error, got: {issues}",
+        )
+
 
 class MetadataHookDispatchTestCase(TestCase):
     """Test that hook functions are called correctly in metadata pipeline."""

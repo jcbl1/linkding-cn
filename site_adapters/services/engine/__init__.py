@@ -12,24 +12,21 @@ Public API:
 from site_adapters.services.engine.script_runner import run_script
 
 
-def parse_metadata(html_content: str, url: str, config: dict) -> dict:
+def parse_metadata(content: str, url: str, config: dict) -> dict:
     """Built-in metadata parser exposed for use in replace scripts.
 
     Args:
-        html_content: HTML string to parse.
+        content: HTML, XML, or JSON response string to parse.
         url: Page URL (for relative image resolution).
-        config: Merged config dict (user-facing keys: select_title, etc.)
+        config: Merged config dict (user-facing keys: content_type, select_*, etc.)
 
     Returns:
         dict with title, description, image, url (any can be None).
     """
-    from bs4 import BeautifulSoup
-    from bookmarks.services.website_loader import _parse_metadata_from_soup
-    from site_adapters.services.config import apply_rewrite
+    from bookmarks.services.website_loader import _parse_metadata_from_content
 
-    soup = BeautifulSoup(html_content, "html.parser")
-    title, description, preview_image, _ = _parse_metadata_from_soup(
-        soup, url, config, include_sources=True
+    title, description, preview_image, _ = _parse_metadata_from_content(
+        content, url, config, include_sources=True
     )
     return {
         "title": title,

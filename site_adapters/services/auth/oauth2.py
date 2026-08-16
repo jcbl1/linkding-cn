@@ -9,18 +9,17 @@ OAuth2 Token 自动刷新
 5. 注入为 HTTP header
 """
 
-import json
 import logging
-import re
 import threading
 import time
 
 import requests
+from jsonpath_rfc9535 import find as jsonpath_find
 
 from site_adapters.services.auth.credentials import (
     get_user_token,
-    save_user_token_cache,
     load_user_token_cache,
+    save_user_token_cache,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,28 +36,22 @@ def _cache_key(username: str, domain_key: str) -> str:
     return f'{username}:{domain_key}'
 
 
-_PATH_PART_RE = re.compile(r'^([^\[\]]+)(?:\[(\d+)\])?$')
-
-
 def _resolve_json_path(data: dict, path: str) -> str | None:
-    """从 JSON 中按 dot path 取值，支持 items[0].token。"""
-    current = data
-    for part in path.split('.'):
-        match = _PATH_PART_RE.match(part)
-        if not match or not isinstance(current, dict):
-            return None
-        current = current.get(match.group(1))
-        if current is None:
-            return None
-        index = match.group(2)
-        if index is not None:
-            if not isinstance(current, list):
-                return None
-            idx = int(index)
-            if idx >= len(current):
-                return None
-            current = current[idx]
-    return str(current) if current is not None else None
+    """从 JSON 中按标准 JSONPath 取值。"""
+    path = path.strip()
+    if not path.startswith("$"):
+        path = "$." + path
+    try:
+        nodes = jsonpath_find(path, data)
+    except Exception:
+        return None
+    for node in nodes:
+        value = node.value
+        if isinstance(value, str):
+            return value.strip() or None
+        if isinstance(value, (int, float, bool)):
+            return str(value)
+    return None
 
 
 def refresh_token(token_config: dict, refresh_token_value: str) -> dict | None:
@@ -87,9 +80,9 @@ def refresh_token(token_config: dict, refresh_token_value: str) -> dict | None:
         body['client_secret'] = client_secret
     body.update(extra)
 
-    access_path = token_config.get('access_token_path', token_config.get('access_path', 'access_token'))
-    refresh_path = token_config.get('refresh_token_path', token_config.get('refresh_path', 'refresh_token'))
-    expires_path = token_config.get('expires_in_path', token_config.get('expires_path', 'expires_in'))
+    access_path = token_config.get('access_token_path', token_config.get('access_path', '$.access_token'))
+    refresh_path = token_config.get('refresh_token_path', token_config.get('refresh_path', '$.refresh_token'))
+    expires_path = token_config.get('expires_in_path', token_config.get('expires_path', '$.expires_in'))
 
     try:
         if fmt == 'json':

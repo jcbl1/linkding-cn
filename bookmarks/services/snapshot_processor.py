@@ -4,17 +4,21 @@ import os
 import subprocess
 from contextlib import suppress
 
-from bookmarks.services import singlefile
-from site_adapters.services.engine.script_runner import run_script
+from bookmarks.services import singlefile, website_loader
 from site_adapters.services.auth.cookies import (
     verify_and_refresh,
 )
 from site_adapters.services.auth.credentials import get_shared_cookie
 from site_adapters.services.config.resolver import get_snapshot_config
+from site_adapters.services.engine.script_runner import run_script
 
 logger = logging.getLogger(__name__)
 
 
+
+
+def _snapshot_format(config: dict | None) -> str:
+    return website_loader.resolve_content_type(config, default="html")
 
 
 def _run_snapshot(url: str, filepath: str, config: dict | None):
@@ -28,8 +32,22 @@ def _run_snapshot(url: str, filepath: str, config: dict | None):
             if os.path.exists(script_path):
                 return run_script(script_path, url=url, config=config, output_path=filepath)
             logger.error("Snapshot script not found: %s", script_path)
+        if _snapshot_format(config) in ("xml", "json"):
+            return _create_raw_snapshot(url, filepath, config)
         return _create_snapshot(url, filepath, config)
     return _create_snapshot(url, filepath, None)
+
+
+def _create_raw_snapshot(url: str, filepath, config: dict):
+    before_path = config.get("_before_content_path")
+    if before_path and os.path.exists(before_path):
+        with open(before_path, encoding="utf-8") as f:
+            content = f.read()
+    else:
+        request_url = config.get("_request_url", url)
+        content = website_loader.load_page(request_url, config, load_full_page=True)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content or "")
 
 
 def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: list):
@@ -39,7 +57,9 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
            → external after hooks
     """
     import tempfile
-    before_html_path = None
+    raw_format = _snapshot_format(config)
+    is_raw = raw_format in ("xml", "json")
+    before_content_path = None
     external_before = []
     external_after = []
     replace_scripts = []
@@ -70,11 +90,13 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
         logger.debug("Running snapshot before hook: %s", script_path)
         result = run_script(script_path, hook_name='before', url=url, config=dict(config))
         if isinstance(result, str):
-            # before hook returned HTML — save to temp file for downstream
-            with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as tmp:
+            suffix = raw_format if is_raw else "html"
+            with tempfile.NamedTemporaryFile(
+                "w", suffix=f".{suffix}", delete=False, encoding="utf-8"
+            ) as tmp:
                 tmp.write(result)
-            before_html_path = tmp.name
-            logger.debug("Before hook returned HTML, saved to: %s", before_html_path)
+            before_content_path = tmp.name
+            logger.debug("Before hook returned content, saved to: %s", before_content_path)
 
     # 2. Run replace hook or built-in engine
     if replace_scripts:
@@ -87,20 +109,32 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
             run_script(script_path, hook_name='replace', url=url,
                        config=dict(config), output_path=filepath)
             break  # Only one replace allowed
+    elif is_raw:
+        config_copy = dict(config)
+        if before_content_path:
+            config_copy['_before_content_path'] = before_content_path
+        _create_raw_snapshot(url, filepath, config_copy)
     else:
         # Built-in engine: SingleFile
         config_copy = dict(config)
         if browser_before:
             config_copy['_browser_before_scripts'] = browser_before
-        if before_html_path:
-            config_copy['_before_html_path'] = before_html_path
+        if before_content_path:
+            config_copy['_before_html_path'] = before_content_path
             _create_snapshot(url, filepath, config_copy)
         else:
             _create_snapshot(url, filepath, config_copy)
 
     # 3. Run built-in after hooks against the saved HTML
     for script_path in builtin_after:
-        _run_builtin_after_hook(script_path, url, filepath, config)
+        if is_raw:
+            logger.warning(
+                "SingleFile built-in after hook skipped for raw %s snapshot: %s",
+                raw_format,
+                script_path,
+            )
+        else:
+            _run_builtin_after_hook(script_path, url, filepath, config)
 
     # 4. Run external after hooks
     for entry in external_after:
@@ -110,9 +144,9 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
                    config=dict(config))
 
     # Cleanup temp file
-    if before_html_path:
+    if before_content_path:
         with suppress(OSError):
-            os.unlink(before_html_path)
+            os.unlink(before_content_path)
 
 
 def _run_builtin_after_hook(script_path: str, url: str, filepath: str, config: dict):
@@ -184,8 +218,15 @@ def _cookie_string_from_config(config: dict = None) -> str | None:
     return config.get("headers", {}).get("Cookie")
 
 
-def create_snapshot(url: str, filepath: str, username: str = ''):
+def create_snapshot(
+    url: str,
+    filepath: str,
+    username: str = '',
+    content_type: str | None = None,
+):
     config = get_snapshot_config(url, username=username)
+    if config and content_type:
+        config["_response_content_type"] = content_type
     # Pre-flight: for auto-type cookie sites without cookies, acquire via browser first.
     try:
         cookie_config = config.get("cookie") if config else {}

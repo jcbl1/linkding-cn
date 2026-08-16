@@ -1,7 +1,7 @@
-from unittest import mock
 import json
 import os
 import tempfile
+from unittest import mock
 
 import requests
 from django.test import TestCase
@@ -82,6 +82,16 @@ class WebsiteLoaderTestCase(TestCase):
 
             expected_content_size = 10 * 1024
             self.assertEqual(expected_content_size, len(content))
+
+    def test_load_page_captures_response_content_type(self):
+        response = MockStreamingResponse(num_chunks=1, chunk_size=4)
+        response.headers = {"Content-Type": "application/json"}
+        config = {}
+
+        with mock.patch("requests.get", return_value=response):
+            website_loader.load_page("https://example.com/api", config)
+
+        self.assertEqual(config["_response_content_type"], "application/json")
 
     def test_load_page_limits_large_documents(self):
         with mock.patch("requests.get") as mock_get:
@@ -493,7 +503,7 @@ class WebsiteLoaderTestCase(TestCase):
 
     def test_website_metadata_with_config_uses_cache(self):
         expected_html = '<html><head><title>Test Title</title></head></html>'
-        config = {"http": {"timeout": 3}}
+        config = {"http": {"timeout": 3}, "select_title": ["title"]}
 
         with (
             mock.patch(
@@ -544,6 +554,250 @@ class WebsiteLoaderTestCase(TestCase):
         self.assertEqual(metadata.title, "Selected title")
         self.assertEqual(metadata.description, "Selected description")
         self.assertEqual(metadata.preview_image, "https://fetch.example.com/cover.jpg")
+
+    def test_html_metadata_uses_standard_css_semantics(self):
+        html = """
+        <html><body>
+          <meta property="og:description" content="CSS description">
+          <meta property="og:image" content="/cover.jpg">
+        </body></html>
+        """
+        config = {
+            "select_description": ["meta[property='og:description']"],
+            "select_image": ["meta[property='og:image']"],
+            "headers": {},
+        }
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com/post")
+
+        self.assertEqual(metadata.description, "CSS description")
+        self.assertEqual(metadata.preview_image, "https://example.com/cover.jpg")
+
+    def test_configured_xml_metadata_uses_selectors(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+          <entry>
+            <title>XML title</title>
+            <content type="html">&lt;p&gt;XML &lt;strong&gt;description&lt;/strong&gt;&lt;/p&gt;</content>
+            <media:thumbnail url="https://preview.redd.it/pic.jpg?width=140&amp;auto=webp" />
+          </entry>
+        </feed>
+        """
+        config = {
+            "content_type": "xml",
+            "select_title": ["//atom:feed/atom:entry/atom:title"],
+            "select_description": ["//atom:feed/atom:entry/atom:content"],
+            "select_image": ["//atom:feed/atom:entry/media:thumbnail/@url"],
+            "rewrite_image": [
+                "^https://preview\\.redd\\.it/([^?]+).*$",
+                "https://i.redd.it/\\1",
+            ],
+            "headers": {},
+        }
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch.object(website_loader, "load_page", return_value=xml),
+        ):
+            metadata = website_loader.load_website_metadata("https://www.reddit.com/r/x/comments/y/post/")
+
+        self.assertEqual(metadata.title, "XML title")
+        self.assertEqual(metadata.description, "XML\ndescription")
+        self.assertEqual(metadata.preview_image, "https://i.redd.it/pic.jpg")
+
+    def test_configured_xml_metadata_binds_unprefixed_xpath_to_default_namespace(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+          <entry>
+            <title>XML title</title>
+            <content type="html">&lt;p&gt;XML &lt;strong&gt;description&lt;/strong&gt;&lt;/p&gt;</content>
+            <media:thumbnail url="https://preview.redd.it/pic.jpg?width=140&amp;auto=webp" />
+          </entry>
+        </feed>
+        """
+        config = {
+            "content_type": "xml",
+            "select_title": ["//feed/entry/title"],
+            "select_description": ["//feed/entry/content"],
+            "select_image": ["//feed/entry/media:thumbnail/@url"],
+            "rewrite_image": [
+                "^https://preview\\.redd\\.it/([^?]+).*$",
+                "https://i.redd.it/\\1",
+            ],
+            "headers": {},
+        }
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch.object(website_loader, "load_page", return_value=xml),
+        ):
+            metadata = website_loader.load_website_metadata("https://www.reddit.com/r/x/comments/y/post/")
+
+        self.assertEqual(metadata.title, "XML title")
+        self.assertEqual(metadata.description, "XML\ndescription")
+        self.assertEqual(metadata.preview_image, "https://i.redd.it/pic.jpg")
+
+    def test_xml_metadata_without_namespace_keeps_plain_xpath(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <feed>
+          <entry>
+            <title>Plain XML title</title>
+            <summary>Plain XML description</summary>
+          </entry>
+        </feed>
+        """
+        config = {
+            "content_type": "xml",
+            "select_title": ["//feed/entry/title"],
+            "select_description": ["//feed/entry/summary"],
+            "headers": {},
+        }
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch.object(website_loader, "load_page", return_value=xml),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com/feed.xml")
+
+        self.assertEqual(metadata.title, "Plain XML title")
+        self.assertEqual(metadata.description, "Plain XML description")
+
+    def test_xml_metadata_registers_prefixes_declared_on_nested_elements(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <entry xmlns:media="http://search.yahoo.com/mrss/">
+            <title>Nested prefix title</title>
+            <media:thumbnail url="https://example.com/nested.jpg" />
+          </entry>
+        </feed>
+        """
+        config = {
+            "content_type": "xml",
+            "select_title": ["//feed/entry/title"],
+            "select_image": ["//feed/entry/media:thumbnail/@url"],
+            "headers": {},
+        }
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch.object(website_loader, "load_page", return_value=xml),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com/feed.xml")
+
+        self.assertEqual(metadata.title, "Nested prefix title")
+        self.assertEqual(metadata.preview_image, "https://example.com/nested.jpg")
+
+    def test_xml_metadata_can_select_no_namespace_nodes_with_local_name(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>Atom title</title>
+          <custom xmlns="">Plain child</custom>
+        </feed>
+        """
+        config = {
+            "content_type": "xml",
+            "select_title": ["/feed/*[local-name()='custom']"],
+            "headers": {},
+        }
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch.object(website_loader, "load_page", return_value=xml),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com/feed.xml")
+
+        self.assertEqual(metadata.title, "Plain child")
+
+    def test_configured_json_metadata_uses_paths(self):
+        body = json.dumps({
+            "data": {
+                "title": "JSON title",
+                "items": [{"summary": "JSON description"}],
+                "image": {"url": "/cover.jpg"},
+            }
+        })
+        config = {
+            "content_type": "json",
+            "select_title": ["$.data.title"],
+            "select_description": ["$.data.items[0].summary"],
+            "select_image": ["$.data.image.url"],
+            "headers": {},
+        }
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch.object(website_loader, "load_page", return_value=body),
+        ):
+            metadata = website_loader.load_website_metadata("https://api.example.com/item")
+
+        self.assertEqual(metadata.title, "JSON title")
+        self.assertEqual(metadata.description, "JSON description")
+        self.assertEqual(metadata.preview_image, "https://api.example.com/cover.jpg")
+
+    def test_content_type_explicit_wins_over_selectors(self):
+        body = json.dumps({"title": "JSON title"})
+        config = {
+            "content_type": "json",
+            "select_title": ["$.title"],
+            "headers": {},
+        }
+
+        with (
+            mock.patch(
+                "bookmarks.services.website_loader.get_metadata_config",
+                return_value=config,
+            ),
+            mock.patch.object(website_loader, "load_page", return_value=body),
+        ):
+            metadata = website_loader.load_website_metadata("https://api.example.com/item")
+
+        self.assertEqual(metadata.title, "JSON title")
+
+    def test_content_type_inferred_from_selector_syntax(self):
+        configs = [
+            ({"select_title": ["$.title"]}, "json"),
+            ({"select_title": ["//item/title"]}, "xml"),
+            ({"select_title": [".title"]}, "html"),
+        ]
+        for config, expected in configs:
+            with self.subTest(expected=expected):
+                self.assertEqual(
+                    website_loader.resolve_content_type(config),
+                    expected,
+                )
+
+    def test_content_type_falls_back_to_response_header(self):
+        config = {"_response_content_type": "application/atom+xml"}
+        self.assertEqual(website_loader.resolve_content_type(config), "xml")
+
+    def test_content_type_resolution_raises_without_signals(self):
+        with self.assertRaises(website_loader.ContentTypeResolutionError):
+            website_loader.resolve_content_type({})
 
     def test_build_request_cookies_prefers_cookie_config_file(self):
         fd, path = tempfile.mkstemp()
@@ -915,9 +1169,9 @@ class MetadataRetryTestCase(TestCase):
             mock.patch("requests.get", return_value=fail_response),
             mock.patch("bookmarks.services.website_loader._wait_for_domain"),
             collect_executions() as entries,
+            self.assertRaises(website_loader.NonRetryableMetadataError),
         ):
-            with self.assertRaises(website_loader.NonRetryableMetadataError):
-                website_loader.load_page("https://example.com")
+            website_loader.load_page("https://example.com")
 
         self.assertTrue(
             any(

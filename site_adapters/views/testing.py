@@ -13,6 +13,7 @@ from django.views.decorators.http import require_POST
 
 from bookmarks.services.website_loader import (
     load_website_metadata_for_test,
+    normalize_content_type,
 )
 from bookmarks.utils import is_safe_domain_key
 from site_adapters.services.auth.cookies import (
@@ -142,6 +143,7 @@ def _make_default_snapshot_config():
     return {
         '_engine': 'built-in (SingleFile)',
         'script': None,
+        'content_type': 'html',
         'process_lazy_images': None,
         'remove_classes': None,
         'set_styles': None,
@@ -365,7 +367,15 @@ def _test_snapshot(url, base_dir, username, entries):
         no_match = True
     from bookmarks.services.snapshot_processor import create_snapshot
     os.makedirs(TEST_ASSETS_DIR, exist_ok=True)
-    filename = 'snapshot_' + _timestamp() + '_' + _sanitize_url_for_filename(url) + '.html'
+    snapshot_extension = normalize_content_type((config or {}).get('content_type')) or 'html'
+    filename = (
+        'snapshot_'
+        + _timestamp()
+        + '_'
+        + _sanitize_url_for_filename(url)
+        + '.'
+        + snapshot_extension
+    )
     out_path = os.path.join(TEST_ASSETS_DIR, filename)
     create_snapshot(url, out_path, username=username)
 

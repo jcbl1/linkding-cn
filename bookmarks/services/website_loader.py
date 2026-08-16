@@ -13,21 +13,24 @@ from bs4 import BeautifulSoup
 from charset_normalizer import from_bytes
 from django.conf import settings
 from django.utils import timezone
+from elementpath import Selector as XPathSelector
+from jsonpath_rfc9535 import find as jsonpath_find
+from lxml import etree
 
+from bookmarks.utils import get_registrable_domain
 from site_adapters.services.auth.cookies import (
     verify_and_refresh,
 )
 from site_adapters.services.auth.credentials import get_shared_cookie
-from site_adapters.services.execution_log import log_execution
 from site_adapters.services.config import (
     apply_request_url,
     apply_rewrite,
     apply_rewrite_url,
 )
 from site_adapters.services.config.resolver import get_metadata_config
-from site_adapters.services.engine.script_runner import run_script
 from site_adapters.services.engine.browser_fallback import load_metadata_via_browser
-from bookmarks.utils import get_registrable_domain
+from site_adapters.services.engine.script_runner import run_script
+from site_adapters.services.execution_log import log_execution
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,27 @@ _JSON_LD_SKIP_TYPES = frozenset({"WebSite", "Organization", "BreadcrumbList"})
 
 _domain_rate_lock = threading.Lock()
 _DOMAIN_RATE_MAX_SIZE = 1000  # Prevent unbounded growth
+
+_CONTENT_TYPE_ALIASES = {
+    "html": "html",
+    "application/xhtml+xml": "html",
+    "json": "json",
+    "application/json": "json",
+    "xml": "xml",
+    "application/xml": "xml",
+    "text/xml": "xml",
+    "application/rss+xml": "xml",
+    "application/atom+xml": "xml",
+}
+
+_DEFAULT_NAMESPACE_ALIASES = {
+    "http://www.w3.org/2005/Atom": "atom",
+    "http://purl.org/rss/1.0/": "rss",
+}
+
+
+class ContentTypeResolutionError(ValueError):
+    """Raised when neither config nor response headers identify the format."""
 
 
 def _wait_for_domain(domain: str):
@@ -391,9 +415,8 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
 
     try:
         start = timezone.now()
-        soup = BeautifulSoup(page_text, "html.parser")
-        title, description, preview_image, sources = _parse_metadata_from_soup(
-            soup, fetch_url, config, include_sources=True
+        title, description, preview_image, sources = _parse_metadata_from_content(
+            page_text, fetch_url, config, include_sources=True
         )
 
         cookie_config = config.get("cookie") if config else {}
@@ -412,13 +435,19 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
                 # 刷新成功后更新 _user_cookie 为新的 cookie 字符串
                 retry_config["_user_cookie"] = after
                 page_text = load_page(fetch_url, retry_config, load_full_page=load_full)
-                soup = BeautifulSoup(page_text, "html.parser")
-                title, description, preview_image, sources = _parse_metadata_from_soup(
-                    soup, fetch_url, retry_config, include_sources=True
+                title, description, preview_image, sources = _parse_metadata_from_content(
+                    page_text, fetch_url, retry_config, include_sources=True
                 )
 
         end = timezone.now()
         logger.debug("Parsing duration: %s", end - start)
+    except ContentTypeResolutionError:
+        logger.error(
+            "Unable to determine metadata content type for url=%s",
+            url,
+            exc_info=True,
+        )
+        raise
     except Exception as exc:
         logger.error("Unexpected metadata parsing failure. url=%s", url, exc_info=exc)
         if include_sources:
@@ -502,11 +531,181 @@ def _extract_json_ld(soup) -> dict:
     return {}
 
 
-def _parse_metadata_from_soup(soup, url: str, config: dict | None = None, include_sources: bool = False):
-    sources = {}
+def normalize_content_type(value) -> str | None:
+    """Normalize a config value or HTTP Content-Type to html/json/xml."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower().split(";", 1)[0].strip()
+    return _CONTENT_TYPE_ALIASES.get(normalized)
 
-    # Pre-extract JSON-LD once (shared across title/desc/image fallbacks)
-    json_ld = None
+
+def _selectors_from_config(config: dict | None) -> list[str]:
+    if not config:
+        return []
+    selectors = []
+    for key in ("select_title", "select_description", "select_image"):
+        value = config.get(key)
+        if isinstance(value, str):
+            value = [value]
+        if isinstance(value, list):
+            selectors.extend(
+                item.strip()
+                for item in value
+                if isinstance(item, str) and item.strip()
+            )
+    return selectors
+
+
+def _infer_content_type_from_selectors(config: dict | None) -> str | None:
+    selectors = _selectors_from_config(config)
+    if not selectors:
+        return None
+    first = selectors[0]
+    if first.startswith("$"):
+        return "json"
+    if first.startswith("/"):
+        return "xml"
+    return "html"
+
+
+def resolve_content_type(config: dict | None, default: str | None = None) -> str:
+    """Resolve the extraction format using explicit, selector, and header signals."""
+    explicit = normalize_content_type((config or {}).get("content_type"))
+    if explicit:
+        return explicit
+
+    inferred = _infer_content_type_from_selectors(config)
+    if inferred:
+        return inferred
+
+    response_type = normalize_content_type((config or {}).get("_response_content_type"))
+    if response_type:
+        return response_type
+
+    if default is not None:
+        return default
+    raise ContentTypeResolutionError(
+        "Could not determine response format. "
+        "Set content_type, use a recognized selector syntax, or supply Content-Type."
+    )
+
+
+def _metadata_content_type(config: dict | None, default: str | None = None) -> str:
+    return resolve_content_type(config, default=default)
+
+
+def _empty_parse_sources():
+    return {
+        "title": {"value": None, "selector": None},
+        "description": {"value": None, "selector": None},
+        "preview_image": {"value": None, "selector": None},
+    }
+
+
+def _parse_metadata_from_content(
+    content: str,
+    url: str,
+    config: dict | None = None,
+    include_sources: bool = False,
+):
+    content_type = resolve_content_type(config)
+    if content_type == "json":
+        return _parse_metadata_from_json(content, url, config, include_sources)
+    if content_type == "xml":
+        return _parse_metadata_from_xml(content, url, config, include_sources)
+
+    soup = BeautifulSoup(content, "html.parser")
+    return _parse_metadata_from_soup(soup, url, config, include_sources)
+
+
+def _parse_metadata_from_json(
+    content: str,
+    url: str,
+    config: dict | None = None,
+    include_sources: bool = False,
+):
+    sources = {}
+    try:
+        data = json.loads(content)
+    except (json.JSONDecodeError, ValueError):
+        if include_sources:
+            return None, None, None, _empty_parse_sources()
+        return None, None, None
+
+    title, source = _extract_with_json_paths(
+        data, (config or {}).get("select_title") or []
+    )
+    sources["title"] = {"value": title, "selector": source}
+
+    description, source = _extract_with_json_paths(
+        data, (config or {}).get("select_description") or []
+    )
+    sources["description"] = {"value": description, "selector": source}
+
+    preview_image, source = _extract_with_json_paths(
+        data, (config or {}).get("select_image") or []
+    )
+    if preview_image and not preview_image.startswith(("http://", "https://")):
+        preview_image = urljoin(url, preview_image)
+    sources["preview_image"] = {"value": preview_image, "selector": source}
+
+    if include_sources:
+        return title, description, preview_image, sources
+    return title, description, preview_image
+
+
+def _parse_metadata_from_xml(
+    content: str,
+    url: str,
+    config: dict | None = None,
+    include_sources: bool = False,
+):
+    sources = {}
+    try:
+        root = etree.fromstring(_strip_xml_declaration(content))
+    except (etree.XMLSyntaxError, ValueError):
+        if include_sources:
+            return None, None, None, _empty_parse_sources()
+        return None, None, None
+
+    title, source = _extract_with_xpath(
+        root, (config or {}).get("select_title") or [], "title", config
+    )
+    sources["title"] = {"value": title, "selector": source}
+
+    description, source = _extract_with_xpath(
+        root, (config or {}).get("select_description") or [], "description", config
+    )
+    sources["description"] = {"value": description, "selector": source}
+
+    preview_image, source = _extract_with_xpath(
+        root, (config or {}).get("select_image") or [], "image", config
+    )
+    if preview_image and not preview_image.startswith(("http://", "https://")):
+        preview_image = urljoin(url, preview_image)
+    sources["preview_image"] = {"value": preview_image, "selector": source}
+
+    if include_sources:
+        return title, description, preview_image, sources
+    return title, description, preview_image
+
+
+def _strip_xml_declaration(content: str) -> str:
+    content = content.lstrip()
+    if content.startswith("<?xml"):
+        end = content.find("?>")
+        if end != -1:
+            content = content[end + 2:].lstrip()
+    return content
+
+
+def _parse_metadata_from_soup(
+    soup,
+    url: str,
+    config: dict | None = None,
+    include_sources: bool = False,
+):
+    sources = {}
 
     title_selectors = config.get("select_title") if config else None
     title, source = _extract_with_selector_source(
@@ -526,21 +725,19 @@ def _parse_metadata_from_soup(soup, url: str, config: dict | None = None, includ
     )
     sources["preview_image"] = {"value": preview_image, "selector": source}
 
-    # JSON-LD as universal fallback for any missing fields
-    if title is None or description is None or preview_image is None:
-        json_ld = _extract_json_ld(soup)
-        if title is None:
-            title = json_ld.get("title")
-            if title:
-                sources["title"] = {"value": title, "selector": "json-ld"}
-        if description is None:
-            description = json_ld.get("description")
-            if description:
-                sources["description"] = {"value": description, "selector": "json-ld"}
-        if preview_image is None:
-            preview_image = json_ld.get("image")
-            if preview_image:
-                sources["preview_image"] = {"value": preview_image, "selector": "json-ld"}
+    json_ld = _extract_json_ld(soup)
+    if title is None:
+        title = json_ld.get("title")
+        if title:
+            sources["title"] = {"value": title, "selector": "json-ld"}
+    if description is None:
+        description = json_ld.get("description")
+        if description:
+            sources["description"] = {"value": description, "selector": "json-ld"}
+    if preview_image is None:
+        preview_image = json_ld.get("image")
+        if preview_image:
+            sources["preview_image"] = {"value": preview_image, "selector": "json-ld"}
 
     if (
         preview_image
@@ -548,7 +745,10 @@ def _parse_metadata_from_soup(soup, url: str, config: dict | None = None, includ
         and not preview_image.startswith("https://")
     ):
         preview_image = urljoin(url, preview_image)
-    sources["preview_image"] = {"value": preview_image, "selector": sources["preview_image"]["selector"]}
+    sources["preview_image"] = {
+        "value": preview_image,
+        "selector": sources["preview_image"]["selector"],
+    }
 
     if include_sources:
         return title, description, preview_image, sources
@@ -567,17 +767,159 @@ def _extract_with_selector_source(soup, selectors, url: str = "", field: str = "
             continue
         if not el:
             continue
-        value = None
-        if el.name == "meta":
-            value = el.get("content")
-        elif field == "image":
-            value = el.get("src") or el.get("href") or el.get("content")
-        else:
-            value = el.get("content") or el.get_text(" ", strip=True)
+        value = _extract_element_value(el, field)
         if value:
             value = urljoin(url, value.strip()) if field == "image" else value.strip()
             return value, selector
     return None, None
+
+
+def _extract_element_value(el, field: str) -> str | None:
+    if el.name == "meta":
+        return el.get("content")
+    if field == "image":
+        return el.get("src") or el.get("href") or el.get("content") or el.get("url")
+
+    value = el.get("content") or el.get_text(" ", strip=True)
+    if field == "description" and value and el.get("type") == "html":
+        return BeautifulSoup(value, "html.parser").get_text("\n", strip=True) or None
+    return value
+
+
+def _extract_with_json_paths(data, paths):
+    if isinstance(paths, str):
+        paths = [paths]
+    for path in paths or []:
+        if not path or not path.strip():
+            continue
+        try:
+            nodes = jsonpath_find(path, data)
+        except Exception:
+            continue
+        for node in nodes:
+            value = _json_value_to_string(node.value)
+            if value:
+                return value, path
+    return None, None
+
+
+def _extract_with_xpath(root, expressions, field: str, config: dict | None = None):
+    if isinstance(expressions, str):
+        expressions = [expressions]
+    configured_namespaces = (config or {}).get("xmlns") or {}
+    if not isinstance(configured_namespaces, dict):
+        configured_namespaces = {}
+    namespaces = {}
+    namespaces.update(configured_namespaces)
+    for element in root.iter():
+        for prefix, uri in (element.nsmap or {}).items():
+            if not prefix:
+                continue
+            namespaces.setdefault(prefix, uri)
+    default_uri = (root.nsmap or {}).get(None)
+    default_alias = _DEFAULT_NAMESPACE_ALIASES.get(default_uri or "")
+    if default_alias:
+        namespaces.setdefault(default_alias, default_uri)
+    namespaces = namespaces or None
+    for expression in expressions or []:
+        if not expression or not expression.strip():
+            continue
+        try:
+            result = root.xpath(
+                expression,
+                namespaces=namespaces,
+            )
+        except (etree.XPathError, ValueError):
+            result = None
+        value = _xpath_result_to_string(result, field)
+        if value:
+            return value, expression
+        if default_uri:
+            value, _ = _select_with_default_namespace(
+                root,
+                expression,
+                namespaces,
+                field,
+                default_uri,
+            )
+            if value:
+                return value, expression
+    return None, None
+
+
+def _select_with_default_namespace(
+    root,
+    expression: str,
+    namespaces: dict | None,
+    field: str,
+    default_namespace: str,
+):
+    try:
+        selector = XPathSelector(
+            expression,
+            namespaces=namespaces,
+            default_namespace=default_namespace,
+        )
+    except Exception:
+        return None, None
+    try:
+        result = selector.select(root)
+    except Exception:
+        return None, None
+    value = _xpath_result_to_string(result, field)
+    return value, expression
+
+
+def _xpath_result_to_string(result, field: str) -> str | None:
+    if isinstance(result, list):
+        for item in result:
+            value = _xpath_result_to_string(item, field)
+            if value:
+                return value
+        return None
+    if isinstance(result, etree._Element):
+        return _xpath_element_to_string(result, field)
+    if isinstance(result, bool):
+        return "true" if result else "false"
+    if isinstance(result, (int, float)):
+        return str(result)
+    if isinstance(result, str):
+        return result.strip() or None
+    return None
+
+
+def _xpath_element_to_string(el, field: str) -> str | None:
+    if field == "image":
+        for attr in ("src", "href", "content", "url"):
+            value = el.get(attr)
+            if value:
+                return value
+
+    value = "".join(el.itertext()).strip()
+    if field == "description" and value and el.get("type") == "html":
+        return BeautifulSoup(value, "html.parser").get_text("\n", strip=True) or None
+    return value or None
+
+
+def _json_value_to_string(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, list):
+        for item in value:
+            result = _json_value_to_string(item)
+            if result:
+                return result
+        return None
+    if isinstance(value, dict):
+        for key in ("url", "src", "href", "content", "text", "title", "name", "description"):
+            result = _json_value_to_string(value.get(key))
+            if result:
+                return result
+    return None
 
 
 def load_website_metadata_for_test(url: str, username: str = ''):
@@ -665,6 +1007,12 @@ def load_page(url: str, config: dict = None, load_full_page: bool = False):
                 raise NonRetryableMetadataError(
                     f"Non-retryable metadata response: {status_code}", status_code
                 )
+
+            if isinstance(config, dict):
+                response_headers = getattr(r, "headers", {}) or {}
+                response_content_type = response_headers.get("Content-Type")
+                if response_content_type:
+                    config["_response_content_type"] = response_content_type
 
             for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
                 size += len(chunk)
@@ -813,6 +1161,12 @@ def _cookie_string_from_config(config: dict = None) -> str | None:
     user_cookie = config.get("_user_cookie")
     if user_cookie:
         return user_cookie
+    cookie_config = config.get("cookie")
+    if isinstance(cookie_config, dict) and cookie_config.get("file"):
+        from site_adapters.services.auth.cookies import load_cookie_file
+        cookie = load_cookie_file(cookie_config["file"])
+        if cookie:
+            return cookie
     domain_key = config.get("_domain_key")
     if domain_key:
         shared, _ = get_shared_cookie(domain_key)

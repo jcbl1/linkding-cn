@@ -212,8 +212,13 @@ class SourceCache:
     def load(self, base_dir: str) -> dict:
         """Load and merge all adapters, returning the full merged config."""
         now = time.monotonic()
-        self._base_dir = base_dir
         with self._lock:
+            if self._base_dir and self._base_dir != base_dir:
+                self._sources.clear()
+                self._merged = None
+                self._adapter_order = []
+                self._defaults_cache_key = None
+            self._base_dir = base_dir
             if self._merged is not None and (now - self._last_check) < self._CHECK_INTERVAL:
                 return self._merged
             self._last_check = now

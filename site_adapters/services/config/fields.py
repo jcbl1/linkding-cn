@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Single source of truth for all site adapter configuration fields.
 
@@ -83,20 +82,32 @@ METADATA_FIELDS = {
         "zh": _REWRITE_RULE_ZH + "用于改写最终展示/保存的 URL。",
         "example": ["^https://m\\.example\\.com/(.*)", "https://www.example.com/\\1"],
     },
+    "content_type": {
+        "type": '"html"|"xml"|"json"',
+        "en": 'Response format for declarative extraction. "html" uses CSS selectors and JSON-LD fallback; "xml" uses standard XPath; "json" uses standard JSONPath such as $.data.items[0].title.',
+        "zh": '声明式提取的响应格式。"html" 使用 CSS 选择器和 JSON-LD 兜底；"xml" 使用标准 XPath；"json" 使用标准 JSONPath，例如 $.data.items[0].title。',
+        "example": "html",
+    },
+    "xmlns": {
+        "type": "object<string, string>",
+        "en": 'Optional namespace prefixes for XML XPath expressions. Atom/RSS use automatic aliases atom/rss; prefixes declared anywhere in the document are auto-registered; unprefixed element names bind to the document default namespace; this overrides or adds custom prefixes.',
+        "zh": '可选的 XML XPath namespace 前缀映射。Atom/RSS 自动提供 atom/rss 前缀；文档任意层级声明的前缀会自动注册；无前缀元素名自动绑定文档默认 namespace；此字段用于覆盖或补充自定义前缀。',
+        "example": {"atom": "http://www.w3.org/2005/Atom"},
+    },
     "select_title": {
         "type": "array<str>",
-        "en": 'CSS selectors for the title, tried in order. First non-empty match wins. Supports "selector@attr".',
-        "zh": "标题的 CSS 选择器，按顺序尝试，取第一个非空结果。支持 selector@attr。",
+        "en": "Selectors for the title, tried in order. HTML uses standard CSS; XML uses standard XPath; JSON uses standard JSONPath.",
+        "zh": "标题选择器，按顺序尝试，取第一个非空结果。HTML 使用标准 CSS；XML 使用标准 XPath；JSON 使用标准 JSONPath。",
     },
     "select_description": {
         "type": "array<str>",
-        "en": "CSS selectors for the description, tried in order.",
-        "zh": "描述的 CSS 选择器，按顺序尝试。",
+        "en": "Selectors for the description, tried in order. HTML uses standard CSS; XML uses standard XPath; JSON uses standard JSONPath.",
+        "zh": "描述选择器，按顺序尝试。HTML 使用标准 CSS；XML 使用标准 XPath；JSON 使用标准 JSONPath。",
     },
     "select_image": {
         "type": "array<str>",
-        "en": 'CSS selectors for the preview image, tried in order. Supports "selector@attr".',
-        "zh": "预览图的 CSS 选择器，按顺序尝试。支持 selector@attr。",
+        "en": "Selectors for the preview image, tried in order. HTML uses standard CSS; XML uses standard XPath; JSON uses standard JSONPath.",
+        "zh": "预览图选择器，按顺序尝试。HTML 使用标准 CSS；XML 使用标准 XPath；JSON 使用标准 JSONPath。",
     },
     "rewrite_title": {
         "type": "rewrite",
@@ -156,6 +167,12 @@ METADATA_FIELDS = {
 # ── snapshot section ─────────────────────────────────────────────────────
 
 SNAPSHOT_FIELDS = {
+    "content_type": {
+        "type": '"html"|"xml"|"json"',
+        "en": 'Snapshot format. "html" uses SingleFile; "xml" and "json" save the raw response.',
+        "zh": "快照格式。\"html\" 使用 SingleFile；\"xml\" 和 \"json\" 保存原始响应。",
+        "example": "html",
+    },
     "auth": {
         "type": "auth",
         "en": "Authentication config.",
@@ -218,8 +235,8 @@ SNAPSHOT_FIELDS = {
     },
     "scripts": {
         "type": "array<{path, hook}>",
-        "en": 'Script hooks. hook: "before" | "replace" | "after". before runs inside SingleFile; after modifies the saved snapshot HTML; replace bypasses SingleFile and declarative fields.',
-        "zh": "自定义脚本钩子。hook: before | replace | after。before 在 SingleFile 内运行，after 修改保存后的快照 HTML；replace 接管 SingleFile，并绕过声明式快照字段。",
+        "en": 'Script hooks. hook: "before" | "replace" | "after". before runs inside SingleFile; after modifies the saved snapshot file; replace bypasses SingleFile and declarative fields.',
+        "zh": "自定义脚本钩子。hook: before | replace | after。before 在 SingleFile 内运行，after 修改保存后的快照文件；replace 接管 SingleFile，并绕过声明式快照字段。",
         "example": [],
         "example_items": [
             {"path": "example_before.py", "hook": "before"},
@@ -433,21 +450,21 @@ AUTH_OAUTH2_FIELDS = {
     },
     "access_token_path": {
         "type": "str",
-        "en": 'JSON dot-path to access_token in response. Defaults to "access_token".',
-        "zh": '响应中 access_token 的 JSON 路径。默认为 "access_token"。',
-        "example": "access_token",
+        "en": 'Standard JSONPath to access_token in response. Defaults to "$.access_token".',
+        "zh": '响应中 access_token 的标准 JSONPath。默认为 "$.access_token"。',
+        "example": "$.access_token",
     },
     "refresh_token_path": {
         "type": "str",
-        "en": 'JSON dot-path to refresh_token in response. Defaults to "refresh_token".',
-        "zh": '响应中 refresh_token 的 JSON 路径。默认为 "refresh_token"。',
-        "example": "refresh_token",
+        "en": 'Standard JSONPath to refresh_token in response. Defaults to "$.refresh_token".',
+        "zh": '响应中 refresh_token 的标准 JSONPath。默认为 "$.refresh_token"。',
+        "example": "$.refresh_token",
     },
     "expires_in_path": {
         "type": "str",
-        "en": 'JSON dot-path to expires_in in response. Defaults to "expires_in".',
-        "zh": '响应中 expires_in 的 JSON 路径。默认为 "expires_in"。',
-        "example": "expires_in",
+        "en": 'Standard JSONPath to expires_in in response. Defaults to "$.expires_in".',
+        "zh": '响应中 expires_in 的标准 JSONPath。默认为 "$.expires_in"。',
+        "example": "$.expires_in",
     },
     "header": {
         "type": "str",
@@ -840,12 +857,12 @@ SECTION_TITLES = {
         "zh": "metadata — 元数据提取（标题、描述、预览图）",
     },
     "sec_snapshot": {
-        "en": "snapshot — HTML snapshot via SingleFile + DOM cleanup",
-        "zh": "snapshot — HTML 快照生成（SingleFile + DOM 清理）",
+        "en": "snapshot — HTML snapshot via SingleFile, or raw XML/JSON capture",
+        "zh": "snapshot — HTML 快照生成（SingleFile + DOM 清理），或原始 XML/JSON 捕获",
     },
     "snapshot_mutex": {
-        "en": "A snapshot script with hook \"replace\" bypasses SingleFile and the declarative fields keep_elements / remove_elements / remove_classes / set_styles / singlefile_args. before/after hooks can coexist with those fields.",
-        "zh": "仅 hook 为 \"replace\" 的快照脚本会绕过 SingleFile，并旁路 keep_elements / remove_elements / remove_classes / set_styles / singlefile_args；before/after hook 可与这些字段并存。",
+        "en": "A snapshot script with hook \"replace\" bypasses SingleFile and the declarative fields keep_elements / remove_elements / remove_classes / set_styles / singlefile_args. HTML cleanup fields only apply to html snapshots. before/after hooks can coexist with those fields.",
+        "zh": "hook 为 \"replace\" 的快照脚本会绕过 SingleFile 和声明式字段 keep_elements / remove_elements / remove_classes / set_styles / singlefile_args。HTML 清理字段仅对 html 快照生效。before/after hook 可与这些字段并存。",
     },
     "sec_reader": {
         "en": "reader — article extraction via defuddle",

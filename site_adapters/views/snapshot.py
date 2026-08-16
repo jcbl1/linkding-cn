@@ -11,7 +11,11 @@ from site_adapters.views.helpers import TEST_ASSETS_DIR, site_adapters_required
 
 def _resolve_test_asset_path(filename: str) -> str | None:
     """Resolve a test asset filename, rejecting traversal outside TEST_ASSETS_DIR."""
-    if not filename or filename != os.path.basename(filename) or not filename.endswith('.html'):
+    if (
+        not filename
+        or filename != os.path.basename(filename)
+        or not filename.endswith((".html", ".json", ".xml"))
+    ):
         raise Http404
     base_dir = os.path.abspath(TEST_ASSETS_DIR)
     full_path = os.path.abspath(os.path.join(base_dir, filename))
@@ -35,7 +39,13 @@ def view_snapshot(request):
     # FileResponse handles closing the file handle when the response is finalized.
     f = open(full_path, 'rb')
     try:
-        response = FileResponse(f, content_type='text/html; charset=utf-8')
+        if full_path.endswith('.json'):
+            content_type = 'application/json; charset=utf-8'
+        elif full_path.endswith('.xml'):
+            content_type = 'application/xml; charset=utf-8'
+        else:
+            content_type = 'text/html; charset=utf-8'
+        response = FileResponse(f, content_type=content_type)
     except Exception:
         f.close()
         raise

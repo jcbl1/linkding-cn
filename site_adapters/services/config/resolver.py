@@ -6,7 +6,7 @@ Config structure:
     "auth": { ... },      # auth requirements (cookie + headers)
     "defaults": { ... },  # shared settings
     "metadata": { ... },   # metadata extraction
-    "snapshot": { ... },   # HTML snapshot
+    "snapshot": { ... },   # HTML snapshot or raw XML/JSON capture
     "reader": { ... }      # reader mode
   }
 
@@ -312,6 +312,10 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
 
     # Section-specific fields
     if section == 'metadata':
+        if 'content_type' in section_data:
+            result['content_type'] = section_data['content_type']
+        if 'xmlns' in section_data:
+            result['xmlns'] = section_data['xmlns']
         if 'select_title' in section_data:
             result['select_title'] = section_data['select_title']
         if 'select_description' in section_data:
@@ -330,6 +334,8 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
             result['max_content_limit'] = section_data['max_content_limit']
 
     elif section == 'snapshot':
+        if 'content_type' in section_data:
+            result['content_type'] = section_data['content_type']
         if 'process_lazy_images' in section_data:
             result['process_lazy_images'] = section_data['process_lazy_images']
         if 'process_carousels' in section_data:
