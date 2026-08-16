@@ -1,5 +1,8 @@
+import json
 import os
+import subprocess
 import tempfile
+from pathlib import Path
 from unittest import mock
 
 from django.test import TestCase, override_settings
@@ -255,6 +258,61 @@ class SingleFileServiceTestCase(TestCase):
             f.write(content)
         self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
         return path
+
+    def _run_browser_script(self, script_path, html):
+        repo_root = Path(__file__).resolve().parents[2]
+        node_harness = r"""
+const fs = require("fs");
+const { parseHTML } = require(process.argv[3]);
+const dom = parseHTML(process.argv[1]);
+global.window = dom.window;
+global.document = dom.document;
+global.Node = dom.window.Node;
+global.CustomEvent = dom.window.CustomEvent;
+global.dispatchEvent = dom.window.dispatchEvent.bind(dom.window);
+global.addEventListener = dom.window.addEventListener.bind(dom.window);
+global.getComputedStyle = () => ({ whiteSpace: "normal" });
+eval(fs.readFileSync(process.argv[2], "utf8"));
+window.dispatchEvent(new window.CustomEvent("single-file-on-before-capture-request"));
+const meta = document.querySelector("meta[name=linkding-cleanup-stats]");
+console.log(JSON.stringify({
+  wrap: document.querySelectorAll(".interaction_bar__wrap").length,
+  indicator: document.querySelectorAll(".swiper_indicator_wrp_pc").length,
+  stats: meta && meta.getAttribute("content")
+}));
+"""
+        result = subprocess.run(
+            [
+                "node",
+                "-e",
+                node_harness,
+                html,
+                script_path,
+                str(repo_root / "node_modules" / "linkedom"),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_remove_elements_works_without_keep_elements(self):
+        script_path = singlefile._build_browser_script({
+            "remove_elements": [".interaction_bar__wrap", ".swiper_indicator_wrp_pc"],
+        })
+        self.addCleanup(lambda: os.path.exists(script_path) and os.remove(script_path))
+
+        result = self._run_browser_script(
+            script_path,
+            "<html><body>"
+            '<div class="interaction_bar__wrap">x</div>'
+            '<div class="swiper_indicator_wrp_pc">y</div>'
+            "</body></html>",
+        )
+
+        self.assertEqual(result["wrap"], 0)
+        self.assertEqual(result["indicator"], 0)
+        self.assertIn('"removed":2', result["stats"])
 
     def test_read_builtin_engine_supports_singlefile_empty_and_null(self):
         singlefile_path = self._write_js('const builtin_engine = "singlefile";\n')

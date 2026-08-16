@@ -15,8 +15,9 @@
  * recursively inside open shadow roots. keep_elements is applied to the
  * normal document body and preserves the matched subtree, including shadow
  * DOM inside it.
- * remove_elements only operates inside kept subtrees and never removes a
- * keep element or any of its ancestors.
+ * remove_elements runs across the document, but when keep_elements is
+ * configured it only operates inside kept subtrees and never removes a keep
+ * element or any of its ancestors.
  */
 (() => {
   dispatchEvent(new CustomEvent("single-file-user-script-init"));
@@ -511,7 +512,7 @@
     for (const selector of config.remove || []) {
       queryAll(document, selector).forEach((el) => {
         if (!el.isConnected || protectedNodes.has(el)) return;
-        if (!keep.some((target) => isWithin(target, el))) return;
+        if (keep.length && !keep.some((target) => isWithin(target, el))) return;
         el.remove();
         stats.removed += 1;
       });
