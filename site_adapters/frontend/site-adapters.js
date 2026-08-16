@@ -842,8 +842,12 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     if (value == null || value === '') return '<span class="wa-result-empty">-</span>';
     var s = String(value);
     if (key === 'preview_image' || key === 'image') {
+      var proxyUrl = urls.previewImageProxy
+        ? urls.previewImageProxy + '?url=' + encodeURIComponent(s)
+        : '';
+      var fallbackHandler = "if(this.dataset.proxied){this.style.display='none'}else if(this.dataset.proxySrc){this.dataset.proxied='1';this.src=this.dataset.proxySrc}else{this.style.display='none'}";
       return '<div><a href="' + esc(s) + '" target="_blank" rel="noopener" class="wa-result-link">' + esc(s) + '</a></div>' +
-             '<img src="' + esc(s) + '" class="wa-preview-img" loading="lazy" onerror="this.style.display=\'none\'" alt="">';
+             '<img src="' + esc(s) + '" class="wa-preview-img" loading="lazy" referrerpolicy="no-referrer" data-proxy-src="' + esc(proxyUrl) + '" onerror="' + esc(fallbackHandler) + '" alt="">';
     }
     if (/^https?:\/\//.test(s)) return urlLink(s);
     if (key === 'size' || key === 'html_size' || key === 'snapshot_size') return formatBytes(value);

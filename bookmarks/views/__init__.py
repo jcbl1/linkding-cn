@@ -32,5 +32,6 @@ from site_adapters.views import (
     snapshot_toggles,
     view_snapshot,
     view_reader,
+    preview_image_proxy,
 )
 from .toasts import *

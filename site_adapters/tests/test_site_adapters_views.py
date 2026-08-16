@@ -5,6 +5,7 @@ import tempfile
 import json
 from unittest import mock
 
+from django.conf import settings
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
@@ -405,3 +406,106 @@ class SiteAdaptersViewsTestCase(TestCase):
             [item["id"] for item in response.json()["adapters"]],
             ["defaults"],
         )
+
+    def _make_preview_response(
+        self,
+        status_code=200,
+        content_type="image/png",
+        content_length="4",
+        chunks=(b"test",),
+        headers=None,
+    ):
+        response = mock.Mock(status_code=status_code)
+        response.headers = headers or {
+            "Content-Type": content_type,
+            "Content-Length": content_length,
+        }
+        response.iter_content.return_value = chunks
+        return response
+
+    def test_preview_image_proxy_streams_image(self):
+        preview_response = self._make_preview_response()
+
+        with mock.patch(
+            "site_adapters.views.preview.requests.get",
+            return_value=preview_response,
+        ) as mock_get:
+            response = self.client.get(
+                reverse("linkding:settings.site_adapters.preview_image"),
+                {"url": "https://example.com/preview.png"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/png")
+        self.assertEqual(b"".join(response.streaming_content), b"test")
+        mock_get.assert_called_once()
+
+    def test_preview_image_proxy_requires_superuser(self):
+        user = User.objects.create_user("preview-nonstaff", password="password")
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("linkding:settings.site_adapters.preview_image"),
+            {"url": "https://example.com/preview.png"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_preview_image_proxy_rejects_invalid_url(self):
+        response = self.client.get(
+            reverse("linkding:settings.site_adapters.preview_image"),
+            {"url": "file:///etc/passwd"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_preview_image_proxy_rejects_non_image_content(self):
+        preview_response = self._make_preview_response(content_type="text/html")
+
+        with mock.patch(
+            "site_adapters.views.preview.requests.get",
+            return_value=preview_response,
+        ):
+            response = self.client.get(
+                reverse("linkding:settings.site_adapters.preview_image"),
+                {"url": "https://example.com/preview"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        preview_response.close.assert_called_once()
+
+    def test_preview_image_proxy_rejects_oversized_image(self):
+        preview_response = self._make_preview_response(
+            content_length=str(settings.LD_PREVIEW_MAX_SIZE + 1)
+        )
+
+        with mock.patch(
+            "site_adapters.views.preview.requests.get",
+            return_value=preview_response,
+        ):
+            response = self.client.get(
+                reverse("linkding:settings.site_adapters.preview_image"),
+                {"url": "https://example.com/preview.png"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        preview_response.close.assert_called_once()
+
+    def test_preview_image_proxy_follows_redirect(self):
+        redirect_response = mock.Mock(status_code=302)
+        redirect_response.headers = {"Location": "https://cdn.example.com/preview.png"}
+        redirect_response.iter_content.return_value = []
+        preview_response = self._make_preview_response()
+
+        with mock.patch(
+            "site_adapters.views.preview.requests.get",
+            side_effect=[redirect_response, preview_response],
+        ) as mock_get:
+            response = self.client.get(
+                reverse("linkding:settings.site_adapters.preview_image"),
+                {"url": "https://example.com/preview"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"test")
+        self.assertEqual(mock_get.call_count, 2)

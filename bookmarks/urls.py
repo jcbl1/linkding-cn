@@ -124,6 +124,7 @@ urlpatterns = [
     path("admin/site-adapters/domain/delete", views.domain_delete, name="settings.site_adapters.domain_delete"),
     path("admin/site-adapters/domains/all", views.all_domains, name="settings.site_adapters.all_domains"),
     path("admin/site-adapters/local-domain-toggle", views.local_domain_toggle, name="settings.site_adapters.local_domain_toggle"),
+    path("admin/site-adapters/preview-image", views.preview_image_proxy, name="settings.site_adapters.preview_image"),
     path("admin/site-adapters/subscription/domain-read", views.subscription_domain_read, name="settings.site_adapters.subscription_domain_read"),
     path("admin/site-adapters/subscription/domain-toggle", views.subscription_domain_toggle, name="settings.site_adapters.subscription_domain_toggle"),
     path("admin/site-adapters/subscription/manage", views.subscription_manage, name="settings.site_adapters.subscription_manage"),
