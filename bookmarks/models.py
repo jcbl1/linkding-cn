@@ -70,6 +70,8 @@ class Bookmark(models.Model):
     website_description = models.TextField(blank=True, null=True)
     web_archive_snapshot_url = models.CharField(max_length=2048, blank=True)
     preview_image_file = models.CharField(max_length=512, blank=True)
+    preview_image_retry_count = models.PositiveSmallIntegerField(default=0)
+    preview_image_next_retry_at = models.DateTimeField(null=True, blank=True)
     unread = models.BooleanField(default=False)
     is_archived = models.BooleanField(default=False)
     shared = models.BooleanField(default=False)
@@ -215,6 +217,7 @@ class BookmarkAsset(models.Model):
     gzip = models.BooleanField(default=False, null=False)
     retry_count = models.IntegerField(default=0)
     next_retry_at = models.DateTimeField(null=True, blank=True)
+    scheduling_priority = models.IntegerField(default=0)
 
     @property
     def download_name(self):

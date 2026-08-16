@@ -137,7 +137,9 @@ def read(request: HttpRequest, bookmark_id: int):
         elif asset.status == BookmarkAsset.STATUS_FAILURE:
             # Previous attempt failed — retry with a new asset
             remove_article(asset)
-            new_asset = tasks.create_article(bookmark)
+            new_asset = tasks.create_article(
+                bookmark, priority=tasks.PRIORITY_READING
+            )
             return render(
                 request,
                 "bookmarks/reader/read_pending.html",
@@ -149,7 +151,7 @@ def read(request: HttpRequest, bookmark_id: int):
             )
 
     # No article yet — create one via huey task
-    asset = tasks.create_article(bookmark)
+    asset = tasks.create_article(bookmark, priority=tasks.PRIORITY_READING)
     return render(
         request,
         "bookmarks/reader/read_pending.html",

@@ -15,6 +15,7 @@ import bookmarks.services.bookmarks
 from bookmarks.api.serializers import BookmarkSerializer
 from bookmarks.models import Bookmark, BookmarkSearch, UserProfile
 from bookmarks.services import website_loader
+from bookmarks.services import tasks
 from bookmarks.services.website_loader import WebsiteMetadata
 from bookmarks.tests.helpers import BookmarkFactoryMixin, LinkdingApiTestCase
 from bookmarks.utils import app_version
@@ -499,7 +500,7 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
         self.assertEqual(bookmark.title, "")
         self.assertEqual(bookmark.description, "")
         mock_load_website_metadata.assert_not_called()
-        mock_schedule_metadata_enrichment.assert_called_once_with(bookmark)
+        mock_schedule_metadata_enrichment.assert_called_once_with(bookmark, priority=tasks.PRIORITY_NEW_BOOKMARK)
 
     def test_create_bookmark_schedules_background_enrichment_on_retryable_failure(self):
         self.authenticate()

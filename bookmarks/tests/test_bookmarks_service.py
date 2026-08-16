@@ -108,7 +108,7 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
             schedule_metadata_enrichment=True,
         )
 
-        self.mock_schedule_metadata_enrichment.assert_called_once_with(created_bookmark)
+        self.mock_schedule_metadata_enrichment.assert_called_once_with(created_bookmark, priority=tasks.PRIORITY_NEW_BOOKMARK)
 
     def test_create_should_skip_metadata_enrichment_when_all_fields_present(self):
         bookmark_data = Bookmark(
@@ -236,7 +236,7 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
             bookmark = create_bookmark(bookmark_data, "tag1,tag2", self.user)
 
             mock_create_web_archive_snapshot.assert_called_once_with(
-                self.user, bookmark, False
+                self.user, bookmark, False, priority=tasks.PRIORITY_NEW_BOOKMARK
             )
 
     def test_create_should_load_favicon(self):
@@ -244,7 +244,7 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
             bookmark_data = Bookmark(url="https://example.com")
             bookmark = create_bookmark(bookmark_data, "tag1,tag2", self.user)
 
-            mock_load_favicon.assert_called_once_with(self.user, bookmark)
+            mock_load_favicon.assert_called_once_with(self.user, bookmark, priority=tasks.PRIORITY_NEW_BOOKMARK)
 
     def test_create_should_load_favicon_even_when_prefilled(self):
         with patch.object(tasks, "load_favicon") as mock_load_favicon:
@@ -253,14 +253,14 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
             )
             bookmark = create_bookmark(bookmark_data, "tag1,tag2", self.user)
 
-            mock_load_favicon.assert_called_once_with(self.user, bookmark)
+            mock_load_favicon.assert_called_once_with(self.user, bookmark, priority=tasks.PRIORITY_NEW_BOOKMARK)
 
     def test_create_should_load_html_snapshot(self):
         with patch.object(tasks, "create_html_snapshot") as mock_create_html_snapshot:
             bookmark_data = Bookmark(url="https://example.com")
             bookmark = create_bookmark(bookmark_data, "tag1,tag2", self.user)
 
-            mock_create_html_snapshot.assert_called_once_with(bookmark)
+            mock_create_html_snapshot.assert_called_once_with(bookmark, priority=tasks.PRIORITY_NEW_BOOKMARK)
 
     def test_create_should_not_load_html_snapshot_when_disabled(self):
         with patch.object(tasks, "create_html_snapshot") as mock_create_html_snapshot:
@@ -388,7 +388,7 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
             bookmark.title = "updated title"
             update_bookmark(bookmark, "tag1,tag2", self.user)
 
-            mock_load_favicon.assert_called_once_with(self.user, bookmark)
+            mock_load_favicon.assert_called_once_with(self.user, bookmark, priority=None)
 
     def test_update_should_not_create_html_snapshot(self):
         with patch.object(tasks, "create_html_snapshot") as mock_create_html_snapshot:

@@ -839,7 +839,9 @@ def load_temporary_preview_image(request: HttpRequest):
 
 def create_html_snapshot(request: HttpRequest, bookmark_id: int | str):
     bookmark = access.bookmark_write(request, bookmark_id)
-    tasks.create_html_snapshot(bookmark)
+    tasks.create_html_snapshot(
+        bookmark, priority=tasks.PRIORITY_MANUAL_SNAPSHOT
+    )
 
 
 def upload_asset(request: HttpRequest, bookmark_id: int | str):

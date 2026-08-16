@@ -212,6 +212,7 @@ class BookmarkFactoryMixin:
         gzip: bool = False,
         retry_count: int = None,
         next_retry_at: datetime = None,
+        scheduling_priority: int = 0,
     ):
         if date_created is None:
             date_created = timezone.now()
@@ -229,6 +230,7 @@ class BookmarkFactoryMixin:
             display_name=display_name,
             status=status,
             gzip=gzip,
+            scheduling_priority=scheduling_priority,
         )
         if retry_count is not None:
             asset.retry_count = retry_count

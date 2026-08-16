@@ -179,7 +179,7 @@ HUEY = {
     "store_none": False,
     "utc": False,
     "consumer": {
-        "workers": 3,
+        "workers": 4,
         "worker_type": "thread",
         "initial_delay": 5,
         "backoff": 1.15,

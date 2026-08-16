@@ -16,6 +16,7 @@ import gzip
 import logging
 import os
 import random
+import threading
 import time
 from collections.abc import Callable
 from datetime import timedelta
@@ -28,7 +29,7 @@ from django.db.models import Q
 from django.utils import timezone
 from huey import crontab
 from huey.contrib.djhuey import HUEY as huey
-from huey.exceptions import TaskLockedException
+from huey.exceptions import RetryTask, TaskLockedException
 from waybackpy.exceptions import TooManyRequestsError, WaybackError
 
 from bookmarks.models import Bookmark, BookmarkAsset, UserProfile
@@ -41,7 +42,31 @@ from bookmarks.utils import (
 
 logger = logging.getLogger(__name__)
 HTML_SNAPSHOT_DISPATCHER_LOCK = huey.lock_task("html-snapshot-dispatcher-lock")
-FAVICON_FETCH_LOCK = huey.lock_task("favicon-fetch-global-lock")
+BACKGROUND_SERIAL_LOCK = huey.lock_task("background-serial-lock")
+
+PRIORITY_READING = 100
+PRIORITY_MANUAL_SNAPSHOT = 90
+PRIORITY_NEW_BOOKMARK = 80
+PRIORITY_CORE = 60
+PRIORITY_SUBSCRIPTION = 40
+PRIORITY_FAVICON = 20
+PRIORITY_PREVIEW = 10
+
+NON_URGENT_MAX_CONCURRENCY = 3
+_non_urgent_slots = threading.BoundedSemaphore(NON_URGENT_MAX_CONCURRENCY)
+
+
+def acquire_non_urgent_slot() -> bool:
+    return _non_urgent_slots.acquire(blocking=False)
+
+
+def release_non_urgent_slot():
+    _non_urgent_slots.release()
+
+
+PREVIEW_IMAGE_MAX_RETRIES = 3
+PREVIEW_IMAGE_RETRY_DELAYS = [60, 240, 960]
+READER_SNAPSHOT_WAIT_TIMEOUT = 60
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +83,12 @@ def task(retries=5, retry_delay=15, retry_backoff=4, priority=0):
         @functools.wraps(fn)
         def inner(*args, **kwargs):
             task = kwargs.pop("task", None)
+            acquired_slot = False
             try:
+                if task is not None and task.priority < PRIORITY_READING:
+                    if not acquire_non_urgent_slot():
+                        raise RetryTask(delay=random.uniform(1, 3)) from None
+                    acquired_slot = True
                 return fn(*args, **kwargs)
             except TaskLockedException as exc:
                 # Task locks are currently only used as workaround to enforce
@@ -71,6 +101,9 @@ def task(retries=5, retry_delay=15, retry_backoff=4, priority=0):
                 if task is not None:
                     task.retry_delay *= retry_backoff
                 raise exc
+            finally:
+                if acquired_slot:
+                    release_non_urgent_slot()
 
         return huey.task(
             retries=retries,
@@ -101,9 +134,14 @@ def is_web_archive_integration_active(user: User) -> bool:
     return background_tasks_enabled and web_archive_integration_enabled
 
 
-def create_web_archive_snapshot(user: User, bookmark: Bookmark, force_update: bool):
+def create_web_archive_snapshot(
+    user: User,
+    bookmark: Bookmark,
+    force_update: bool,
+    priority: int | None = None,
+):
     if is_web_archive_integration_active(user):
-        _create_web_archive_snapshot_task(bookmark.id, force_update)
+        _create_web_archive_snapshot_task(bookmark.id, force_update, priority=priority)
 
 
 def _create_wayback_snapshot(bookmark: Bookmark):
@@ -117,7 +155,7 @@ def _create_wayback_snapshot(bookmark: Bookmark):
     logger.info("Successfully created new snapshot for bookmark:. url=%s", bookmark.url)
 
 
-@task()
+@task(priority=PRIORITY_CORE)
 def _create_web_archive_snapshot_task(bookmark_id: int, force_update: bool):
     try:
         bookmark = Bookmark.objects.get(id=bookmark_id)
@@ -163,7 +201,7 @@ def _resolve_domain(url: str, domain_config=None) -> str:
     return resolve_favicon_domain(hostname, config=domain_config)
 
 
-def ensure_favicon(user: User, url: str):
+def ensure_favicon(user: User, url: str, priority: int | None = None):
     """确保指定 URL 的域名有 favicon。
 
     策略：
@@ -215,7 +253,7 @@ def ensure_favicon(user: User, url: str):
     # 3. 无磁盘文件 → 按 DB 状态处理
     if not cache:
         FaviconCache.objects.create(domain=domain, status=FaviconCache.STATUS_PENDING)
-        _enqueue_favicon_task(user.id, domain)
+        _enqueue_favicon_task(user.id, domain, priority=priority)
         return
 
     if cache.status == FaviconCache.STATUS_PENDING:
@@ -223,40 +261,45 @@ def ensure_favicon(user: User, url: str):
 
     if cache.status == FaviconCache.STATUS_FAILED:
         if cache.next_retry_at and cache.next_retry_at <= timezone.now():
-            _enqueue_favicon_task(user.id, domain)
+            _enqueue_favicon_task(user.id, domain, priority=priority)
         return
 
     if cache.status == FaviconCache.STATUS_MISSING:
         # MISSING 状态下，如果 next_retry_at 已过期，允许重试
         if cache.next_retry_at and cache.next_retry_at <= timezone.now():
-            _enqueue_favicon_task(user.id, domain)
+            _enqueue_favicon_task(user.id, domain, priority=priority)
         return
 
     # STATUS_SUCCESS 但文件丢失（已在步骤 1 处理，此处兜底）
-    _enqueue_favicon_task(user.id, domain)
+    _enqueue_favicon_task(user.id, domain, priority=priority)
 
 
-def refresh_favicon_for_url(user: User, url: str):
+def refresh_favicon_for_url(user: User, url: str, priority: int | None = None):
     """强制刷新指定 URL 的域名 favicon（替代原来的 refresh_favicon(bookmark)）。"""
     if not is_favicon_feature_active(user):
         return
     domain_config = parse_domain_roots(user.profile.custom_domain_root)
     domain = _resolve_domain(url, domain_config)
     if domain and _set_favicon_pending_for_enqueue(domain, force=True):
-        _enqueue_favicon_task(user.id, domain)
+        _enqueue_favicon_task(user.id, domain, priority=priority)
 
 
-def load_favicon(user: User, bookmark: Bookmark, domain_config=None):
+def load_favicon(
+    user: User,
+    bookmark: Bookmark,
+    domain_config=None,
+    priority: int | None = None,
+):
     """兼容旧接口：书签创建/更新时调用。"""
-    ensure_favicon(user, bookmark.url)
+    ensure_favicon(user, bookmark.url, priority=priority)
 
 
-def refresh_favicon(user: User, bookmark: Bookmark):
+def refresh_favicon(user: User, bookmark: Bookmark, priority: int | None = None):
     """兼容旧接口：强制刷新书签的 favicon。"""
-    refresh_favicon_for_url(user, bookmark.url)
+    refresh_favicon_for_url(user, bookmark.url, priority=priority)
 
 
-def _enqueue_favicon_task(user_id: int, domain: str):
+def _enqueue_favicon_task(user_id: int, domain: str, priority: int | None = None):
     """入队 favicon 获取任务。
 
     入队前检查分布式锁，避免同一域名在短时间内被反复入队，
@@ -272,7 +315,7 @@ def _enqueue_favicon_task(user_id: int, domain: str):
         )
         return
 
-    _fetch_domain_favicon_task(user_id, domain)
+    _fetch_domain_favicon_task(user_id, domain, priority=priority)
 
 
 def _set_favicon_pending_for_enqueue(domain: str, force: bool = False) -> bool:
@@ -317,12 +360,26 @@ def _set_favicon_pending_for_enqueue(domain: str, force: bool = False) -> bool:
     return bool(updated)
 
 
-@task(retries=3, priority=-1)
-@FAVICON_FETCH_LOCK
+@task(retries=0, priority=PRIORITY_FAVICON)
 def _fetch_domain_favicon_task(user_id: int, domain: str):
     """per-domain 的 favicon 获取任务。
 
-    分布式锁保证同一域名同时只有一个任务在执行。
+    全局锁保证同时只有一个 favicon 抓取任务在执行；
+    锁被占用时延迟重排，不消耗 Huey 重试次数。
+    """
+    try:
+        with BACKGROUND_SERIAL_LOCK:
+            return _fetch_domain_favicon_task_unlocked(user_id, domain)
+    except TaskLockedException:
+        logger.debug(
+            "Skipping favicon fetch for domain=%s, global favicon lock is busy", domain
+        )
+        raise RetryTask(delay=random.uniform(5, 15)) from None
+
+
+def _fetch_domain_favicon_task_unlocked(user_id: int, domain: str):
+    """执行 favicon 抓取并更新 FaviconCache。
+
     成功后更新 FaviconCache；失败时更新重试计数和下次重试时间。
     """
     from django.core.cache import cache as django_cache
@@ -413,7 +470,7 @@ def schedule_bookmarks_without_favicons(user: User):
     _batch_load_favicons_task(user.id)
 
 
-@task(priority=-1)
+@task(priority=PRIORITY_FAVICON)
 def _batch_load_favicons_task(user_id: int):
     from bookmarks.models import FaviconCache
 
@@ -473,7 +530,7 @@ def schedule_refresh_favicons(user: User):
     _batch_refresh_favicons_task(user.id)
 
 
-@task(priority=-1)
+@task(priority=PRIORITY_FAVICON)
 def _batch_refresh_favicons_task(user_id: int):
     """刷新该用户书签涉及的所有域名的 favicon。"""
     user = User.objects.get(id=user_id)
@@ -622,12 +679,38 @@ def is_preview_feature_active(user: User) -> bool:
     )
 
 
-def load_preview_image(user: User, bookmark: Bookmark):
-    if is_preview_feature_active(user):
-        _load_preview_image_task(bookmark.id)
+def _preview_image_should_skip(bookmark: Bookmark) -> bool:
+    """判断预览图是否处于无需自动重试的状态。"""
+    if bookmark.preview_image_file:
+        return True
+    if bookmark.preview_image_retry_count >= PREVIEW_IMAGE_MAX_RETRIES:
+        return True
+    return bool(
+        bookmark.preview_image_next_retry_at
+        and bookmark.preview_image_next_retry_at > timezone.now()
+    )
 
 
-@task()
+def load_preview_image(
+    user: User,
+    bookmark: Bookmark,
+    priority: int | None = None,
+    force: bool = False,
+):
+    if not is_preview_feature_active(user):
+        return
+    if not force and _preview_image_should_skip(bookmark):
+        return
+    if force:
+        bookmark.preview_image_retry_count = 0
+        bookmark.preview_image_next_retry_at = None
+        bookmark.save(
+            update_fields=["preview_image_retry_count", "preview_image_next_retry_at"]
+        )
+    _load_preview_image_task(bookmark.id, priority=priority)
+
+
+@task(priority=PRIORITY_PREVIEW)
 def delete_preview_image_temp_file(filepath: str):
     logger.debug(
         f"Followed temporary preview image file will be deleted after a while: {filepath}"
@@ -637,8 +720,20 @@ def delete_preview_image_temp_file(filepath: str):
         logger.info("Deleted temporary preview image file: %s", filepath)
 
 
-@task()
+@task(priority=PRIORITY_PREVIEW)
 def _load_preview_image_task(bookmark_id: int):
+    try:
+        with BACKGROUND_SERIAL_LOCK:
+            return _load_preview_image_task_unlocked(bookmark_id)
+    except TaskLockedException:
+        logger.debug(
+            "Skipping preview image for bookmark_id=%s, background serial lock is busy",
+            bookmark_id,
+        )
+        raise RetryTask(delay=random.uniform(1, 3)) from None
+
+
+def _load_preview_image_task_unlocked(bookmark_id: int):
     try:
         bookmark = Bookmark.objects.get(id=bookmark_id)
     except Bookmark.DoesNotExist:
@@ -646,16 +741,49 @@ def _load_preview_image_task(bookmark_id: int):
 
     logger.info("Load preview image for bookmark. url=%s", bookmark.url)
 
-    new_preview_image_file = preview_image_loader.load_preview_image(
-        bookmark.url, bookmark
-    )
+    try:
+        new_preview_image_file = preview_image_loader.load_preview_image(
+            bookmark.url, bookmark
+        )
+    except Exception:
+        logger.exception("Failed to load preview image. bookmark_id=%s", bookmark_id)
+        new_preview_image_file = None
 
-    if new_preview_image_file != bookmark.preview_image_file:
-        bookmark.preview_image_file = new_preview_image_file or ""
-        bookmark.save(update_fields=["preview_image_file"])
+    if new_preview_image_file:
+        bookmark.preview_image_file = new_preview_image_file
+        bookmark.preview_image_retry_count = 0
+        bookmark.preview_image_next_retry_at = None
+        bookmark.save(
+            update_fields=[
+                "preview_image_file",
+                "preview_image_retry_count",
+                "preview_image_next_retry_at",
+            ]
+        )
         logger.info(
             f"Successfully updated preview image for bookmark. url={bookmark.url} preview_image_file={new_preview_image_file}"
         )
+        return
+
+    next_count = bookmark.preview_image_retry_count + 1
+    if next_count < PREVIEW_IMAGE_MAX_RETRIES:
+        delay = PREVIEW_IMAGE_RETRY_DELAYS[next_count - 1]
+        bookmark.preview_image_retry_count = next_count
+        bookmark.preview_image_next_retry_at = timezone.now() + timedelta(seconds=delay)
+        bookmark.save(
+            update_fields=[
+                "preview_image_retry_count",
+                "preview_image_next_retry_at",
+            ]
+        )
+        raise RetryTask(delay=delay) from None
+
+    bookmark.preview_image_retry_count = PREVIEW_IMAGE_MAX_RETRIES
+    bookmark.preview_image_next_retry_at = None
+    bookmark.save(
+        update_fields=["preview_image_retry_count", "preview_image_next_retry_at"]
+    )
+    logger.info("Preview image failed permanently for bookmark. url=%s", bookmark.url)
 
 
 def schedule_bookmarks_without_previews(user: User):
@@ -663,7 +791,7 @@ def schedule_bookmarks_without_previews(user: User):
         _batch_load_preview_images_task(user.id)
 
 
-@task()
+@task(priority=PRIORITY_PREVIEW)
 def _batch_load_preview_images_task(user_id: int):
     user = User.objects.get(id=user_id)
     bookmarks = Bookmark.objects.filter(
@@ -673,6 +801,8 @@ def _batch_load_preview_images_task(user_id: int):
 
     # TODO: Implement bulk task creation
     for bookmark in bookmarks:
+        if _preview_image_should_skip(bookmark):
+            continue
         try:
             _load_preview_image_task(bookmark.id)
         except Exception as exc:
@@ -693,16 +823,18 @@ def schedule_metadata_enrichment(
     bookmark: Bookmark,
     overwrite: bool = False,
     ignore_cache: bool = True,
+    priority: int | None = None,
 ):
     if not settings.LD_DISABLE_BACKGROUND_TASKS:
         _enrich_metadata_task(
             bookmark.id,
             overwrite=overwrite,
             ignore_cache=ignore_cache,
+            priority=priority,
         )
 
 
-@task(retries=3)
+@task(retries=3, priority=PRIORITY_CORE)
 def _enrich_metadata_task(
     bookmark_id: int,
     overwrite: bool = False,
@@ -753,7 +885,7 @@ def _enrich_metadata_task(
         logger.info("Successfully enriched metadata for bookmark. url=%s", bookmark.url)
 
 
-@task()
+@task(priority=PRIORITY_CORE)
 def _refresh_metadata_task(bookmark_id: int):
     try:
         bookmark = Bookmark.objects.get(id=bookmark_id)
@@ -811,8 +943,8 @@ def is_html_snapshot_feature_active() -> bool:
     return settings.LD_ENABLE_SNAPSHOTS and not settings.LD_DISABLE_BACKGROUND_TASKS
 
 
-def _trigger_html_snapshot_dispatcher():
-    _html_snapshot_dispatcher_task()
+def _trigger_html_snapshot_dispatcher(priority: int | None = None):
+    _html_snapshot_dispatcher_task(priority=priority)
 
 
 def _get_html_snapshot_cooldown_seconds(
@@ -847,7 +979,7 @@ def _select_next_html_snapshot_asset(now, next_eligible_at: dict[str, object]):
             status=BookmarkAsset.STATUS_PENDING,
         )
         .select_related("bookmark")
-        .order_by("-date_created", "-id")
+        .order_by("-scheduling_priority", "-date_created", "-id")
     )
 
     # 可立即执行的（无重试时间或重试时间已过）
@@ -919,7 +1051,7 @@ def _run_html_snapshot_dispatcher_loop(
         next_eligible_at[domain] = now_func() + timedelta(seconds=cooldown_func())
 
 
-@task(retries=0, retry_delay=0)
+@task(retries=0, retry_delay=0, priority=PRIORITY_CORE)
 def _html_snapshot_dispatcher_task():
     try:
         with HTML_SNAPSHOT_DISPATCHER_LOCK:
@@ -928,29 +1060,31 @@ def _html_snapshot_dispatcher_task():
         logger.debug("HTML snapshot dispatcher already running.")
 
 
-def create_html_snapshot(bookmark: Bookmark):
+def create_html_snapshot(bookmark: Bookmark, priority: int | None = None):
     if not is_html_snapshot_feature_active():
         return
 
     asset = assets.create_snapshot_asset(bookmark)
+    asset.scheduling_priority = priority or 0
     asset.save()
-    _trigger_html_snapshot_dispatcher()
+    _trigger_html_snapshot_dispatcher(priority=priority)
 
 
-def create_html_snapshots(bookmark_list: list[Bookmark]):
+def create_html_snapshots(bookmark_list: list[Bookmark], priority: int | None = None):
     if not is_html_snapshot_feature_active():
         return
 
     assets_to_create = []
     for bookmark in bookmark_list:
         asset = assets.create_snapshot_asset(bookmark)
+        asset.scheduling_priority = priority or 0
         assets_to_create.append(asset)
 
     if not assets_to_create:
         return
 
     BookmarkAsset.objects.bulk_create(assets_to_create)
-    _trigger_html_snapshot_dispatcher()
+    _trigger_html_snapshot_dispatcher(priority=priority)
 
 
 # SingleFile does not support running multiple snapshot captures in parallel.
@@ -1036,22 +1170,30 @@ def create_missing_html_snapshots(user: User) -> int:
 # ---------------------------------------------------------------------------
 
 
-def create_article(bookmark: Bookmark) -> BookmarkAsset:
+def create_article(
+    bookmark: Bookmark, priority: int | None = None
+) -> BookmarkAsset:
     """创建 pending 状态的文章资产，并提交 defuddle 解析任务。"""
     from bookmarks.services.articles import create_article_asset_pending
 
     asset = create_article_asset_pending(bookmark)
-    _create_article_task(asset.id)
+    _create_article_task(
+        asset.id, reader_priority=priority, priority=priority
+    )
     return asset
 
 
-def create_html_articles(bookmark_list: list[Bookmark]):
+def create_html_articles(
+    bookmark_list: list[Bookmark], priority: int | None = None
+):
     """批量创建 pending 状态的文章资产，并逐个提交 defuddle 解析任务。"""
     from bookmarks.services.articles import create_article_asset_pending
 
     for bookmark in bookmark_list:
         asset = create_article_asset_pending(bookmark)
-        _create_article_task(asset.id)
+        _create_article_task(
+            asset.id, reader_priority=priority, priority=priority
+        )
 
 
 def _load_snapshot_asset_content(
@@ -1116,33 +1258,39 @@ def _requires_snapshot_before_article(url: str) -> bool:
         selectors = [selectors]
     return any(
         isinstance(selector, str)
-        and (
-            _is_xpath_selector(selector)
-            or _is_json_path_selector(selector)
-        )
+        and (_is_xpath_selector(selector) or _is_json_path_selector(selector))
         for selector in (selectors or [])
     )
 
 
 def _create_snapshot_for_article(
     bookmark: Bookmark,
+    priority: int = PRIORITY_CORE,
 ) -> tuple[BookmarkAsset | None, str | None, str | None]:
-    """为文章解析生成快照，返回 (快照资产, 内容, 类型)；失败时内容为 None。"""
+    """通过快照 dispatcher 为文章解析生成快照，等待完成后返回内容。"""
     asset = assets.create_snapshot_asset(bookmark)
+    asset.scheduling_priority = priority
     asset.save()
+    _trigger_html_snapshot_dispatcher(priority=priority)
 
-    try:
-        assets.create_snapshot(asset)
+    deadline = timezone.now() + timedelta(seconds=READER_SNAPSHOT_WAIT_TIMEOUT)
+    while timezone.now() < deadline:
         asset.refresh_from_db()
         if asset.status == BookmarkAsset.STATUS_COMPLETE:
             content, content_type = _load_snapshot_asset_content(asset)
             return asset, content, content_type
-    except Exception:
-        logger.warning(
-            f"Failed to create snapshot for article. url={bookmark.url}",
-            exc_info=True,
-        )
+        if asset.status == BookmarkAsset.STATUS_FAILURE:
+            logger.warning(
+                "Snapshot failed while preparing article. url=%s",
+                bookmark.url,
+            )
+            return asset, None, None
+        time.sleep(0.5)
 
+    logger.warning(
+        "Timed out waiting for snapshot before article. url=%s",
+        bookmark.url,
+    )
     return asset, None, None
 
 
@@ -1154,9 +1302,7 @@ def _parse_snapshot_for_reader(
 
     username = _bookmark_username(bookmark)
     if content_type == BookmarkAsset.CONTENT_TYPE_HTML:
-        return reader_processor.parse_html(
-            content, url=bookmark.url, username=username
-        )
+        return reader_processor.parse_html(content, url=bookmark.url, username=username)
     return reader_processor.parse_content(
         content,
         content_type,
@@ -1165,8 +1311,8 @@ def _parse_snapshot_for_reader(
     )
 
 
-@task(retries=2)
-def _create_article_task(asset_id: int):
+@task(retries=2, priority=PRIORITY_CORE)
+def _create_article_task(asset_id: int, reader_priority: int | None = None):
     """Huey 任务：抓取页面 → defuddle 解析 → 保存文章内容。"""
     from bookmarks.services.articles import remove_article, save_article_content
 
@@ -1207,7 +1353,9 @@ def _create_article_task(asset_id: int):
             # 2. Site-specific snapshot config → create snapshot first, then parse
             logger.info("Creating snapshot via site adapters. url=%s", bookmark.url)
             _snapshot, raw_content, snapshot_content_type = (
-                _create_snapshot_for_article(bookmark)
+                _create_snapshot_for_article(
+                    bookmark, priority=reader_priority or PRIORITY_CORE
+                )
             )
             if not raw_content:
                 raise Exception("Failed to create snapshot via custom processor")
@@ -1228,7 +1376,9 @@ def _create_article_task(asset_id: int):
                     exc_info=True,
                 )
                 fallback_snapshot, raw_content, snapshot_content_type = (
-                    _create_snapshot_for_article(bookmark)
+                    _create_snapshot_for_article(
+                        bookmark, priority=reader_priority or PRIORITY_CORE
+                    )
                 )
                 if not raw_content:
                     raise Exception(
