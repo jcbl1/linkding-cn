@@ -39,6 +39,29 @@ Config keys available in every hook
     scripts            list[dict]     Script hooks configuration
 
 --------------------------------------------------------------------------------
+Project helpers commonly useful in custom Python hooks
+--------------------------------------------------------------------------------
+
+  # Browser engine selected by project settings (Chromium / CloakBrowser):
+  # from site_adapters.services.engine.browser_provider import launch_browser, get_browser_config
+
+  # Cookie conversion for Playwright contexts:
+  # from site_adapters.services.auth.cookies import cookie_string_to_playwright_list
+
+  # Stored credentials, with user-first/shared fallback helpers:
+  # from site_adapters.services.auth.credentials import get_best_cookie, get_user_cookie, get_shared_cookie
+  # from site_adapters.services.auth.credentials import get_best_header, get_best_token, get_best_basic_auth
+
+  # OAuth2 access token cache/refresh:
+  # from site_adapters.services.auth.oauth2 import get_valid_token
+
+  # Resolve merged adapter configs for another URL/section:
+  # from site_adapters.services.config.resolver import get_metadata_config, get_snapshot_config, get_reader_config
+
+  # Delegate back to built-in engines from a replace hook:
+  # from site_adapters.services.engine import create_snapshot, parse_metadata, run_script
+
+--------------------------------------------------------------------------------
 File handling
 --------------------------------------------------------------------------------
 
@@ -60,13 +83,14 @@ def before(url: str, config: dict) -> str | None:
     Executes before SingleFile. Return HTML to feed to SingleFile instead of
     re-fetching the URL; return None to let SingleFile fetch the URL normally.
 
-    Example - expand collapsed content in a browser:
-        from playwright.sync_api import sync_playwright
+    Example - expand collapsed content in the configured project browser:
+        from site_adapters.services.engine.browser_provider import launch_browser
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch()
+        browser = launch_browser(headless=True)
+        playwright = getattr(browser, "__playwright__", None)
+        try:
             page = browser.new_page()
-            page.goto(url, wait_until="networkidle")
+            page.goto(config.get("request_url") or url, wait_until="networkidle")
             for btn in page.query_selector_all(".read-more-btn"):
                 try:
                     btn.click()
@@ -74,7 +98,10 @@ def before(url: str, config: dict) -> str | None:
                 except Exception:
                     pass
             html = page.content()
+        finally:
             browser.close()
+            if playwright:
+                playwright.stop()
         return html
 
     Example - return a fixed HTML document:
@@ -90,17 +117,21 @@ def replace(url: str, config: dict, output_path: str) -> None:
     Completely replaces the SingleFile engine. Write a complete,
     self-contained HTML file to `output_path`.
 
-    Example - capture with Playwright:
-        from playwright.sync_api import sync_playwright
+    Example - capture with the configured project browser:
+        from site_adapters.services.engine.browser_provider import launch_browser
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch()
+        browser = launch_browser(headless=True)
+        playwright = getattr(browser, "__playwright__", None)
+        try:
             page = browser.new_page()
-            page.goto(url, wait_until="networkidle")
+            page.goto(config.get("request_url") or url, wait_until="networkidle")
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             page.wait_for_timeout(1000)
             html = page.content()
+        finally:
             browser.close()
+            if playwright:
+                playwright.stop()
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(html)
