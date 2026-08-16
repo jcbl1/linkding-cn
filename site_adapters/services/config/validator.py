@@ -187,11 +187,14 @@ def _validate_cookie_block(issues: list[str], label: str, cookie: dict, file_dir
                 if key not in ("url", "wait_cookie", "timeout", "interval"):
                     issues.append(f"WARN: {label}.refresh.{key} is unknown, will be ignored")
     # refresh_interval
-    refresh_block = cookie.get("refresh", {})
-    ri = refresh_block.get("interval", 0) if isinstance(refresh_block, dict) else cookie.get("refresh_interval", 0)
-    if ri is not None:
-        if not isinstance(ri, (int, float)) or ri <= 0:
-            issues.append(f"ERROR: {label}.refresh.interval must be a positive number")
+    refresh_block = cookie.get("refresh")
+    ri = None
+    if isinstance(refresh_block, dict):
+        ri = refresh_block.get("interval", cookie.get("refresh_interval"))
+    else:
+        ri = cookie.get("refresh_interval")
+    if ri is not None and (not isinstance(ri, (int, float)) or ri <= 0):
+        issues.append(f"ERROR: {label}.refresh.interval must be a positive number")
     # warn about unknown keys at cookie level
     for key in cookie:
         if key not in ("enabled", "type", "verify", "refresh", "help"):

@@ -9,6 +9,7 @@ from django.core.management import call_command
 from django.test import TestCase, override_settings
 
 from site_adapters.services.config.loader import _cache
+from site_adapters.services.auth.cookies import _should_refresh_cookie
 
 
 class SiteAdaptersCommandTestCase(TestCase):
@@ -98,3 +99,19 @@ class SiteAdaptersCommandTestCase(TestCase):
         result = json.loads(out.getvalue())
         self.assertTrue(result["has_cookie"])
         self.assertTrue(result["refreshed"])
+
+    def test_login_cookie_does_not_use_anonymous_refresh_by_default(self):
+        default_refresh = {"url": "", "wait_cookie": "", "timeout": 30, "interval": 14400}
+
+        self.assertTrue(_should_refresh_cookie({
+            "type": "auto",
+            "refresh": default_refresh,
+        }))
+        self.assertFalse(_should_refresh_cookie({
+            "type": "login",
+            "refresh": default_refresh,
+        }))
+        self.assertTrue(_should_refresh_cookie({
+            "type": "login",
+            "refresh": {**default_refresh, "wait_cookie": "reddit_session"},
+        }))

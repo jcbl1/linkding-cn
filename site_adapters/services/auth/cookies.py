@@ -443,6 +443,20 @@ def verify_cookie_declarative(verify_config: dict, context: dict) -> dict:
 # Refresh
 # ---------------------------------------------------------------------------
 
+def _should_refresh_cookie(cookie_config: dict) -> bool:
+    """Return whether browser-based cookie refresh is allowed.
+
+    ``auto`` cookies may always refresh anonymously. ``login`` cookies must
+    opt in explicitly with ``refresh.url`` or ``refresh.wait_cookie``;
+    otherwise the default empty refresh block must not overwrite a
+    user-supplied login session with anonymous cookies.
+    """
+    refresh = cookie_config.get('refresh') or {}
+    if cookie_config.get('type', 'auto') == 'login':
+        return bool(refresh.get('url') or refresh.get('wait_cookie'))
+    return bool(refresh)
+
+
 def refresh_cookie_declarative(refresh_config: dict, url: str,
                                 domain_key: str) -> list | None:
     """
@@ -598,7 +612,7 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
             save_shared_cookie(domain_key, cookie_str_save)
 
     # 没有 cookie 且有 refresh 配置 → 尝试刷新
-    if not cookie_str and cookie_config.get('refresh'):
+    if not cookie_str and _should_refresh_cookie(cookie_config):
         logger.info("No cookie for %s (%s), attempting browser refresh", domain_key, source or 'auto')
         data = refresh_cookie_declarative(cookie_config['refresh'], url, domain_key)
         if data:
@@ -630,7 +644,7 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
                 logger.info("Cookie invalid (L1): %s: %s",
                             domain_key, l1_result.get("reason"))
                 # L1 判定失效 → 如果配置了 refresh 就直接刷新，不再走 L2
-                if cookie_config.get('refresh'):
+                if _should_refresh_cookie(cookie_config):
                     logger.info("L1 invalid for %s, attempting browser refresh",
                                 domain_key)
                     data = refresh_cookie_declarative(
@@ -671,7 +685,7 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
     logger.info("Cookie invalid: %s: %s", domain_key, result.get("reason"))
 
     # Refresh
-    if cookie_config.get('refresh'):
+    if _should_refresh_cookie(cookie_config):
         logger.info("Cookie invalid for %s, attempting browser refresh", domain_key)
         data = refresh_cookie_declarative(cookie_config['refresh'], url, domain_key)
         if data:
