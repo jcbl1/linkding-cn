@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — 完整字段参考
-//  由 fields.py 自动生成（单一信源）  |  2026-08-16 17:17:46
+//  由 fields.py 自动生成（单一信源）  |  2026-08-19 01:23:02
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -123,10 +123,9 @@
           "extra_params": {},                              // Token 请求体中的额外键值对。
         },
 
-        // 自定义 HTTP 请求头。支持两种形式：扁平 {"名称": ""} 或结构化 {"enabled": true, "help": "...", "values": {"名称": ""}}。
-        // 扁平形式中保留键：enabled、help、values。已保存的 header 凭据无论是否声明都会被注入。
+        // 自定义 HTTP 请求头
         "headers": {
-          "X-API-Key": "",                                 // Header 名称 → 字符串默认值。没有配置默认值时使用空字符串。
+          "X-API-Key": "",                                 // 自定义 HTTP 请求头。支持两种形式：扁平形式（{"X-API-Key": ""}），键为 header 名称，值为字符串默认值；或结构化形式（{"enabled": true, "help": "...", "values": {"X-API-Key": ""}}），当需要特殊字段时使用。扁平形式中保留键：enabled、help、values。如需声明名为 'enabled' 或 'help' 的 header，请使用结构化形式并在 values 中声明。
         },
 
         // HTTP Basic Auth 认证
@@ -162,6 +161,7 @@
         "rewrite_image": ["^http://", "https://"],         // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。应用于提取到的预览图 URL。
         "load_full_page": true,                            // 是否加载完整页面内容。默认为 true。
         "max_content_limit": 5120000,                      // 最大加载字节数。默认为 5120000（5 MB）。
+        "use_browser": {},                                 // 使用浏览器引擎而非 requests 加载页面。启用后启动无头浏览器（Chromium 或 CloakBrowser）加载页面，可处理 JavaScript 渲染的内容。浏览器加载失败时回退到 requests 并记录警告日志。设为 null 可显式禁用/移除从 defaults 继承的浏览器配置。
         "scripts": [
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},

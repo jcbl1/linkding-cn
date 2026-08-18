@@ -166,7 +166,7 @@ def cookie_string_to_playwright_list(cookie_str: str, domain_key: str) -> list[d
     """Convert a 'name=value; name2=value2' cookie string to Playwright format list.
 
     Shared utility to avoid duplicating this conversion in cookies,
-    credentials, and browser_fallback.
+    credentials, and the metadata browser loader.
 
     Supports optional domain= key in the pasted string::
 

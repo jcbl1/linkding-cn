@@ -390,6 +390,8 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
         result['load_full_page'] = section_data.get('load_full_page', True)
         if 'max_content_limit' in section_data:
             result['max_content_limit'] = section_data['max_content_limit']
+        if 'use_browser' in section_data:
+            result['use_browser'] = section_data['use_browser']
 
     elif section == 'snapshot':
         if 'content_type' in section_data:

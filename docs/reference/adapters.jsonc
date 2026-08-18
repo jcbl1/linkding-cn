@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — Complete Field Reference
-//  Auto-generated from fields.py (single source of truth)  |  2026-08-16 17:17:46
+//  Auto-generated from fields.py (single source of truth)  |  2026-08-19 01:23:02
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -123,10 +123,9 @@
           "extra_params": {},                              // Extra key-value pairs included in the token request body.
         },
 
-        // Custom HTTP headers. Two forms: flat {"name": ""} or structured {"enabled": true, "help": "...", "values": {"name": ""}}.
-        // Reserved keys in flat form: enabled, help, values. Saved header credentials are injected regardless of declaration.
+        // Custom HTTP headers
         "headers": {
-          "X-API-Key": "",                                 // Header name → string default. Use empty string when there is no config-level default.
+          "X-API-Key": "",                                 // Custom HTTP request headers. Two forms: flat {"X-API-Key": ""} where keys are header names and values are string defaults; or structured {"enabled": true, "help": "...", "values": {"X-API-Key": ""}} when you need special fields. Reserved keys in flat form: enabled, help, values. To declare a header literally named 'enabled' or 'help', use the structured form with a 'values' sub-key.
         },
 
         // HTTP Basic Auth
@@ -162,6 +161,7 @@
         "rewrite_image": ["^http://", "https://"],         // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Applied to the extracted image URL.
         "load_full_page": true,                            // Whether to load the full page content. Defaults to true.
         "max_content_limit": 5120000,                      // Maximum content size in bytes to load. Defaults to 5120000 (5 MB).
+        "use_browser": {},                                 // Use a browser engine instead of requests for page loading. When enabled, launches a headless browser (Chromium or CloakBrowser) to load the page, which handles JavaScript-rendered content. On browser failure, falls back to requests with a warning log. Set to null to explicitly disable/remove browser config inherited from defaults.
         "scripts": [
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},

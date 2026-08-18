@@ -139,6 +139,12 @@ METADATA_FIELDS = {
         "zh": "最大加载字节数。默认为 5120000（5 MB）。",
         "example": 5120000,
     },
+    "use_browser": {
+        "type": "object|null",
+        "en": "Use a browser engine instead of requests for page loading. When enabled, launches a headless browser (Chromium or CloakBrowser) to load the page, which handles JavaScript-rendered content. On browser failure, falls back to requests with a warning log. Set to null to explicitly disable/remove browser config inherited from defaults.",
+        "zh": "使用浏览器引擎而非 requests 加载页面。启用后启动无头浏览器（Chromium 或 CloakBrowser）加载页面，可处理 JavaScript 渲染的内容。浏览器加载失败时回退到 requests 并记录警告日志。设为 null 可显式禁用/移除从 defaults 继承的浏览器配置。",
+        "example": {},
+    },
     "scripts": {
         "type": "array<{path, hook}>",
         "en": 'Script hooks. hook: "before" | "replace" | "after". before runs inside the built-in engine; after modifies the saved snapshot HTML; replace bypasses the engine.',

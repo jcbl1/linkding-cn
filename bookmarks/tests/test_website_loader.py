@@ -1251,3 +1251,87 @@ class MetadataRetryTestCase(TestCase):
         self.assertIsNone(metadata.title)
         self.assertEqual(sources["error"], "Non-retryable metadata response: 403")
         self.assertIs(returned_config, config)
+
+
+class UseBrowserTestCase(TestCase):
+    """Tests for use_browser config in load_page."""
+
+    def setUp(self):
+        website_loader._load_website_metadata_cached.cache_clear()
+        website_loader._load_website_metadata_config_cached.cache_clear()
+
+    def test_load_page_uses_browser_when_use_browser_configured(self):
+        """load_page should call _load_page_via_browser when use_browser is set."""
+        html = "<html><head><title>Browser Title</title></head><body>Content</body></html>"
+        config = {"use_browser": {}}
+
+        with mock.patch.object(
+            website_loader, "_load_page_via_browser", return_value=html
+        ) as mock_browser:
+            result = website_loader.load_page("https://example.com", config)
+
+        mock_browser.assert_called_once_with("https://example.com", config)
+        self.assertEqual(result, html)
+
+    def test_load_page_falls_back_to_requests_on_browser_failure(self):
+        """When _load_page_via_browser returns None, should fall back to requests."""
+        config = {"use_browser": {}}
+        mock_response = mock.MagicMock()
+        mock_response.status_code = 200
+        mock_response.iter_content.return_value = [
+            b"<html><head><title>Requests</title></head></html>"
+        ]
+        mock_response.headers = {}
+
+        with (
+            mock.patch.object(
+                website_loader, "_load_page_via_browser", return_value=None
+            ),
+            mock.patch("bookmarks.services.website_loader.requests.get") as mock_get,
+        ):
+            mock_get.return_value.__enter__ = mock.MagicMock(return_value=mock_response)
+            mock_get.return_value.__exit__ = mock.MagicMock(return_value=False)
+            result = website_loader.load_page("https://example.com", config)
+
+        self.assertIn("Requests", result)
+
+    def test_load_page_skips_browser_when_use_browser_is_none(self):
+        """When use_browser is None (not configured), should use requests directly."""
+        config = {"timeout": 10}
+        mock_response = mock.MagicMock()
+        mock_response.status_code = 200
+        mock_response.iter_content.return_value = [
+            b"<html><head><title>No Browser</title></head></html>"
+        ]
+        mock_response.headers = {}
+
+        with (
+            mock.patch.object(
+                website_loader, "_load_page_via_browser"
+            ) as mock_browser,
+            mock.patch("bookmarks.services.website_loader.requests.get") as mock_get,
+        ):
+            mock_get.return_value.__enter__ = mock.MagicMock(return_value=mock_response)
+            mock_get.return_value.__exit__ = mock.MagicMock(return_value=False)
+            result = website_loader.load_page("https://example.com", config)
+
+        mock_browser.assert_not_called()
+        self.assertIn("No Browser", result)
+
+    def test_load_page_via_browser_returns_none_when_disabled(self):
+        """_load_page_via_browser should return None when enabled=False."""
+        config = {"use_browser": {"enabled": False}}
+        result = website_loader._load_page_via_browser("https://example.com", config)
+        self.assertIsNone(result)
+
+    def test_load_page_via_browser_returns_none_on_exception(self):
+        """_load_page_via_browser should return None and log warning on failure."""
+        config = {"use_browser": {"wait_until": "domcontentloaded"}}
+
+        with mock.patch(
+            "site_adapters.services.engine.browser_provider.launch_browser",
+            side_effect=Exception("Browser crashed"),
+        ):
+            result = website_loader._load_page_via_browser("https://example.com", config)
+
+        self.assertIsNone(result)

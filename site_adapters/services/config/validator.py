@@ -486,6 +486,29 @@ def _validate_domain_config(issues: list[dict], label: str, data: dict, file_dir
                 issues.append(
                     _issue('error', 'xmlns_invalid', f"{label}.metadata.xmlns must be a string-to-string prefix map", file=file, adapter=adapter, path=f"{label}.metadata.xmlns")
                 )
+            use_browser = sec.get('use_browser')
+            if use_browser is not None:
+                if not isinstance(use_browser, dict):
+                    issues.append(_issue('error', 'use_browser_invalid', f"{label}.metadata.use_browser must be an object or null", file=file, adapter=adapter, path=f"{label}.metadata.use_browser"))
+                else:
+                    for sub_key, sub_val in use_browser.items():
+                        if sub_key not in ('enabled', 'wait_until', 'wait_elements', 'timeout'):
+                            issues.append(_issue('warning', 'unknown_field', f"{label}.metadata.use_browser.{sub_key} is unknown, will be ignored", file=file, adapter=adapter, path=f"{label}.metadata.use_browser.{sub_key}"))
+                        elif sub_key == 'enabled' and not isinstance(sub_val, bool):
+                            issues.append(_issue('error', 'use_browser_invalid', f"{label}.metadata.use_browser.enabled must be a boolean", file=file, adapter=adapter, path=f"{label}.metadata.use_browser.enabled"))
+                        elif sub_key == 'wait_until' and sub_val not in ('domcontentloaded', 'load', 'networkidle'):
+                            issues.append(_issue('error', 'use_browser_invalid', f"{label}.metadata.use_browser.wait_until must be one of domcontentloaded, load, networkidle", file=file, adapter=adapter, path=f"{label}.metadata.use_browser.wait_until"))
+                        elif sub_key == 'wait_elements':
+                            if isinstance(sub_val, str):
+                                pass
+                            elif isinstance(sub_val, list):
+                                if not all(isinstance(s, str) for s in sub_val):
+                                    issues.append(_issue('error', 'use_browser_invalid', f"{label}.metadata.use_browser.wait_elements must be a string or array of strings", file=file, adapter=adapter, path=f"{label}.metadata.use_browser.wait_elements"))
+                            else:
+                                issues.append(_issue('error', 'use_browser_invalid', f"{label}.metadata.use_browser.wait_elements must be a string or array of strings", file=file, adapter=adapter, path=f"{label}.metadata.use_browser.wait_elements"))
+                        elif sub_key == 'timeout' and sub_val is not None:
+                            if not isinstance(sub_val, int) or isinstance(sub_val, bool) or sub_val <= 0:
+                                issues.append(_issue('error', 'use_browser_invalid', f"{label}.metadata.use_browser.timeout must be a positive integer or null", file=file, adapter=adapter, path=f"{label}.metadata.use_browser.timeout"))
         if section == 'snapshot':
             args = sec.get('singlefile_args', {})
             if args and not isinstance(args, dict):

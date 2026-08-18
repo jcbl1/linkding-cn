@@ -28,7 +28,6 @@ from site_adapters.services.config import (
     apply_rewrite_url,
 )
 from site_adapters.services.config.resolver import get_metadata_config
-from site_adapters.services.engine.browser_fallback import load_metadata_via_browser
 from site_adapters.services.engine.script_runner import run_script
 from site_adapters.services.execution_log import log_execution
 
@@ -313,17 +312,6 @@ def load_website_metadata(url: str, ignore_cache: bool = False, username: str = 
         result = _load_website_metadata(url, username=username)
     else:
         result = _load_website_metadata_cached(url)
-
-    # Browser fallback: when no config matched and default extraction got nothing useful
-    if result and not result.title:
-        browser_result = load_metadata_via_browser(url, username=username)
-        if browser_result and browser_result.get('title'):
-            return WebsiteMetadata(
-                url=url,
-                title=browser_result.get('title'),
-                description=browser_result.get('description'),
-                preview_image=browser_result.get('preview_image'),
-            )
 
     return result
 
@@ -964,7 +952,68 @@ def load_website_metadata_for_test(url: str, username: str = ''):
     return metadata, sources, config
 
 
+
+_browser_semaphore = threading.Semaphore(2)
+
+
+def _load_page_via_browser(url: str, config: dict) -> str | None:
+    """Load page HTML via browser engine. Returns HTML string or None on failure."""
+    browser_config = config.get('use_browser') or {}
+    if not isinstance(browser_config, dict):
+        return None
+
+    enabled = browser_config.get('enabled', True)
+    if not enabled:
+        return None
+
+    wait_until = browser_config.get('wait_until', 'networkidle')
+    wait_elements = browser_config.get('wait_elements', '')
+    if isinstance(wait_elements, str):
+        wait_elements = [wait_elements] if wait_elements else []
+    browser_timeout = browser_config.get('timeout') or config.get('timeout', 10)
+    timeout_ms = int(browser_timeout * 1000)
+
+    from site_adapters.services.engine.browser_provider import launch_browser
+
+    if not _browser_semaphore.acquire(timeout=5):
+        logger.warning("Browser load: max concurrent reached, falling back to requests. url=%s", url)
+        return None
+
+    browser = None
+    try:
+        browser = launch_browser(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto(url, timeout=timeout_ms, wait_until=wait_until)
+
+        # Wait for specific elements if configured
+        for selector in wait_elements:
+            if not selector:
+                continue
+            page.wait_for_selector(selector, timeout=timeout_ms)
+
+        return page.content()
+    except Exception as e:
+        logger.warning("Browser load failed, falling back to requests. url=%s: %s", url, e)
+        return None
+    finally:
+        if browser:
+            try:
+                browser.close()
+            except Exception:
+                pass
+        _browser_semaphore.release()
+
+
 def load_page(url: str, config: dict = None, load_full_page: bool = False):
+    # Browser path: use_browser is declared and not null
+    browser_config = config.get('use_browser') if config else None
+    if browser_config is not None:
+        html = _load_page_via_browser(url, config)
+        if html is not None:
+            return html
+        # Fall through to requests on failure (warning already logged)
+
     # Per-domain rate limiting
     domain = get_registrable_domain(url)
     if domain:
