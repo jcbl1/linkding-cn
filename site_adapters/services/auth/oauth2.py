@@ -14,6 +14,15 @@ import threading
 import time
 
 import requests
+
+# Compatibility shim: fall back to stdlib re if regex module is broken (Python 3.14)
+try:
+    import regex  # noqa: F401
+except ImportError:
+    import re as regex  # noqa: F401
+    import sys
+    sys.modules['regex'] = regex
+
 from jsonpath_rfc9535 import find as jsonpath_find
 
 from site_adapters.services.auth.credentials import (
@@ -24,7 +33,7 @@ from site_adapters.services.auth.credentials import (
 
 logger = logging.getLogger(__name__)
 
-# 缓存：{username:domain: access_token, expires_at, refresh_token}
+# 缓存：{username:domain:scope: access_token, expires_at, refresh_token}
 _token_cache: dict[str, dict] = {}
 _token_cache_lock = threading.Lock()
 
@@ -32,8 +41,8 @@ _token_cache_lock = threading.Lock()
 _REFRESH_AHEAD_SEC = 60
 
 
-def _cache_key(username: str, domain_key: str) -> str:
-    return f'{username}:{domain_key}'
+def _cache_key(username: str, domain_key: str, scope: str = '') -> str:
+    return f'{username}:{domain_key}:{scope}'
 
 
 def _resolve_json_path(data: dict, path: str) -> str | None:
@@ -116,18 +125,22 @@ def refresh_token(token_config: dict, refresh_token_value: str) -> dict | None:
         return None
 
 
-def get_valid_token(token_config: dict, username: str, domain_key: str) -> str | None:
+def get_valid_token(token_config: dict, username: str, domain_key: str,
+                    *, scope: str = '') -> str | None:
     """
     获取有效的 access_token。
     优先从缓存读取，过期则自动刷新。
     返回 access_token 字符串或 None。
+
+    scope: effective scope for credential lookup ('' for domain-level,
+           'metadata'/'snapshot'/'reader' for section-level).
 
     锁仅保护缓存读写；HTTP 请求在锁外执行，避免阻塞其他线程。
     """
     if not username or not domain_key:
         return None
 
-    key = _cache_key(username, domain_key)
+    key = _cache_key(username, domain_key, scope)
     now = time.time()
 
     # 1. 检查内存缓存（lock-free fast path）
@@ -137,7 +150,7 @@ def get_valid_token(token_config: dict, username: str, domain_key: str) -> str |
         return cached['access_token']
 
     # 2. 检查持久化缓存
-    stored = load_user_token_cache(username, domain_key)
+    stored = load_user_token_cache(username=username, hostname=domain_key, scope=scope)
     if stored and stored.get('expires_at', 0) > now:
         with _token_cache_lock:
             _token_cache[key] = stored
@@ -148,7 +161,7 @@ def get_valid_token(token_config: dict, username: str, domain_key: str) -> str |
         cached = _token_cache.get(key)
         if cached and cached.get('expires_at', 0) > now:
             return cached['access_token']
-        rt, _ = get_user_token(username, domain_key)
+        rt, _ = get_user_token(username=username, hostname=domain_key, scope=scope)
 
     if not rt:
         return None
@@ -171,10 +184,11 @@ def get_valid_token(token_config: dict, username: str, domain_key: str) -> str |
         _token_cache[key] = entry
 
     # 5. 持久化（锁外，非关键路径）
-    save_user_token_cache(username, domain_key, entry)
+    save_user_token_cache(username=username, domain=domain_key, cache_data=entry, scope=scope)
     if result['refresh_token'] != rt:
         from site_adapters.services.auth.credentials import save_user_token
-        save_user_token(username, domain_key, result['refresh_token'])
+        save_user_token(username=username, domain=domain_key,
+                        refresh_token=result['refresh_token'], scope=scope)
 
     return result['access_token']
 

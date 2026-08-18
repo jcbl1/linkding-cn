@@ -4,11 +4,25 @@ User credential management
 Storage: credentials/users/{username}/{domain}/cookie.json (encrypted)
          credentials/users/{username}/{domain}/header.json (encrypted)
 Metadata: credentials/encryption.meta (key fingerprint + domain index)
+
+Section-level scope support:
+  cookie.json              — domain-level (scope='')
+  cookie_snapshot.json     — snapshot section (scope='snapshot')
+  cookie_metadata.json     — metadata section (scope='metadata')
+  cookie_reader.json       — reader section (scope='reader')
+  Same pattern for header, token (oauth2), basic_auth, token_cache.
+
+Credential resolution model (simplified):
+  1. _build_section_config determines the effective scope per auth sub-type.
+  2. Within a single scope, user > shared (2-level lookup).
+  3. Cross-scope fallback (cookie only) is an explicit sequential step,
+     gated by cookie type matching.
 """
 
 import json
 import logging
 import os
+import re
 import time
 
 from bookmarks.utils import atomic_write
@@ -23,13 +37,56 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Scope constants
+# ---------------------------------------------------------------------------
+
+VALID_SCOPES = ('', 'metadata', 'snapshot', 'reader')
+
+# Sections that can carry their own auth config.
+_AUTH_SECTIONS = ('metadata', 'snapshot', 'reader')
+
+
+def _validate_scope(scope: str) -> str:
+    """Validate and return the scope, defaulting to '' (domain-level)."""
+    if scope is None:
+        return ''
+    if scope not in VALID_SCOPES:
+        raise ValueError(f'Invalid scope: {scope!r}; must be one of {VALID_SCOPES}')
+    return scope
+
+
+# ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
+
+# Credential type → base filename (without .json suffix and without scope).
+_CRED_FILENAMES = {
+    'cookie': 'cookie',
+    'header': 'header',
+    'oauth2': 'token',       # OAuth2 refresh tokens stored as token.json
+    'token': 'token',        # legacy alias
+    'basic_auth': 'basic_auth',
+    'token_cache': 'token_cache',
+}
+
+
+def _scoped_filename(*, cred_type: str, scope: str = '') -> str:
+    """Build a credential filename with optional scope suffix.
+
+    Examples:
+      cred_type='cookie', scope=''           → 'cookie.json'
+      cred_type='cookie', scope='snapshot'   → 'cookie_snapshot.json'
+    """
+    scope = _validate_scope(scope)
+    base = _CRED_FILENAMES.get(cred_type, cred_type)
+    if scope:
+        return f'{base}_{scope}.json'
+    return f'{base}.json'
+
 
 def _get_credentials_dir() -> str:
     from site_adapters.services.base import _get_base_dir
     return os.path.join(_get_base_dir(), 'credentials')
-
 
 
 # ── Shared credential path helpers ──
@@ -38,19 +95,15 @@ def _shared_credential_dir(domain: str) -> str:
     return os.path.join(_get_credentials_dir(), 'shared', domain)
 
 
-def _shared_credential_path(domain: str, cred_type: str, index: int = 0) -> str:
-    """Build a shared credential file path.
-
-    index=0 uses the bare filename (cookie.json); index>=1 uses cookie_1.json etc.
-    This allows future multi-credential pool expansion without changing the API.
-    """
-    basename = f'{cred_type}.json' if index <= 0 else f'{cred_type}_{index}.json'
-    return os.path.join(_shared_credential_dir(domain), basename)
+def _shared_credential_path(*, domain: str, cred_type: str, scope: str = '') -> str:
+    """Build a shared credential file path with scope support."""
+    filename = _scoped_filename(cred_type=cred_type, scope=scope)
+    return os.path.join(_shared_credential_dir(domain), filename)
 
 
 # ── User credential path helpers ──
 
-def _credential_path(username: str, domain: str, filename: str) -> str:
+def _credential_path(*, username: str, domain: str, filename: str) -> str:
     """Build a credential file path without domain matching."""
     return os.path.join(_get_credentials_dir(), 'users', username, domain, filename)
 
@@ -121,11 +174,11 @@ def _resolve_shared_credential_domain(hostname: str) -> str | None:
     )
 
 
-def _resolve_credential_path(username: str, hostname: str, filename: str) -> str:
+def _resolve_credential_path(*, username: str, hostname: str, filename: str) -> str:
     """Build a credential file path with domain matching for reads."""
     matched = _resolve_credential_domain(username, hostname)
     effective_domain = matched if matched else hostname
-    return _credential_path(username, effective_domain, filename)
+    return _credential_path(username=username, domain=effective_domain, filename=filename)
 
 
 def _get_meta_path() -> str:
@@ -156,11 +209,18 @@ def _save_meta(meta: dict):
     atomic_write(_get_meta_path(), json.dumps(meta, indent=2, ensure_ascii=False))
 
 
-def _update_meta_entry(cred_type: str, username: str, domain: str, **fields):
+def _meta_key(*, cred_type: str, username: str, domain: str, scope: str = '') -> str:
+    """Build the encryption metadata key with scope."""
+    scope = _validate_scope(scope)
+    return f'{cred_type}:{username}:{domain}:{scope}'
+
+
+def _update_meta_entry(*, cred_type: str, username: str, domain: str,
+                       scope: str = '', **fields):
     meta = _load_meta()
     # keep fingerprint current
     meta['key_fingerprint'] = get_key_fingerprint()
-    key = f'{cred_type}:{username}:{domain}'
+    key = _meta_key(cred_type=cred_type, username=username, domain=domain, scope=scope)
     entry = meta['credentials'].get(key, {})
     entry.update(fields)
     meta['credentials'][key] = entry
@@ -193,7 +253,7 @@ def _read_encrypted_file(path: str) -> tuple[str | None, str]:
         if not raw.strip():
             return None, 'not_found'
         if not is_encrypted(raw):
-            # legacy plaintext, lazy migration
+            # legacy plaintext
             return raw, 'ok'
         result = decrypt_or_plaintext(raw)
         if result == raw and is_encrypted(raw):
@@ -219,16 +279,17 @@ def _remove_file(path: str):
 # Cookie credentials
 # ---------------------------------------------------------------------------
 
-def get_user_cookie(username: str, hostname: str) -> tuple[str | None, str]:
+def get_user_cookie(*, username: str, hostname: str, scope: str = '') -> tuple[str | None, str]:
     """
-    Get the user's cookie credential for a hostname.
+    Get the user's cookie credential for a hostname in a given scope.
 
     Uses DNS multi-level fallback: "www.zhihu.com" -> "zhihu.com".
 
     Returns (cookie_string | None, status).
     Status: 'ok' | 'key_changed' | 'not_found' | 'error'
     """
-    path = _resolve_credential_path(username, hostname, 'cookie.json')
+    filename = _scoped_filename(cred_type='cookie', scope=scope)
+    path = _resolve_credential_path(username=username, hostname=hostname, filename=filename)
     content, status = _read_encrypted_file(path)
     if content is None:
         return None, status
@@ -236,7 +297,8 @@ def get_user_cookie(username: str, hostname: str) -> tuple[str | None, str]:
     return cookie_str, status
 
 
-def save_user_cookie(username: str, domain: str, cookie_str: str, exact: bool = True):
+def save_user_cookie(*, username: str, domain: str, cookie_str: str,
+                     scope: str = '', exact: bool = True):
     """Save the user's cookie credential (encrypted storage).
 
     By default uses exact domain without fallback matching to avoid
@@ -245,21 +307,24 @@ def save_user_cookie(username: str, domain: str, cookie_str: str, exact: bool = 
     from site_adapters.services.auth.cookies import cookie_string_to_playwright_list
     cookies_list = cookie_string_to_playwright_list(cookie_str, domain)
     cookie_content = json.dumps(cookies_list, ensure_ascii=False)
+    filename = _scoped_filename(cred_type='cookie', scope=scope)
     if exact:
-        path = _credential_path(username, domain, 'cookie.json')
+        path = _credential_path(username=username, domain=domain, filename=filename)
     else:
-        path = _resolve_credential_path(username, domain, 'cookie.json')
+        path = _resolve_credential_path(username=username, hostname=domain, filename=filename)
     _write_encrypted_file(path, cookie_content)
-    _update_meta_entry('cookies', username, domain,
-                       updated_at=_now_iso(), source='paste')
+    _update_meta_entry(cred_type='cookies', username=username, domain=domain,
+                       scope=scope, updated_at=_now_iso(), source='paste')
 
 
-def delete_user_cookie(username: str, domain: str):
+def delete_user_cookie(*, username: str, domain: str, scope: str = ''):
     """Delete the user's cookie credential."""
-    path = _resolve_credential_path(username, domain, 'cookie.json')
+    filename = _scoped_filename(cred_type='cookie', scope=scope)
+    path = _resolve_credential_path(username=username, hostname=domain, filename=filename)
     _remove_file(path)
     meta = _load_meta()
-    meta['credentials'].pop(f'cookies:{username}:{domain}', None)
+    meta['credentials'].pop(
+        _meta_key(cred_type='cookies', username=username, domain=domain, scope=scope), None)
     _save_meta(meta)
 
 
@@ -267,12 +332,14 @@ def delete_user_cookie(username: str, domain: str):
 # Header credentials
 # ---------------------------------------------------------------------------
 
-def get_user_header(username: str, hostname: str, header_name: str) -> tuple[str | None, str]:
+def get_user_header(*, username: str, hostname: str, header_name: str,
+                    scope: str = '') -> tuple[str | None, str]:
     """
     Get a specific header credential for a hostname.
     Returns (header_value | None, status).
     """
-    path = _resolve_credential_path(username, hostname, 'header.json')
+    filename = _scoped_filename(cred_type='header', scope=scope)
+    path = _resolve_credential_path(username=username, hostname=hostname, filename=filename)
     content, status = _read_encrypted_file(path)
     if content is None:
         return None, status
@@ -283,12 +350,13 @@ def get_user_header(username: str, hostname: str, header_name: str) -> tuple[str
         return None, 'error'
 
 
-def get_user_headers(username: str, hostname: str) -> tuple[dict, str]:
+def get_user_headers(*, username: str, hostname: str, scope: str = '') -> tuple[dict, str]:
     """
     Get all header credentials for a hostname.
     Returns (headers dict, status).
     """
-    path = _resolve_credential_path(username, hostname, 'header.json')
+    filename = _scoped_filename(cred_type='header', scope=scope)
+    path = _resolve_credential_path(username=username, hostname=hostname, filename=filename)
     content, status = _read_encrypted_file(path)
     if content is None:
         return {}, status
@@ -299,10 +367,14 @@ def get_user_headers(username: str, hostname: str) -> tuple[dict, str]:
         return {}, 'error'
 
 
-def save_user_header(username: str, domain: str, header_name: str, value: str, exact: bool = True):
+def save_user_header(*, username: str, domain: str, header_name: str, value: str,
+                      scope: str = '', exact: bool = True):
     """Save a header credential (encrypted storage)."""
-    path = _credential_path(username, domain, 'header.json') if exact \
-        else _resolve_credential_path(username, domain, 'header.json')
+    filename = _scoped_filename(cred_type='header', scope=scope)
+    if exact:
+        path = _credential_path(username=username, domain=domain, filename=filename)
+    else:
+        path = _resolve_credential_path(username=username, hostname=domain, filename=filename)
     # read existing headers (may have other headers)
     existing, _ = _read_encrypted_file(path)
     try:
@@ -314,17 +386,20 @@ def save_user_header(username: str, domain: str, header_name: str, value: str, e
     headers[header_name] = value
     content = json.dumps(headers, ensure_ascii=False)
     _write_encrypted_file(path, content)
-    _update_meta_entry('headers', username, domain,
-                       updated_at=_now_iso(), source='paste')
+    _update_meta_entry(cred_type='headers', username=username, domain=domain,
+                       scope=scope, updated_at=_now_iso(), source='paste')
 
 
-def delete_user_header(username: str, domain: str, header_name: str = ''):
+def delete_user_header(*, username: str, domain: str, header_name: str = '',
+                        scope: str = ''):
     """Delete a header credential. Empty header_name deletes the entire file."""
-    path = _resolve_credential_path(username, domain, 'header.json')
+    filename = _scoped_filename(cred_type='header', scope=scope)
+    path = _resolve_credential_path(username=username, hostname=domain, filename=filename)
     if not header_name:
         _remove_file(path)
         meta = _load_meta()
-        meta['credentials'].pop(f'headers:{username}:{domain}', None)
+        meta['credentials'].pop(
+            _meta_key(cred_type='headers', username=username, domain=domain, scope=scope), None)
         _save_meta(meta)
         return
     # delete single header
@@ -339,21 +414,19 @@ def delete_user_header(username: str, domain: str, header_name: str = ''):
     else:
         _remove_file(path)
         meta = _load_meta()
-        meta['credentials'].pop(f'headers:{username}:{domain}', None)
+        meta['credentials'].pop(
+            _meta_key(cred_type='headers', username=username, domain=domain, scope=scope), None)
         _save_meta(meta)
 
 
 # ---------------------------------------------------------------------------
-# Listing
+# Token (OAuth2) credentials
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Token credentials
-# ---------------------------------------------------------------------------
-
-def get_user_token(username: str, hostname: str) -> tuple[str | None, str]:
+def get_user_token(*, username: str, hostname: str, scope: str = '') -> tuple[str | None, str]:
     """Get the user's refresh_token for a hostname."""
-    path = _resolve_credential_path(username, hostname, 'token.json')
+    filename = _scoped_filename(cred_type='oauth2', scope=scope)
+    path = _resolve_credential_path(username=username, hostname=hostname, filename=filename)
     content, status = _read_encrypted_file(path)
     if content is None:
         return None, status
@@ -364,40 +437,46 @@ def get_user_token(username: str, hostname: str) -> tuple[str | None, str]:
         return content, status
 
 
-def save_user_token(username: str, domain: str, refresh_token: str, exact: bool = True):
+def save_user_token(*, username: str, domain: str, refresh_token: str,
+                    scope: str = '', exact: bool = True):
     """Save the user's refresh_token (encrypted storage)."""
-    path = _credential_path(username, domain, 'token.json') if exact \
-        else _resolve_credential_path(username, domain, 'token.json')
+    filename = _scoped_filename(cred_type='oauth2', scope=scope)
+    if exact:
+        path = _credential_path(username=username, domain=domain, filename=filename)
+    else:
+        path = _resolve_credential_path(username=username, hostname=domain, filename=filename)
     token_content = json.dumps({'refresh_token': refresh_token}, ensure_ascii=False)
     _write_encrypted_file(path, token_content)
-    _update_meta_entry('tokens', username, domain,
-                       updated_at=_now_iso(), source='paste')
+    _update_meta_entry(cred_type='tokens', username=username, domain=domain,
+                       scope=scope, updated_at=_now_iso(), source='paste')
 
 
-def delete_user_token(username: str, domain: str):
+def delete_user_token(*, username: str, domain: str, scope: str = ''):
     """Delete the user's token credential."""
-    path = _resolve_credential_path(username, domain, 'token.json')
+    filename = _scoped_filename(cred_type='oauth2', scope=scope)
+    path = _resolve_credential_path(username=username, hostname=domain, filename=filename)
     _remove_file(path)
-    cache_path = _resolve_credential_path(username, domain, 'token_cache.json')
+    cache_filename = _scoped_filename(cred_type='token_cache', scope=scope)
+    cache_path = _resolve_credential_path(username=username, hostname=domain, filename=cache_filename)
     _remove_file(cache_path)
     meta = _load_meta()
-    meta['credentials'].pop(f'tokens:{username}:{domain}', None)
+    meta['credentials'].pop(
+        _meta_key(cred_type='tokens', username=username, domain=domain, scope=scope), None)
     _save_meta(meta)
 
-
-
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Basic Auth credentials
 # ---------------------------------------------------------------------------
 
-def get_user_basic_auth(username: str, hostname: str) -> tuple[dict | None, str]:
+def get_user_basic_auth(*, username: str, hostname: str,
+                        scope: str = '') -> tuple[dict | None, str]:
     """Get the user's basic auth credential for a hostname.
 
     Returns ({'username': ..., 'password': ...} | None, status).
     """
-    path = _resolve_credential_path(username, hostname, 'basic_auth.json')
+    filename = _scoped_filename(cred_type='basic_auth', scope=scope)
+    path = _resolve_credential_path(username=username, hostname=hostname, filename=filename)
     content, status = _read_encrypted_file(path)
     if content is None:
         return None, status
@@ -408,30 +487,38 @@ def get_user_basic_auth(username: str, hostname: str) -> tuple[dict | None, str]
         return None, 'error'
 
 
-def save_user_basic_auth(username: str, domain: str, username_val: str, password_val: str, exact: bool = True):
+def save_user_basic_auth(*, username: str, domain: str, username_val: str,
+                         password_val: str, scope: str = '', exact: bool = True):
     """Save the user's basic auth credential (encrypted storage)."""
-    path = _credential_path(username, domain, 'basic_auth.json') if exact \
-        else _resolve_credential_path(username, domain, 'basic_auth.json')
+    filename = _scoped_filename(cred_type='basic_auth', scope=scope)
+    if exact:
+        path = _credential_path(username=username, domain=domain, filename=filename)
+    else:
+        path = _resolve_credential_path(username=username, hostname=domain, filename=filename)
     content = json.dumps({'username': username_val, 'password': password_val}, ensure_ascii=False)
     _write_encrypted_file(path, content)
-    _update_meta_entry('basic_auth', username, domain,
-                       updated_at=_now_iso(), source='paste')
+    _update_meta_entry(cred_type='basic_auth', username=username, domain=domain,
+                       scope=scope, updated_at=_now_iso(), source='paste')
 
 
-def delete_user_basic_auth(username: str, domain: str):
+def delete_user_basic_auth(*, username: str, domain: str, scope: str = ''):
     """Delete the user's basic auth credential."""
-    path = _resolve_credential_path(username, domain, 'basic_auth.json')
+    filename = _scoped_filename(cred_type='basic_auth', scope=scope)
+    path = _resolve_credential_path(username=username, hostname=domain, filename=filename)
     _remove_file(path)
     meta = _load_meta()
-    meta['credentials'].pop(f'basic_auth:{username}:{domain}', None)
+    meta['credentials'].pop(
+        _meta_key(cred_type='basic_auth', username=username, domain=domain, scope=scope), None)
     _save_meta(meta)
+
+
 # ---------------------------------------------------------------------------
 # Shared credentials
 # ---------------------------------------------------------------------------
 
 # ── Shared Cookie ──
 
-def get_shared_cookie(hostname: str) -> tuple[str | None, str]:
+def get_shared_cookie(*, hostname: str, scope: str = '') -> tuple[str | None, str]:
     """Get the shared cookie credential for a hostname.
 
     Uses DNS multi-level fallback. Returns (cookie_string | None, status).
@@ -439,7 +526,7 @@ def get_shared_cookie(hostname: str) -> tuple[str | None, str]:
     matched = _resolve_shared_credential_domain(hostname)
     if not matched:
         return None, 'not_found'
-    path = _shared_credential_path(matched, 'cookie')
+    path = _shared_credential_path(domain=matched, cred_type='cookie', scope=scope)
     content, status = _read_encrypted_file(path)
     if content is None:
         return None, status
@@ -447,35 +534,37 @@ def get_shared_cookie(hostname: str) -> tuple[str | None, str]:
     return cookie_str, status
 
 
-def save_shared_cookie(domain: str, cookie_str: str):
+def save_shared_cookie(*, domain: str, cookie_str: str, scope: str = ''):
     """Save a shared cookie credential (encrypted storage)."""
     from site_adapters.services.auth.cookies import cookie_string_to_playwright_list
     cookies_list = cookie_string_to_playwright_list(cookie_str, domain)
     cookie_content = json.dumps(cookies_list, ensure_ascii=False)
-    path = _shared_credential_path(domain, 'cookie')
+    path = _shared_credential_path(domain=domain, cred_type='cookie', scope=scope)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     _write_encrypted_file(path, cookie_content)
-    _update_meta_entry('cookies', 'shared', domain,
-                       updated_at=_now_iso(), source='paste')
+    _update_meta_entry(cred_type='cookies', username='shared', domain=domain,
+                       scope=scope, updated_at=_now_iso(), source='paste')
 
 
-def delete_shared_cookie(domain: str):
+def delete_shared_cookie(*, domain: str, scope: str = ''):
     """Delete a shared cookie credential."""
-    path = _shared_credential_path(domain, 'cookie')
+    path = _shared_credential_path(domain=domain, cred_type='cookie', scope=scope)
     _remove_file(path)
     meta = _load_meta()
-    meta['credentials'].pop(f'cookies:shared:{domain}', None)
+    meta['credentials'].pop(
+        _meta_key(cred_type='cookies', username='shared', domain=domain, scope=scope), None)
     _save_meta(meta)
 
 
 # ── Shared Header ──
 
-def get_shared_header(hostname: str, header_name: str) -> tuple[str | None, str]:
+def get_shared_header(*, hostname: str, header_name: str,
+                      scope: str = '') -> tuple[str | None, str]:
     """Get a specific shared header credential for a hostname."""
     matched = _resolve_shared_credential_domain(hostname)
     if not matched:
         return None, 'not_found'
-    path = _shared_credential_path(matched, 'header')
+    path = _shared_credential_path(domain=matched, cred_type='header', scope=scope)
     content, status = _read_encrypted_file(path)
     if content is None:
         return None, status
@@ -486,12 +575,12 @@ def get_shared_header(hostname: str, header_name: str) -> tuple[str | None, str]
         return None, 'error'
 
 
-def get_shared_headers(hostname: str) -> tuple[dict, str]:
+def get_shared_headers(*, hostname: str, scope: str = '') -> tuple[dict, str]:
     """Get all shared header credentials for a hostname."""
     matched = _resolve_shared_credential_domain(hostname)
     if not matched:
         return {}, 'not_found'
-    path = _shared_credential_path(matched, 'header')
+    path = _shared_credential_path(domain=matched, cred_type='header', scope=scope)
     content, status = _read_encrypted_file(path)
     if content is None:
         return {}, status
@@ -502,9 +591,10 @@ def get_shared_headers(hostname: str) -> tuple[dict, str]:
         return {}, 'error'
 
 
-def save_shared_header(domain: str, header_name: str, value: str):
+def save_shared_header(*, domain: str, header_name: str, value: str,
+                       scope: str = ''):
     """Save a shared header credential (encrypted storage)."""
-    path = _shared_credential_path(domain, 'header')
+    path = _shared_credential_path(domain=domain, cred_type='header', scope=scope)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     existing, _ = _read_encrypted_file(path)
     try:
@@ -516,17 +606,18 @@ def save_shared_header(domain: str, header_name: str, value: str):
     headers[header_name] = value
     content = json.dumps(headers, ensure_ascii=False)
     _write_encrypted_file(path, content)
-    _update_meta_entry('headers', 'shared', domain,
-                       updated_at=_now_iso(), source='paste')
+    _update_meta_entry(cred_type='headers', username='shared', domain=domain,
+                       scope=scope, updated_at=_now_iso(), source='paste')
 
 
-def delete_shared_header(domain: str, header_name: str = ''):
+def delete_shared_header(*, domain: str, header_name: str = '', scope: str = ''):
     """Delete a shared header credential. Empty header_name deletes the entire file."""
-    path = _shared_credential_path(domain, 'header')
+    path = _shared_credential_path(domain=domain, cred_type='header', scope=scope)
     if not header_name:
         _remove_file(path)
         meta = _load_meta()
-        meta['credentials'].pop(f'headers:shared:{domain}', None)
+        meta['credentials'].pop(
+            _meta_key(cred_type='headers', username='shared', domain=domain, scope=scope), None)
         _save_meta(meta)
         return
     existing, _ = _read_encrypted_file(path)
@@ -540,18 +631,19 @@ def delete_shared_header(domain: str, header_name: str = ''):
     else:
         _remove_file(path)
         meta = _load_meta()
-        meta['credentials'].pop(f'headers:shared:{domain}', None)
+        meta['credentials'].pop(
+            _meta_key(cred_type='headers', username='shared', domain=domain, scope=scope), None)
         _save_meta(meta)
 
 
 # ── Shared Token ──
 
-def get_shared_token(hostname: str) -> tuple[str | None, str]:
+def get_shared_token(*, hostname: str, scope: str = '') -> tuple[str | None, str]:
     """Get the shared refresh_token for a hostname."""
     matched = _resolve_shared_credential_domain(hostname)
     if not matched:
         return None, 'not_found'
-    path = _shared_credential_path(matched, 'token')
+    path = _shared_credential_path(domain=matched, cred_type='oauth2', scope=scope)
     content, status = _read_encrypted_file(path)
     if content is None:
         return None, status
@@ -562,38 +654,36 @@ def get_shared_token(hostname: str) -> tuple[str | None, str]:
         return content, status
 
 
-def save_shared_token(domain: str, refresh_token: str):
+def save_shared_token(*, domain: str, refresh_token: str, scope: str = ''):
     """Save a shared refresh_token (encrypted storage)."""
-    path = _shared_credential_path(domain, 'token')
+    path = _shared_credential_path(domain=domain, cred_type='oauth2', scope=scope)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     token_content = json.dumps({'refresh_token': refresh_token}, ensure_ascii=False)
     _write_encrypted_file(path, token_content)
-    _update_meta_entry('tokens', 'shared', domain,
-                       updated_at=_now_iso(), source='paste')
+    _update_meta_entry(cred_type='tokens', username='shared', domain=domain,
+                       scope=scope, updated_at=_now_iso(), source='paste')
 
 
-def delete_shared_token(domain: str):
+def delete_shared_token(*, domain: str, scope: str = ''):
     """Delete a shared token credential."""
-    path = _shared_credential_path(domain, 'token')
+    path = _shared_credential_path(domain=domain, cred_type='oauth2', scope=scope)
     _remove_file(path)
-    cache_path = _shared_credential_path(domain, 'token_cache')
+    cache_path = _shared_credential_path(domain=domain, cred_type='token_cache', scope=scope)
     _remove_file(cache_path)
     meta = _load_meta()
-    meta['credentials'].pop(f'tokens:shared:{domain}', None)
+    meta['credentials'].pop(
+        _meta_key(cred_type='tokens', username='shared', domain=domain, scope=scope), None)
     _save_meta(meta)
 
 
-
-# ---------------------------------------------------------------------------
-
 # ── Shared Basic Auth ──
 
-def get_shared_basic_auth(hostname: str) -> tuple[dict | None, str]:
+def get_shared_basic_auth(*, hostname: str, scope: str = '') -> tuple[dict | None, str]:
     """Get the shared basic auth credential for a hostname."""
     matched = _resolve_shared_credential_domain(hostname)
     if not matched:
         return None, 'not_found'
-    path = _shared_credential_path(matched, 'basic_auth')
+    path = _shared_credential_path(domain=matched, cred_type='basic_auth', scope=scope)
     content, status = _read_encrypted_file(path)
     if content is None:
         return None, status
@@ -604,66 +694,106 @@ def get_shared_basic_auth(hostname: str) -> tuple[dict | None, str]:
         return None, 'error'
 
 
-def save_shared_basic_auth(domain: str, username_val: str, password_val: str):
+def save_shared_basic_auth(*, domain: str, username_val: str, password_val: str,
+                           scope: str = ''):
     """Save a shared basic auth credential (encrypted storage)."""
-    path = _shared_credential_path(domain, 'basic_auth')
+    path = _shared_credential_path(domain=domain, cred_type='basic_auth', scope=scope)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     content = json.dumps({'username': username_val, 'password': password_val}, ensure_ascii=False)
     _write_encrypted_file(path, content)
-    _update_meta_entry('basic_auth', 'shared', domain,
-                       updated_at=_now_iso(), source='paste')
+    _update_meta_entry(cred_type='basic_auth', username='shared', domain=domain,
+                       scope=scope, updated_at=_now_iso(), source='paste')
 
 
-def delete_shared_basic_auth(domain: str):
+def delete_shared_basic_auth(*, domain: str, scope: str = ''):
     """Delete a shared basic auth credential."""
-    path = _shared_credential_path(domain, 'basic_auth')
+    path = _shared_credential_path(domain=domain, cred_type='basic_auth', scope=scope)
     _remove_file(path)
     meta = _load_meta()
-    meta['credentials'].pop(f'basic_auth:shared:{domain}', None)
+    meta['credentials'].pop(
+        _meta_key(cred_type='basic_auth', username='shared', domain=domain, scope=scope), None)
     _save_meta(meta)
-# Unified best-credential resolution (user first, shared fallback)
-# Used by resolver.py and auth/__init__.py to avoid duplicated fallback logic.
+
+
+# ---------------------------------------------------------------------------
+# Unified best-credential resolution (single scope, user > shared)
 # ---------------------------------------------------------------------------
 
-def get_best_cookie(username: str, hostname: str) -> tuple[str | None, str]:
-    """Get the best available cookie: user credential first, shared fallback."""
+def get_best_cookie(*, username: str, hostname: str,
+                    scope: str = '') -> tuple[str | None, str]:
+    """Get the best available cookie within a single scope: user first, shared fallback."""
     if username:
-        result, status = get_user_cookie(username, hostname)
+        result, status = get_user_cookie(username=username, hostname=hostname, scope=scope)
         if result:
             return result, status
-    return get_shared_cookie(hostname)
+    return get_shared_cookie(hostname=hostname, scope=scope)
 
 
-def get_best_header(username: str, hostname: str, header_name: str) -> tuple[str | None, str]:
-    """Get the best available header: user credential first, shared fallback."""
+def get_best_header(*, username: str, hostname: str, header_name: str,
+                    scope: str = '') -> tuple[str | None, str]:
+    """Get the best available header within a single scope: user first, shared fallback."""
     if username:
-        result, status = get_user_header(username, hostname, header_name)
+        result, status = get_user_header(username=username, hostname=hostname,
+                                         header_name=header_name, scope=scope)
         if result:
             return result, status
-    return get_shared_header(hostname, header_name)
+    return get_shared_header(hostname=hostname, header_name=header_name, scope=scope)
 
 
-def get_best_token(username: str, hostname: str) -> tuple[str | None, str]:
-    """Get the best available token: user credential first, shared fallback."""
+def get_best_token(*, username: str, hostname: str,
+                   scope: str = '') -> tuple[str | None, str]:
+    """Get the best available token within a single scope: user first, shared fallback."""
     if username:
-        result, status = get_user_token(username, hostname)
+        result, status = get_user_token(username=username, hostname=hostname, scope=scope)
         if result:
             return result, status
-    return get_shared_token(hostname)
+    return get_shared_token(hostname=hostname, scope=scope)
 
 
-
-def get_best_basic_auth(username: str, hostname: str) -> tuple[dict | None, str]:
-    """Get the best available basic auth: user credential first, shared fallback."""
+def get_best_basic_auth(*, username: str, hostname: str,
+                        scope: str = '') -> tuple[dict | None, str]:
+    """Get the best available basic auth within a single scope: user first, shared fallback."""
     if username:
-        result, status = get_user_basic_auth(username, hostname)
+        result, status = get_user_basic_auth(username=username, hostname=hostname, scope=scope)
         if result:
             return result, status
-    return get_shared_basic_auth(hostname)
+    return get_shared_basic_auth(hostname=hostname, scope=scope)
+
+
+# ---------------------------------------------------------------------------
+# Listing
+# ---------------------------------------------------------------------------
+
+# Regex to parse scope from filenames: cookie.json, cookie_snapshot.json, etc.
+_SCOPE_FILE_RE = re.compile(r'^(cookie|header|token|basic_auth|token_cache)(?:_({}))?\.json$'.format(
+    '|'.join(s for s in VALID_SCOPES if s)
+))
+
+
+def _parse_scoped_filename(filename: str) -> tuple[str | None, str | None]:
+    """Parse a credential filename into (cred_type, scope).
+
+    Returns (None, None) if the file doesn't match a known credential pattern.
+    """
+    m = _SCOPE_FILE_RE.match(filename)
+    if not m:
+        return None, None
+    raw_type = m.group(1)
+    scope = m.group(2) or ''
+    # Normalize 'token' → 'oauth2' for display consistency
+    if raw_type == 'token':
+        cred_type = 'oauth2'
+    else:
+        cred_type = raw_type
+    return cred_type, scope
+
 
 def _list_credentials_in_dir(base_dir: str, meta_prefix: str,
                                   include_values: bool = False) -> list[dict]:
-    """List all credentials in a directory, optionally with decrypted values."""
+    """List all credentials in a directory, optionally with decrypted values.
+
+    Scans for all scope variants (cookie.json, cookie_snapshot.json, etc.).
+    """
     result = []
     meta = _load_meta()
     fingerprint_ok = check_key_fingerprint()
@@ -676,16 +806,20 @@ def _list_credentials_in_dir(base_dir: str, meta_prefix: str,
         if not os.path.isdir(domain_dir):
             continue
 
-        for cred_type, filename in [
-            ('cookie', 'cookie.json'),
-            ('header', 'header.json'),
-            ('oauth2', 'token.json'), ('token', 'token.json'),  # legacy: token → oauth2
-            ('basic_auth', 'basic_auth.json'),
-        ]:
+        for filename in sorted(os.listdir(domain_dir)):
+            cred_type, scope = _parse_scoped_filename(filename)
+            if cred_type is None:
+                continue
+            # Skip token_cache files in listing (they are internal cache, not credentials)
+            if filename.startswith('token_cache'):
+                continue
+
             path = os.path.join(domain_dir, filename)
             if not os.path.isfile(path):
                 continue
-            meta_key = f'{cred_type}s:{meta_prefix}:{domain}'
+
+            meta_key = _meta_key(cred_type=cred_type + 's', username=meta_prefix,
+                                 domain=domain, scope=scope)
             m = meta['credentials'].get(meta_key, {})
             content, status = _read_encrypted_file(path)
             if not fingerprint_ok and status == 'ok':
@@ -694,6 +828,7 @@ def _list_credentials_in_dir(base_dir: str, meta_prefix: str,
             entry = {
                 'domain': domain,
                 'type': cred_type,
+                'scope': scope,
                 'status': status,
                 'updated_at': m.get('updated_at', ''),
             }
@@ -710,7 +845,7 @@ def _list_credentials_in_dir(base_dir: str, meta_prefix: str,
                     except (json.JSONDecodeError, AttributeError):
                         entry['header_names'] = []
                         entry['header_values'] = {}
-                elif (cred_type == 'oauth2' or cred_type == 'token'):
+                elif cred_type == 'oauth2':
                     try:
                         token_data = json.loads(content)
                         entry['token'] = token_data.get('refresh_token', '') if isinstance(token_data, dict) else ''
@@ -747,10 +882,15 @@ def list_user_credentials(username: str) -> list[dict]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Token cache (OAuth2 access_token persistence)
+# ---------------------------------------------------------------------------
 
-def load_user_token_cache(username: str, hostname: str) -> dict | None:
+def load_user_token_cache(*, username: str, hostname: str,
+                          scope: str = '') -> dict | None:
     """Load token cache (access_token + expires_at) for a hostname."""
-    path = _resolve_credential_path(username, hostname, 'token_cache.json')
+    filename = _scoped_filename(cred_type='token_cache', scope=scope)
+    path = _resolve_credential_path(username=username, hostname=hostname, filename=filename)
     if not os.path.exists(path):
         return None
     try:
@@ -761,22 +901,119 @@ def load_user_token_cache(username: str, hostname: str) -> dict | None:
         return None
 
 
-def save_user_token_cache(username: str, domain: str, cache_data: dict):
+def save_user_token_cache(*, username: str, domain: str, cache_data: dict,
+                          scope: str = ''):
     """Save token cache for a domain.
 
     Uses exact domain (no fallback) because the cache is always written
     alongside the token itself in the same domain directory.
     """
+    filename = _scoped_filename(cred_type='token_cache', scope=scope)
     matched = _resolve_credential_domain(username, domain)
     effective_domain = matched if matched else domain
-    path = _credential_path(username, effective_domain, 'token_cache.json')
+    path = _credential_path(username=username, domain=effective_domain, filename=filename)
     atomic_write(path, json.dumps(cache_data, ensure_ascii=False))
+
+
+# ---------------------------------------------------------------------------
+# Auth requirements
+# ---------------------------------------------------------------------------
+
+def _extract_auth_block(auth: dict) -> dict:
+    """Extract the effective auth requirement fields from a merged auth block."""
+    cookie_cfg = auth.get('cookie', {})
+    headers_cfg = auth.get('headers', {})
+    oauth2_cfg = auth.get('oauth2', {})
+    basic_cfg = auth.get('basic_auth', {})
+
+    has_cookie = bool(cookie_cfg) and (
+        cookie_cfg.get('enabled', True) if isinstance(cookie_cfg, dict) else True
+    )
+    has_headers = bool(headers_cfg) and (
+        headers_cfg.get('enabled', True) if isinstance(headers_cfg, dict) else True
+    )
+    header_names = sorted(headers_cfg.keys()) if isinstance(headers_cfg, dict) else []
+    has_oauth2 = bool(oauth2_cfg) and (
+        oauth2_cfg.get('enabled', True) if isinstance(oauth2_cfg, dict) else True
+    ) and bool(oauth2_cfg.get('endpoint'))
+    has_basic_auth = bool(basic_cfg) and (
+        basic_cfg.get('enabled', True) if isinstance(basic_cfg, dict) else True
+    )
+    cookie_type = cookie_cfg.get('type', 'auto') if isinstance(cookie_cfg, dict) else 'auto'
+
+    return {
+        'cookie': has_cookie,
+        'cookie_type': cookie_type if has_cookie else '',
+        'headers': header_names if has_headers else [],
+        'oauth2': has_oauth2,
+        'token': has_oauth2,  # backward compat
+        'basic_auth': has_basic_auth,
+        'cookie_help': cookie_cfg.get('help', '') if isinstance(cookie_cfg, dict) else '',
+        'headers_help': headers_cfg.get('help', '') if isinstance(headers_cfg, dict) else '',
+        'oauth2_help': oauth2_cfg.get('help', '') if isinstance(oauth2_cfg, dict) else '',
+        'basic_help': basic_cfg.get('help', '') if isinstance(basic_cfg, dict) else '',
+    }
+
+
+def _build_section_auth_requirements(*, section_data: dict, domain_auth: dict) -> dict:
+    """Build auth requirements for a single section.
+
+    Determines which sub-types are section-level vs inherited vs disabled.
+    """
+    section_auth_raw = section_data.get('auth') if isinstance(section_data, dict) else None
+
+    # auth: null → disabled
+    if section_auth_raw is None and isinstance(section_data, dict) and 'auth' in section_data:
+        return {
+            'cookie': False, 'cookie_type': '', 'headers': [],
+            'oauth2': False, 'token': False, 'basic_auth': False,
+            'cookie_help': '', 'headers_help': '', 'oauth2_help': '', 'basic_help': '',
+            'source': 'disabled',
+        }
+
+    if not isinstance(section_auth_raw, dict) or not section_auth_raw:
+        # No section auth → fully inherited from domain
+        result = _extract_auth_block(domain_auth)
+        result['source'] = 'inherited'
+        return result
+
+    # Section has its own auth block — merge and determine per-subtype source
+    from site_adapters.services.auth.cookies import merge_cookie
+    merged = {}
+    # Cookie
+    if 'cookie' in section_auth_raw:
+        merged['cookie'] = merge_cookie(domain_auth.get('cookie', {}), section_auth_raw['cookie'])
+    else:
+        merged['cookie'] = domain_auth.get('cookie', {})
+    # Headers
+    if 'headers' in section_auth_raw:
+        existing_h = dict(domain_auth.get('headers', {}))
+        existing_h.update(section_auth_raw['headers'])
+        merged['headers'] = existing_h
+    else:
+        merged['headers'] = domain_auth.get('headers', {})
+    # OAuth2
+    if 'oauth2' in section_auth_raw:
+        merged['oauth2'] = dict(section_auth_raw['oauth2'])
+    else:
+        merged['oauth2'] = domain_auth.get('oauth2', {})
+    # Basic Auth
+    if 'basic_auth' in section_auth_raw:
+        merged['basic_auth'] = dict(section_auth_raw['basic_auth'])
+    else:
+        merged['basic_auth'] = domain_auth.get('basic_auth', {})
+
+    result = _extract_auth_block(merged)
+    result['source'] = 'section'
+    return result
 
 
 def get_auth_requirements_for_domain(hostname: str, base_dir: str = '') -> dict:
     """
     Query auth requirements for a hostname (local + subscription).
-    Returns {'cookie': bool, 'headers': [str], 'token': bool}
+
+    Returns the domain-level baseline auth requirements (flat, for backward compat).
+    Use get_auth_requirements_for_domain_key for the full section-aware structure.
     """
     if not base_dir:
         from site_adapters.services.base import _get_base_dir
@@ -786,32 +1023,43 @@ def get_auth_requirements_for_domain(hostname: str, base_dir: str = '') -> dict:
     url = f'https://{hostname}'
     config = load_domain_config(url, base_dir)
     if not config:
-        return {'cookie': False, 'headers': [], 'token': False, 'cookie_type': ''}
+        return {'cookie': False, 'headers': [], 'token': False, 'cookie_type': '',
+                'oauth2': False, 'basic_auth': False,
+                'cookie_help': '', 'headers_help': '', 'oauth2_help': '', 'basic_help': ''}
 
     auth = config.get('auth', {})
-    has_cookie = bool(auth.get('cookie'))
-    headers = list(auth.get('headers', {}).keys()) if isinstance(auth.get('headers'), dict) else []
-    has_oauth2 = bool(auth.get('oauth2', {}).get('endpoint'))
-    cookie_type = auth.get('cookie', {}).get('type', 'auto') if isinstance(auth.get('cookie'), dict) else 'auto'
-    cookie_cfg = auth.get('cookie', {})
-    headers_cfg = auth.get('headers', {})
-    oauth2_cfg = auth.get('oauth2', {})
-    basic_cfg = auth.get('basic_auth', {})
-    cookie_help = cookie_cfg.get('help', '') if isinstance(cookie_cfg, dict) else ''
-    headers_help = headers_cfg.get('help', '') if isinstance(headers_cfg, dict) else ''
-    oauth2_help = oauth2_cfg.get('help', '') if isinstance(oauth2_cfg, dict) else ''
-    basic_help = basic_cfg.get('help', '') if isinstance(basic_cfg, dict) else ''
-    has_basic_auth = bool(auth.get('basic_auth'))
-    return {'cookie': has_cookie, 'headers': headers, 'oauth2': has_oauth2, 'token': has_oauth2, 'basic_auth': has_basic_auth, 'cookie_help': cookie_help, 'headers_help': headers_help, 'oauth2_help': oauth2_help, 'basic_help': basic_help, 'cookie_type': cookie_type}
+    return _extract_auth_block(auth)
 
 
 def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') -> dict:
-    """Query auth requirements for a resolved domain key."""
+    """Query auth requirements for a resolved domain key.
+
+    Returns:
+    {
+        'domain': { ... },              # domain-level baseline
+        'sections': {
+            'metadata': { ... },        # effective merged auth per section
+            'snapshot': { ... },
+            'reader': { ... },
+        }
+    }
+
+    Each block contains: cookie, cookie_type, headers, oauth2, basic_auth,
+    cookie_help, headers_help, oauth2_help, basic_help, source.
+    source is 'section' (section defines its own auth), 'inherited'
+    (inherits domain-level), or 'disabled' (auth: null).
+    """
     if not base_dir:
         from site_adapters.services.base import _get_base_dir
         base_dir = _get_base_dir()
+
+    empty_block = {
+        'cookie': False, 'cookie_type': '', 'headers': [],
+        'oauth2': False, 'token': False, 'basic_auth': False,
+        'cookie_help': '', 'headers_help': '', 'oauth2_help': '', 'basic_help': '',
+    }
     if not domain_key:
-        return {'cookie': False, 'headers': [], 'token': False, 'cookie_type': ''}
+        return {'domain': dict(empty_block), 'sections': {}}
 
     from site_adapters.services.config import deep_merge
     from site_adapters.services.config.loader import _cache, _resolve_alias
@@ -820,28 +1068,30 @@ def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') ->
     defaults = all_config.get('defaults', {})
     raw_config = all_config.get(domain_key)
     if raw_config is None:
-        return {'cookie': False, 'headers': [], 'token': False, 'cookie_type': ''}
+        return {'domain': dict(empty_block), 'sections': {}}
 
     resolved = _resolve_alias(raw_config, all_config) if isinstance(raw_config, dict) else raw_config
     if not isinstance(resolved, dict):
-        return {'cookie': False, 'headers': [], 'token': False, 'cookie_type': ''}
+        return {'domain': dict(empty_block), 'sections': {}}
 
     merged = deep_merge(resolved, defaults) if defaults else resolved
-    auth = merged.get('auth', {})
-    has_cookie = bool(auth.get('cookie'))
-    headers = sorted(auth.get('headers', {}).keys()) if isinstance(auth.get('headers'), dict) else []
-    has_oauth2 = bool(auth.get('oauth2', {}).get('endpoint'))
-    cookie_type = auth.get('cookie', {}).get('type', 'auto') if isinstance(auth.get('cookie'), dict) else 'auto'
-    cookie_cfg = auth.get('cookie', {})
-    headers_cfg = auth.get('headers', {})
-    oauth2_cfg = auth.get('oauth2', {})
-    basic_cfg = auth.get('basic_auth', {})
-    cookie_help = cookie_cfg.get('help', '') if isinstance(cookie_cfg, dict) else ''
-    headers_help = headers_cfg.get('help', '') if isinstance(headers_cfg, dict) else ''
-    oauth2_help = oauth2_cfg.get('help', '') if isinstance(oauth2_cfg, dict) else ''
-    basic_help = basic_cfg.get('help', '') if isinstance(basic_cfg, dict) else ''
-    has_basic_auth = bool(auth.get('basic_auth'))
-    return {'cookie': has_cookie, 'headers': headers, 'oauth2': has_oauth2, 'token': has_oauth2, 'basic_auth': has_basic_auth, 'cookie_help': cookie_help, 'headers_help': headers_help, 'oauth2_help': oauth2_help, 'basic_help': basic_help, 'cookie_type': cookie_type}
+
+    # Domain-level baseline auth = top.auth + defaults.auth merged
+    from site_adapters.services.config.resolver import _merge_auth
+    top_auth = merged.get('auth', {})
+    default_auth = defaults.get('auth', {})
+    domain_auth = _merge_auth(top_auth, default_auth)
+
+    domain_block = _extract_auth_block(domain_auth)
+    domain_block['source'] = 'domain'
+
+    sections = {}
+    for section in _AUTH_SECTIONS:
+        section_data = merged.get(section, {})
+        sections[section] = _build_section_auth_requirements(
+            section_data=section_data, domain_auth=domain_auth)
+
+    return {'domain': domain_block, 'sections': sections}
 
 
 # ---------------------------------------------------------------------------
@@ -860,4 +1110,3 @@ def _json_cookie_to_header_string(data_str: str) -> str | None:
 
 def _now_iso() -> str:
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-

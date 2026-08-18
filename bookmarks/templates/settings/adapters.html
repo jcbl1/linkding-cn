@@ -89,6 +89,7 @@
     window.__ld_csrf_token = "{{ csrf_token }}";
     window.__ld_urls = window.__ld_urls || {};
     window.__ld_urls.credentials_api = "{% url 'linkding:settings.credentials_api' %}";
+    window.__ld_urls.matchDomain = "{% url 'linkding:settings.match_domain_config' %}";
     window.__ld_credentials_data = {{ credentials_json|safe }};
     window.__ld_snapshot_toggles_url = "{% url 'linkding:settings.snapshot_toggles' %}";
     window.__ld_auth_domains = {{ auth_domains_json|safe }};

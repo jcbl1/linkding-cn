@@ -51,17 +51,18 @@ def site_adapters_page(request):
         'auth_domains_json': json.dumps([
             {
                 'd': d['domain'],
-                'c': d['needs_cookie'],
-                'h': d['needs_headers'],
-                't': d.get('needs_oauth2', d.get('needs_token', False)),
-                'b': d.get('needs_basic_auth', False),
-                'ct': d.get('cookie_type', 'auto'),
+                'c': d['domain_auth'].get('cookie', False),
+                'h': d['domain_auth'].get('headers', []),
+                't': d['domain_auth'].get('oauth2', False),
+                'b': d['domain_auth'].get('basic_auth', False),
+                'ct': d['domain_auth'].get('cookie_type', 'auto'),
                 'help': {
-                    'c': d.get('cookie_help', ''),
-                    'h': d.get('headers_help', ''),
-                    't': d.get('oauth2_help', ''),
-                    'b': d.get('basic_help', ''),
+                    'c': d['domain_auth'].get('cookie_help', ''),
+                    'h': d['domain_auth'].get('headers_help', ''),
+                    't': d['domain_auth'].get('oauth2_help', ''),
+                    'b': d['domain_auth'].get('basic_help', ''),
                 },
+                'sections': d.get('sections', {}),
             }
             for d in domains_needing_auth
         ], ensure_ascii=False),

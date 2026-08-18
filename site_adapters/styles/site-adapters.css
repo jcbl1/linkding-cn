@@ -1459,6 +1459,7 @@
 .wa-toggle-detail-col-enabled { width: 60px; flex-shrink: 0; text-align: left; }
 .wa-col-domain { flex: 1; min-width: 120px; }
 .wa-col-type { width: 90px; flex-shrink: 0; }
+.wa-col-scope { width: 80px; flex-shrink: 0; }
 
 .wa-col-updated { width: 90px; flex-shrink: 0; }
 .wa-col-actions { width: 180px; flex-shrink: 0; text-align: right; display:flex; gap:4px; justify-content:flex-end; align-items:center; }
@@ -1705,6 +1706,7 @@
     flex-shrink: 0;
     justify-content: flex-end;
   }
+  .wa-cred-row .wa-col-scope { width: auto; }
   .wa-cred-row .wa-col-type {
     width: auto;
     font-size: 11px;
@@ -1883,6 +1885,7 @@
   /* ── 桌面列宽清零（移动端由上面的规则接管） ── */
   .wa-col-domain { min-width: 0; }
   .wa-col-type { width: auto; }
+  .wa-col-scope { width: auto; }
   .wa-col-updated { width: auto; }
   .wa-col-actions { width: auto; }
 
@@ -1990,4 +1993,15 @@
 
 .wa-cred-help-text {
   white-space: pre-line;
+}
+
+
+/* Scope badge */
+.wa-badge-scope {
+  background: var(--wa-badge-bg, #e2e8f0);
+  color: var(--wa-badge-text, #475569);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
 }

@@ -570,18 +570,21 @@ def refresh_cookie_declarative(refresh_config: dict, url: str,
 # Verify + refresh flow (declarative)
 # ---------------------------------------------------------------------------
 
-def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
-                       verify_context: dict, username: str = '') -> str | None:
+def verify_and_refresh(*, cookie_config: dict, url: str, domain_key: str,
+                       verify_context: dict, username: str = '',
+                       scope: str = '') -> str | None:
     """
     完整的 cookie 验证 + 刷新流程。
 
-    凭据优先级：用户凭据 > 共享凭据。
-    刷新后写回对应的凭据存储（用户或共享）。
+    凭据优先级：用户凭据 > 共享凭据（在同一 scope 内）。
+    刷新后写回对应的凭据存储（用户或共享），使用正确的 scope 文件。
     cookie_config: 完整的 cookie 配置块（已合并）
+    scope: effective scope ('' for domain-level, section name for section-level)
     返回 cookie 字符串（可能为 None）。
     """
     from site_adapters.services.auth.credentials import (
         get_best_cookie, save_user_cookie, save_shared_cookie,
+        get_user_cookie, get_shared_cookie,
     )
 
     # 判断凭据来源
@@ -589,38 +592,42 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
     source = None  # 'user' | 'shared' | None
 
     if username:
-        from site_adapters.services.auth.credentials import get_user_cookie
-        cookie_str, status = get_user_cookie(username, domain_key)
+        cookie_str, status = get_user_cookie(
+            username=username, hostname=domain_key, scope=scope)
         if cookie_str and status == 'ok':
             source = 'user'
 
     if not cookie_str:
-        cookie_str, status = get_shared_cookie(domain_key)
+        cookie_str, status = get_shared_cookie(
+            hostname=domain_key, scope=scope)
         if cookie_str and status == 'ok':
             source = 'shared'
 
     def _save_cookies(cookie_list: list):
-        """将 cookie 列表保存到对应的凭据存储。"""
+        """将 cookie 列表保存到对应的凭据存储（使用正确的 scope）。"""
         if not cookie_list:
             return
         cookie_str_save = _cookie_data_to_string(cookie_list)
         if not cookie_str_save:
             return
         if source == 'user' and username:
-            save_user_cookie(username, domain_key, cookie_str_save)
+            save_user_cookie(username=username, domain=domain_key,
+                             cookie_str=cookie_str_save, scope=scope)
         else:
-            save_shared_cookie(domain_key, cookie_str_save)
+            save_shared_cookie(domain=domain_key, cookie_str=cookie_str_save, scope=scope)
 
     # 没有 cookie 且有 refresh 配置 → 尝试刷新
     if not cookie_str and _should_refresh_cookie(cookie_config):
-        logger.info("No cookie for %s (%s), attempting browser refresh", domain_key, source or 'auto')
+        logger.info("No cookie for %s (%s, scope=%s), attempting browser refresh",
+                     domain_key, source or 'auto', scope or 'domain')
         data = refresh_cookie_declarative(cookie_config['refresh'], url, domain_key)
         if data:
             try:
                 _save_cookies(data)
                 cookie_str = _cookie_data_to_string(data)
                 target = source or 'shared'
-                logger.info("Cookie acquired and saved to %s credentials for %s (%d cookies)", target, domain_key, len(data))
+                logger.info("Cookie acquired and saved to %s credentials for %s (scope=%s, %d cookies)",
+                           target, domain_key, scope or 'domain', len(data))
             except Exception as e:
                 logger.error("Failed to save cookies to credentials for %s: %s", domain_key, e)
                 return None
@@ -652,8 +659,8 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
                     if data:
                         try:
                             _save_cookies(data)
-                            logger.info("Cookie refreshed and saved for %s (%d cookies)",
-                                        domain_key, len(data))
+                            logger.info("Cookie refreshed and saved for %s (scope=%s, %d cookies)",
+                                        domain_key, scope or 'domain', len(data))
                         except Exception as e:
                             logger.error("Failed to save refreshed cookies for %s: %s",
                                          domain_key, e)
@@ -691,7 +698,8 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
         if data:
             try:
                 _save_cookies(data)
-                logger.info("Cookie refreshed and saved for %s (%d cookies)", domain_key, len(data))
+                logger.info("Cookie refreshed and saved for %s (scope=%s, %d cookies)",
+                           domain_key, scope or 'domain', len(data))
             except Exception as e:
                 logger.error("Failed to save refreshed cookies to credentials for %s: %s", domain_key, e)
             return _cookie_data_to_string(data)
@@ -700,10 +708,6 @@ def verify_and_refresh(cookie_config: dict, url: str, domain_key: str,
 
     return cookie_str
 
-
-# ---------------------------------------------------------------------------
-# Temporary files (for SingleFile)
-# ---------------------------------------------------------------------------
 
 def copy_cookie_data_to_temp(data) -> str | None:
     """Copy Playwright cookie data (list or dict) directly to a temp file.
@@ -718,17 +722,18 @@ def copy_cookie_data_to_temp(data) -> str | None:
         return tmp.name
 
 
-def generate_temp_cookies_file(domain_key: str, cookie_str: str = None) -> str | None:
+def generate_temp_cookies_file(*, domain_key: str, cookie_str: str = None,
+                               scope: str = '') -> str | None:
     """Generate a temporary Playwright cookies file.
 
     When a raw cookie string is given (e.g. user-pasted), it is converted
     to Playwright format.  When cookie_str is None, attempts to load from
-    shared credentials.
+    shared credentials in the given scope.
 
     Caller must delete the returned path after use.
     """
     if cookie_str is None:
-        shared, status = get_shared_cookie(domain_key)
+        shared, status = get_shared_cookie(hostname=domain_key, scope=scope)
         if shared and status == 'ok':
             cookies_list = cookie_string_to_playwright_list(shared, domain_key)
             return copy_cookie_data_to_temp(cookies_list)

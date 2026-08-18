@@ -29,6 +29,7 @@ from site_adapters.views import (
     shared_credential_list,
     shared_credential_save,
     shared_credential_delete,
+    match_domain_config,
     snapshot_toggles,
     view_snapshot,
     view_reader,

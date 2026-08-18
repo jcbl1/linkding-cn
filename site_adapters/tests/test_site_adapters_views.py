@@ -232,9 +232,9 @@ class SiteAdaptersViewsTestCase(TestCase):
         cookie_config = {"type": "anon"}
         meta_config = {"_domain_key": "example.com", "cookie": cookie_config}
 
-        def mock_verify_and_refresh(cookie_config, url, domain_key, verify_context, username=""):
+        def mock_verify_and_refresh(*, cookie_config, url, domain_key, verify_context, username="", scope=""):
             from site_adapters.services.auth.credentials import save_shared_cookie
-            save_shared_cookie("example.com", "session=abc")
+            save_shared_cookie(domain="example.com", cookie_str="session=abc", scope=scope)
             return "session=abc"
 
         auth_req = {"cookie": True, "headers": [], "token": False, "cookie_type": "anon"}

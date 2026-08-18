@@ -46,7 +46,7 @@ class Command(BaseCommand):
 
         cookie = sub.add_parser("cookie")
         cookie.add_argument("url")
-        cookie.add_argument("--section", choices=("metadata", "snapshot"), default="metadata")
+        cookie.add_argument("--section", choices=("metadata", "snapshot", "reader"), default="metadata")
 
         pipeline = sub.add_parser("pipeline")
         pipeline.add_argument("url")
@@ -90,18 +90,19 @@ class Command(BaseCommand):
             return
         domain_key = config.get("_domain_key", "")
         cookie_config = config.get("cookie", {})
-        before = config.get("_user_cookie") or get_shared_cookie(domain_key)[0]
+        before = config.get("_user_cookie") or get_shared_cookie(hostname=domain_key, scope=opts["section"])[0]
         after = before
         if cookie_config:
             after = verify_and_refresh(
-                cookie_config,
-                opts["url"],
-                domain_key,
-                {"url": opts["url"], "status": 0, "title": "", "body_preview": ""},
+                cookie_config=cookie_config,
+                url=opts["url"],
+                domain_key=domain_key,
+                verify_context={"url": opts["url"], "status": 0, "title": "", "body_preview": ""},
+                scope=opts["section"],
             )
         self.stdout.write(json.dumps({
             "domain": domain_key,
-            "has_cookie": bool(config.get("_user_cookie") or get_shared_cookie(domain_key)[0]),
+            "has_cookie": bool(config.get("_user_cookie") or get_shared_cookie(hostname=domain_key, scope=opts["section"])[0]),
             "refreshed": bool(after and after != before),
         }, indent=2, ensure_ascii=False))
 

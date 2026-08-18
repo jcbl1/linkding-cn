@@ -61,7 +61,7 @@ def _do_load(url: str, username: str) -> dict | None:
 
     storage_state = None
     if username:
-        storage_state = _get_storage_state(username, url)
+        storage_state = _get_storage_state(username=username, url=url)
 
     browser = None
     try:
@@ -102,10 +102,10 @@ def _do_load(url: str, username: str) -> dict | None:
                 pass
 
 
-def _get_storage_state(username: str, url: str) -> dict | None:
+def _get_storage_state(*, username: str, url: str, scope: str = '') -> dict | None:
     """尝试获取用户的 Playwright storage state。
 
-    优先使用用户凭据，回退到共享凭据。
+    优先使用用户凭据，回退到共享凭据（在同一 scope 内）。
     """
     from urllib.parse import urlparse
 
@@ -114,7 +114,7 @@ def _get_storage_state(username: str, url: str) -> dict | None:
 
     domain = urlparse(url).netloc
 
-    cookie_str, status = get_best_cookie(username, domain)
+    cookie_str, status = get_best_cookie(username=username, hostname=domain, scope=scope)
     if not cookie_str or status != 'ok':
         return None
 

@@ -491,14 +491,30 @@ def build_domain_files() -> list[dict]:
         for domain_key, domain_config in domains.items():
             is_alias = isinstance(domain_config, dict) and domain_config.get('type') == 'alias'
             target = domain_config.get('target', '') if is_alias else ''
-            shared, _ = get_shared_cookie(domain_key)
-            has_cookie = bool(shared)
-            requires_cookie = (
-                not is_alias
-                and isinstance(domain_config, dict)
-                and (bool(domain_config.get('auth', {}).get('cookie'))
-                     or bool(domain_config.get('cookie')))
-            )
+            # Check for cookies across all scopes (domain + section-level)
+            has_cookie = False
+            shared_domain, _ = get_shared_cookie(hostname=domain_key)
+            if shared_domain:
+                has_cookie = True
+            if not has_cookie:
+                for sec in ('metadata', 'snapshot', 'reader'):
+                    shared_sec, _ = get_shared_cookie(hostname=domain_key, scope=sec)
+                    if shared_sec:
+                        has_cookie = True
+                        break
+            # Determine which sections need cookies
+            section_cookie_needs = {}
+            if not is_alias and isinstance(domain_config, dict):
+                domain_auth = domain_config.get('auth', {})
+                if isinstance(domain_auth, dict) and domain_auth.get('cookie'):
+                    section_cookie_needs[''] = True
+                for sec in ('metadata', 'snapshot', 'reader'):
+                    sec_data = domain_config.get(sec, {})
+                    if isinstance(sec_data, dict):
+                        sec_auth = sec_data.get('auth', {})
+                        if isinstance(sec_auth, dict) and sec_auth.get('cookie'):
+                            section_cookie_needs[sec] = True
+            requires_cookie = bool(section_cookie_needs)
             disabled = domain_key in disabled_domains
 
             if domain_key in seen_domains:
@@ -509,6 +525,7 @@ def build_domain_files() -> list[dict]:
                     'target': target,
                     'has_cookie': has_cookie,
                     'requires_cookie': requires_cookie,
+                    'section_cookie_needs': section_cookie_needs,
                     'disabled': disabled,
                     'shadowed': True,
                     'shadowed_by': seen_domains[domain_key],
@@ -524,6 +541,7 @@ def build_domain_files() -> list[dict]:
                 'target': target,
                 'has_cookie': has_cookie,
                 'requires_cookie': requires_cookie,
+                'section_cookie_needs': section_cookie_needs,
                 'disabled': disabled,
                 'shadowed': False,
                 'shadowed_by': '',

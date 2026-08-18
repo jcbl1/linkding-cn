@@ -208,6 +208,7 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
     - section-specific fields
     - _request_url, _rewrite_url: resolved URLs
     - _domain_key, _raw: metadata
+    - _scope: effective scope for this section's auth sub-types
     """
     default = full_config.get('defaults', {})
     section_data = full_config.get(section, {})
@@ -227,77 +228,128 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
     # HTTP headers (all keys in http sub-object are headers)
     headers = {k: v for k, v in merged_http.items() if v is not None}
 
-    # Auth: top.auth + defaults.auth + section.auth merged
+    # --- Auth: front-door check for auth: null ---
+    section_auth_raw = section_data.get('auth') if isinstance(section_data, dict) else None
+    auth_disabled = (section_auth_raw is None and
+                     isinstance(section_data, dict) and 'auth' in section_data)
+
+    # Effective cookie scope: '' for domain-level, section name for section-level
+    effective_cookie_scope = ''
+
+    # Domain-level auth baseline
     top_auth = full_config.get('auth', {})
     default_auth = default.get('auth', {})
-    section_auth = section_data.get('auth', {})
-    merged_auth = _merge_auth(top_auth, default_auth, section_auth)
 
-    # Domain key (used for cookie file path derivation)
-    domain_key = full_config.get('_domain_key', '')
-    # Hostname from the original URL (used for credential lookups with DNS fallback)
-    from urllib.parse import urlparse
-    hostname = urlparse(full_config.get('_url', '')).hostname or domain_key
+    if auth_disabled:
+        # auth: null → skip all auth for this section
+        merged_auth = {}
+        cookie_config = {}
+        user_cookie_str = None
+    else:
+        # Normal merge: top.auth + defaults.auth + section.auth
+        section_auth_val = section_auth_raw if isinstance(section_auth_raw, dict) else {}
+        merged_auth = _merge_auth(top_auth, default_auth, section_auth_val)
 
-    # Cookie config from auth (deep-merge with defaults)
-    cookie_config = {}
-    merged_cookie = merged_auth.get('cookie', {})
-    if merged_cookie and merged_cookie.get('enabled', True):
-        cookie_config = merge_cookie(dict(COOKIE_DEFAULTS), dict(merged_cookie))
+        # Determine which sub-types are section-level (defined in section.auth)
+        section_has_cookie = isinstance(section_auth_raw, dict) and 'cookie' in section_auth_raw
+        section_has_headers = isinstance(section_auth_raw, dict) and 'headers' in section_auth_raw
+        section_has_oauth2 = isinstance(section_auth_raw, dict) and 'oauth2' in section_auth_raw
+        section_has_basic = isinstance(section_auth_raw, dict) and 'basic_auth' in section_auth_raw
 
-    # cookie and http Cookie header cannot coexist
-    if cookie_config and 'Cookie' in headers:
-        logger.warning("%s: auth.cookie and Cookie header coexist, Cookie header ignored", section)
-        headers.pop('Cookie', None)
+        # Domain key (used for cookie file path derivation)
+        domain_key = full_config.get('_domain_key', '')
+        # Hostname from the original URL (used for credential lookups with DNS fallback)
+        from urllib.parse import urlparse
+        hostname = urlparse(full_config.get('_url', '')).hostname or domain_key
 
-    # Best cookie: user credential first, shared fallback
-    user_cookie_str = None
-    if cookie_config:
-        user_cookie_str, _ = get_best_cookie(username, hostname)
+        # Cookie config from auth (deep-merge with defaults)
+        cookie_config = {}
+        merged_cookie = merged_auth.get('cookie', {})
+        if merged_cookie and merged_cookie.get('enabled', True):
+            cookie_config = merge_cookie(dict(COOKIE_DEFAULTS), dict(merged_cookie))
 
-    # Headers: config default → shared credential → user credential
-    if merged_auth.get('headers'):
-        merged_headers = merged_auth['headers']
-        for header_name, default_val in merged_headers.items():
-            if not isinstance(default_val, str):
-                default_val = ''
-            # Priority: user cred > shared cred > config default
-            best_val = None
+        # cookie and http Cookie header cannot coexist
+        if cookie_config and 'Cookie' in headers:
+            logger.warning("%s: auth.cookie and Cookie header coexist, Cookie header ignored", section)
+            headers.pop('Cookie', None)
+
+        # --- Cookie: scope-aware lookup ---
+        user_cookie_str = None
+        if cookie_config:
+            effective_cookie_scope = section if section_has_cookie else ''
+            user_cookie_str, _ = get_best_cookie(
+                username=username, hostname=hostname, scope=effective_cookie_scope)
+
+            # Cross-scope fallback: if section-level and no cookie found,
+            # fall back to domain-level only when cookie types match.
+            if not user_cookie_str and section_has_cookie:
+                domain_cookie_type = ''
+                domain_cookie_cfg = _merge_auth(top_auth, default_auth).get('cookie', {})
+                if domain_cookie_cfg and domain_cookie_cfg.get('enabled', True):
+                    domain_cookie_type = domain_cookie_cfg.get('type', 'auto')
+                section_cookie_type = cookie_config.get('type', 'auto')
+                if domain_cookie_type and domain_cookie_type == section_cookie_type:
+                    user_cookie_str, _ = get_best_cookie(
+                        username=username, hostname=hostname, scope='')
+
+        # --- Headers: sequential merge ---
+        # 1. Config default values (lowest priority)
+        # 2. Within effective scope: user > shared
+        # 3. If section-level, supplement with domain-level for keys not yet covered
+        if merged_auth.get('headers'):
+            merged_headers = merged_auth['headers']
+            effective_header_scope = section if section_has_headers else ''
+
+            for header_name, default_val in merged_headers.items():
+                if not isinstance(default_val, str):
+                    default_val = ''
+                # Look up in effective scope first
+                best_val, _ = get_best_header(
+                    username=username, hostname=hostname,
+                    header_name=header_name, scope=effective_header_scope)
+                # If section-level and not found, fall back to domain-level
+                if not best_val and section_has_headers:
+                    best_val, _ = get_best_header(
+                        username=username, hostname=hostname,
+                        header_name=header_name, scope='')
+                # If still not found, use config default
+                if not best_val and default_val:
+                    best_val = default_val
+                if best_val:
+                    headers[header_name] = best_val
+
+        # --- OAuth2: no cross-scope fallback ---
+        merged_oauth2 = merged_auth.get('oauth2', {})
+        if merged_oauth2.get('enabled', True) and merged_oauth2.get('endpoint'):
+            effective_oauth2_scope = section if section_has_oauth2 else ''
             if username:
-                user_val, _ = get_best_header(username, hostname, header_name)
-                if user_val:
-                    best_val = user_val
-            if not best_val and default_val:
-                best_val = default_val
-            if best_val:
-                headers[header_name] = best_val
-
-    # OAuth2: auto-inject access_token (user first, shared fallback)
-    merged_oauth2 = merged_auth.get('oauth2', {})
-    if merged_oauth2.get('enabled', True) and merged_oauth2.get('endpoint'):
-        if username:
-            access_token = get_valid_token(merged_oauth2, username, hostname)
-            if access_token:
-                oauth2_headers = get_token_header(merged_oauth2, access_token)
-                headers.update(oauth2_headers)
-        else:
-            best_rt, _ = get_best_token(username, hostname)
-            if best_rt:
-                token_result = _refresh_token(merged_oauth2, best_rt)
-                if token_result:
-                    oauth2_headers = get_token_header(merged_oauth2, token_result['access_token'])
+                access_token = get_valid_token(merged_oauth2, username, hostname,
+                                                scope=effective_oauth2_scope)
+                if access_token:
+                    oauth2_headers = get_token_header(merged_oauth2, access_token)
                     headers.update(oauth2_headers)
+            else:
+                best_rt, _ = get_best_token(username=username, hostname=hostname,
+                                            scope=effective_oauth2_scope)
+                if best_rt:
+                    token_result = _refresh_token(merged_oauth2, best_rt)
+                    if token_result:
+                        oauth2_headers = get_token_header(merged_oauth2, token_result['access_token'])
+                        headers.update(oauth2_headers)
 
+        # --- Basic Auth: no cross-scope fallback ---
+        merged_basic = merged_auth.get('basic_auth', {})
+        if isinstance(merged_basic, dict) and merged_basic.get('enabled', True) and merged_basic:
+            effective_basic_scope = section if section_has_basic else ''
+            best_ba, _ = get_best_basic_auth(username=username, hostname=hostname,
+                                             scope=effective_basic_scope)
+            if best_ba:
+                import base64
+                credentials = f"{best_ba['username']}:{best_ba['password']}"
+                encoded = base64.b64encode(credentials.encode()).decode()
+                headers['Authorization'] = f'Basic {encoded}'
 
-    # Basic Auth: user credential first, shared fallback
-    merged_basic = merged_auth.get('basic_auth', {})
-    if isinstance(merged_basic, dict) and merged_basic.get('enabled', True) and merged_basic:
-        best_ba, _ = get_best_basic_auth(username, hostname)
-        if best_ba:
-            import base64
-            credentials = f"{best_ba['username']}:{best_ba['password']}"
-            encoded = base64.b64encode(credentials.encode()).decode()
-            headers['Authorization'] = f'Basic {encoded}'
+    # --- Build result ---
     result = {
         'headers': headers,
         'timeout': timeout,
@@ -305,6 +357,8 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
         'auth': merged_auth,
         'cookie': cookie_config,
         '_user_cookie': user_cookie_str,
+        '_scope': section,
+        '_effective_cookie_scope': effective_cookie_scope,
         'request_url': merged.get('request_url'),
     }
     if section == 'metadata':

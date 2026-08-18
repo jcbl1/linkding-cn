@@ -192,10 +192,11 @@ def _verify_snapshot_cookie(url: str, filepath: str, config: dict) -> bool:
     domain_key = config.get("_domain_key")
     before = _cookie_string_from_config(config)
     after = verify_and_refresh(
-        cookie_config,
-        config.get("_request_url", url),
-        domain_key,
-        {"url": config.get("_request_url", url), "html_path": filepath},
+        cookie_config=cookie_config,
+        url=config.get("_request_url", url),
+        domain_key=domain_key,
+        verify_context={"url": config.get("_request_url", url), "html_path": filepath},
+        scope=config.get('_effective_cookie_scope', ''),
     )
     if after and after != before:
         # 刷新成功后更新 _user_cookie 为新的 cookie 字符串
@@ -211,8 +212,9 @@ def _cookie_string_from_config(config: dict = None) -> str | None:
     if user_cookie:
         return user_cookie
     domain_key = config.get("_domain_key")
+    scope = config.get("_effective_cookie_scope", "")
     if domain_key:
-        shared, _ = get_shared_cookie(domain_key)
+        shared, _ = get_shared_cookie(hostname=domain_key, scope=scope)
         if shared:
             return shared
     return config.get("headers", {}).get("Cookie")
@@ -233,16 +235,17 @@ def create_snapshot(
         if cookie_config and cookie_config.get("type") == "auto":
             has_cookie = bool(
                 config.get("_user_cookie") or
-                (get_shared_cookie(config.get("_domain_key", ""))[0] if config.get("_domain_key") else None)
+                (get_shared_cookie(hostname=config.get("_domain_key", ""), scope=config.get("_effective_cookie_scope", ""))[0] if config.get("_domain_key") else None)
             )
             if not has_cookie and cookie_config.get("refresh"):
                 domain_key = config.get("_domain_key")
                 logger.info("No cookie for auto site %s, acquiring via browser refresh", domain_key)
                 new_cookie = verify_and_refresh(
-                    cookie_config,
-                    config.get("_request_url", url),
-                    domain_key,
-                    {"url": config.get("_request_url", url), "title": "", "body_preview": ""},
+                    cookie_config=cookie_config,
+                    url=config.get("_request_url", url),
+                    domain_key=domain_key,
+                    verify_context={"url": config.get("_request_url", url), "title": "", "body_preview": ""},
+                    scope=config.get('_effective_cookie_scope', ''),
                 )
                 if new_cookie:
                     config["_user_cookie"] = new_cookie

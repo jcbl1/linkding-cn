@@ -186,12 +186,13 @@ def _snapshot_credential_state(config: dict, username: str, hostname: str) -> di
 
     state = {}
     auth_req = get_auth_requirements_for_domain(hostname)
+    scope = config.get('_effective_cookie_scope', '') if config else ''
 
     # Cookie
     if auth_req.get('cookie'):
-        best, _ = get_best_cookie(username, hostname)
-        user_val, _ = get_user_cookie(username, hostname) if username else (None, '')
-        shared_val, _ = get_shared_cookie(hostname)
+        best, _ = get_best_cookie(username=username, hostname=hostname, scope=scope)
+        user_val, _ = get_user_cookie(username=username, hostname=hostname, scope=scope) if username else (None, '')
+        shared_val, _ = get_shared_cookie(hostname=hostname, scope=scope)
         http_val = (config.get('headers', {}) or {}).get('Cookie') if config else None
         source = 'none'
         if user_val:
@@ -207,9 +208,9 @@ def _snapshot_credential_state(config: dict, username: str, hostname: str) -> di
     if header_names:
         header_state = {}
         for h in header_names:
-            best, _ = get_best_header(username, hostname, h)
-            user_h, _ = get_user_header(username, hostname, h) if username else (None, '')
-            shared_h, _ = get_shared_header(hostname, h)
+            best, _ = get_best_header(username=username, hostname=hostname, header_name=h, scope=scope)
+            user_h, _ = get_user_header(username=username, hostname=hostname, header_name=h, scope=scope) if username else (None, '')
+            shared_h, _ = get_shared_header(hostname=hostname, header_name=h, scope=scope)
             source = 'none'
             if user_h:
                 source = 'user'
@@ -220,9 +221,9 @@ def _snapshot_credential_state(config: dict, username: str, hostname: str) -> di
 
     # Token
     if auth_req.get('oauth2'):
-        best, _ = get_best_token(username, hostname)
-        user_val, _ = get_user_token(username, hostname) if username else (None, '')
-        shared_val, _ = get_shared_token(hostname)
+        best, _ = get_best_token(username=username, hostname=hostname, scope=scope)
+        user_val, _ = get_user_token(username=username, hostname=hostname, scope=scope) if username else (None, '')
+        shared_val, _ = get_shared_token(hostname=hostname, scope=scope)
         source = 'none'
         if user_val:
             source = 'user'
@@ -522,6 +523,7 @@ def _test_credential(url, base_dir, username, entries):
     metadata_config = get_metadata_config(url, username=username) or {}
     domain_key = metadata_config.get('_domain_key', hostname) if metadata_config else hostname
     config = metadata_config
+    test_scope = config.get('_effective_cookie_scope', '') if config else ''
 
     # --- Cookie ---
     cookie_info = None
@@ -529,9 +531,9 @@ def _test_credential(url, base_dir, username, entries):
         cookie_type = auth_req.get('cookie_type', 'auto')
 
         # Before state
-        before_user, _ = get_user_cookie(username, hostname) if username else (None, '')
-        before_shared, _ = get_shared_cookie(hostname)
-        before_best, _ = get_best_cookie(username, hostname)
+        before_user, _ = get_user_cookie(username=username, hostname=hostname, scope=test_scope) if username else (None, '')
+        before_shared, _ = get_shared_cookie(hostname=hostname, scope=test_scope)
+        before_best, _ = get_best_cookie(username=username, hostname=hostname, scope=test_scope)
 
         has_user_before = bool(before_user)
         has_shared_before = bool(before_shared)
@@ -539,15 +541,15 @@ def _test_credential(url, base_dir, username, entries):
         # Refresh
         cookie_config = config.get('cookie', {}) if config else {}
         before = before_best
-        after = verify_and_refresh(cookie_config, url, domain_key,
-                                   {'url': url, 'status': 0, 'title': '', 'body_preview': ''},
-                                   username=username) if cookie_config else None
+        after = verify_and_refresh(cookie_config=cookie_config, url=url, domain_key=domain_key,
+                                   verify_context={'url': url, 'status': 0, 'title': '', 'body_preview': ''},
+                                   username=username, scope=test_scope) if cookie_config else None
         refreshed = bool(after and (not before or after != before))
 
         # After state
-        after_user, _ = get_user_cookie(username, hostname) if username else (None, '')
-        after_shared, _ = get_shared_cookie(hostname)
-        after_best, _ = get_best_cookie(username, hostname)
+        after_user, _ = get_user_cookie(username=username, hostname=hostname, scope=test_scope) if username else (None, '')
+        after_shared, _ = get_shared_cookie(hostname=hostname, scope=test_scope)
+        after_best, _ = get_best_cookie(username=username, hostname=hostname, scope=test_scope)
 
         has_cookie = bool(after_best)
         cookie_preview = after_best[:50] + '...' if after_best and len(after_best) > 50 else (after_best or '')
@@ -585,9 +587,9 @@ def _test_credential(url, base_dir, username, entries):
     if header_names:
         header_list = []
         for h in header_names:
-            best, _ = get_best_header(username, hostname, h)
-            user_h, _ = get_user_header(username, hostname, h) if username else (None, '')
-            shared_h, _ = get_shared_header(hostname, h)
+            best, _ = get_best_header(username=username, hostname=hostname, header_name=h, scope=test_scope)
+            user_h, _ = get_user_header(username=username, hostname=hostname, header_name=h, scope=test_scope) if username else (None, '')
+            shared_h, _ = get_shared_header(hostname=hostname, header_name=h, scope=test_scope)
             source = 'none'
             if user_h:
                 source = 'user'
@@ -614,9 +616,9 @@ def _test_credential(url, base_dir, username, entries):
     # --- Token ---
     token_info = None
     if auth_req.get('oauth2'):
-        best, _ = get_best_token(username, hostname)
-        user_val, _ = get_user_token(username, hostname) if username else (None, '')
-        shared_val, _ = get_shared_token(hostname)
+        best, _ = get_best_token(username=username, hostname=hostname, scope=test_scope)
+        user_val, _ = get_user_token(username=username, hostname=hostname, scope=test_scope) if username else (None, '')
+        shared_val, _ = get_shared_token(hostname=hostname, scope=test_scope)
         source = 'none'
         if user_val:
             source = 'user'
@@ -798,5 +800,5 @@ def save_cookie(request):
         return JsonResponse({'error': 'domain_key required'}, status=400)
     if not is_safe_domain_key(domain_key):
         return JsonResponse({'error': 'invalid domain key'}, status=400)
-    save_shared_cookie(domain_key, cookie_str)
+    save_shared_cookie(domain=domain_key, cookie_str=cookie_str)
     return JsonResponse({'success': True})

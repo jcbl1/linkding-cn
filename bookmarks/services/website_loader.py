@@ -362,9 +362,10 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
                 domain_key = config.get("_domain_key")
                 logger.info("No cookie for auto site %s, acquiring via browser refresh", domain_key)
                 new_cookie = verify_and_refresh(
-                    cookie_config, fetch_url, domain_key,
-                    {"url": fetch_url, "status": 0, "title": "", "body_preview": ""},
+                    cookie_config=cookie_config, url=fetch_url, domain_key=domain_key,
+                    verify_context={"url": fetch_url, "status": 0, "title": "", "body_preview": ""},
                     username=username,
+                    scope=config.get('_effective_cookie_scope', ''),
                 )
                 if new_cookie:
                     config["_user_cookie"] = new_cookie
@@ -429,7 +430,9 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
                 "body_preview": (page_text or "")[:2000],
             }
             before = _cookie_string_from_config(config)
-            after = verify_and_refresh(cookie_config, fetch_url, domain_key, verify_context, username=username)
+            after = verify_and_refresh(cookie_config=cookie_config, url=fetch_url,
+                                       domain_key=domain_key, verify_context=verify_context,
+                                       username=username, scope=config.get('_effective_cookie_scope', ''))
             if after and after != before:
                 retry_config = dict(config)
                 # 刷新成功后更新 _user_cookie 为新的 cookie 字符串
@@ -1173,8 +1176,9 @@ def _cookie_string_from_config(config: dict = None) -> str | None:
         if cookie:
             return cookie
     domain_key = config.get("_domain_key")
+    scope = config.get("_effective_cookie_scope", "")
     if domain_key:
-        shared, _ = get_shared_cookie(domain_key)
+        shared, _ = get_shared_cookie(hostname=domain_key, scope=scope)
         if shared:
             return shared
     cookies_str = config.get("headers", {}).get("Cookie")

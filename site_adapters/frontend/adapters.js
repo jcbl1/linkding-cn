@@ -167,7 +167,7 @@ function initAdapters() {
     var btn = e.target.closest('.js-edit-cred');
     if (!btn) return;
     e.preventDefault();
-    showModal('Edit: ' + btn.dataset.domain, btn.dataset.domain, btn.dataset.type);
+    showModal('Edit: ' + btn.dataset.domain, btn.dataset.domain, btn.dataset.type, btn.dataset.scope || '');
   });
 
   // ===================================================================
@@ -189,6 +189,7 @@ function initAdapters() {
         apiPost(urls.sharedCredDelete, {
           domain: domain,
           type: type,
+          scope: btn.dataset.scope || '',
           header_name: btn.dataset.headerName || ''
         }).then(function(r) {
           if (r.success) {
@@ -209,6 +210,7 @@ function initAdapters() {
         addHidden(f, 'action', 'delete_credential');
         addHidden(f, 'domain', domain);
         addHidden(f, 'type', type);
+        addHidden(f, 'scope', btn.dataset.scope || '');
         if (btn.dataset.headerName) addHidden(f, 'header_name', btn.dataset.headerName);
         document.body.appendChild(f);
         f.requestSubmit();
@@ -251,17 +253,21 @@ function initAdapters() {
 
     var html = '';
     credentials.forEach(function(c) {
+      var scopeLabel = c.scope ? c.scope : 'domain';
       html += '<div class="wa-cred-row">'
         + '<span class="wa-col-domain wa-cred-domain-cell">' + escapeHtml(c.domain) + '</span>'
         + '<span class="wa-col-type wa-cred-type-cell">'
         + '<span class="wa-badge">' + (c.type === 'cookie' ? 'Cookie' : c.type === 'oauth2' ? 'OAuth2' : c.type === 'token' ? 'OAuth2' : c.type === 'basic_auth' ? 'Basic Auth' : 'Header') + '</span>'
         + (c.type === 'header' && c.header_names ? '<span class="wa-cred-header-names">(' + escapeHtml(c.header_names.slice(0, 3).join(', ')) + (c.header_names.length > 3 ? '...' : '') + ')</span>' : '')
         + '</span>'
+        + '<span class="wa-col-scope wa-cred-scope-cell">'
+        + '<span class="wa-badge wa-badge-scope">' + escapeHtml(scopeLabel) + '</span>'
+        + '</span>'
         + '<span class="wa-col-updated wa-cred-updated-cell">' + escapeHtml((c.updated_at || '').slice(0, 10))
         + (c.status !== 'ok' ? ' <span class="wa-badge wa-badge-warn">key changed</span>' : '') + '</span>'
         + '<span class="wa-col-actions">'
-        + '<button type="button" class="btn btn-sm js-edit-cred" data-domain="' + escapeHtml(c.domain) + '" data-type="' + escapeHtml(c.type) + '">' + gettext('Edit') + '</button>'
-        + '<button type="button" class="btn btn-sm btn-error js-delete-cred" data-domain="' + escapeHtml(c.domain) + '" data-type="' + escapeHtml(c.type) + '"'
+        + '<button type="button" class="btn btn-sm js-edit-cred" data-domain="' + escapeHtml(c.domain) + '" data-type="' + escapeHtml(c.type) + '" data-scope="' + escapeHtml(c.scope || '') + '">' + gettext('Edit') + '</button>'
+        + '<button type="button" class="btn btn-sm btn-error js-delete-cred" data-domain="' + escapeHtml(c.domain) + '" data-type="' + escapeHtml(c.type) + '" data-scope="' + escapeHtml(c.scope || '') + '"'
         + (c.type === 'header' && c.header_names && c.header_names[0] ? ' data-header-name="' + escapeHtml(c.header_names[0]) + '"' : '')
         + '>' + gettext('Delete') + '</button>'
         + '</span></div>';
@@ -274,7 +280,7 @@ function initAdapters() {
   // ===================================================================
   function submitCredentialForm(targetDomain, credType, extras) {
     if (credMode === 'shared') {
-      var data = { domain: targetDomain, type: credType };
+      var data = { domain: targetDomain, type: credType, scope: (extras && extras.scope) || '' };
       if (extras) {
         if (extras.value) data.value = extras.value;
         if (extras.header_name) data.header_name = extras.header_name;
@@ -302,6 +308,7 @@ function initAdapters() {
       addHidden(f, 'action', 'save_credential');
       addHidden(f, 'domain', targetDomain);
       addHidden(f, 'type', credType);
+      if (extras && extras.scope) addHidden(f, 'scope', extras.scope);
       if (extras) {
         Object.keys(extras).forEach(function(k) { addHidden(f, k, extras[k]); });
       }
@@ -456,7 +463,7 @@ function initAdapters() {
     modalOpen = false;
   }
 
-  function showModal(title, domain, type) {
+  function showModal(title, domain, type, scope) {
     var host = container.querySelector('.modals');
     if (!host || modalOpen) return;
     modalOpen = true;
@@ -472,7 +479,7 @@ function initAdapters() {
     var existingCred = null;
     if (domain && window.__ld_credentials_data) {
       existingCred = window.__ld_credentials_data.find(function(c) {
-        return c.domain === domain && c.type === type;
+        return c.domain === domain && c.type === type && (c.scope || '') === (scope || '');
       }) || null;
     }
 
@@ -515,6 +522,18 @@ function initAdapters() {
     } else {
       if (domainGroup) domainGroup.hidden = false;
       if (domainHidden) domainHidden.hidden = true;
+    }
+
+    // Set scope selector
+    var scopeSelect = modal.querySelector('#dlg-scope');
+    if (scopeSelect) {
+      scopeSelect.value = scope || '';
+      // In edit mode, scope is read-only
+      if (domain && scope !== undefined) {
+        scopeSelect.disabled = true;
+        var scopeGroup = modal.querySelector('[data-cred-scope-group]');
+        if (scopeGroup) scopeGroup.hidden = false;
+      }
     }
 
     if (existingCred) {
@@ -601,6 +620,50 @@ function initAdapters() {
       window.addEventListener('resize', portalScrollHandler);
     }
 
+    // Domain matching: when user finishes typing a domain, check backend
+    if (!domain) {
+      var dInput2 = modal.querySelector('#dlg-domain');
+      if (dInput2) {
+        dInput2.addEventListener('blur', function() {
+          var val = dInput2.value.trim();
+          if (!val) return;
+          if (urls.matchDomain) {
+            apiGet(urls.matchDomain + '?domain=' + encodeURIComponent(val)).then(function(data) {
+              if (data.matched) {
+                // Switch to configured mode
+                var matchedDomain = data.domain_key;
+                dInput2.value = matchedDomain;
+                if (domainHidden) { domainHidden.hidden = false; domainHidden.value = matchedDomain; }
+                // Update auth requirements display from new section-aware structure
+                var authReq = data.auth_requirements || {};
+                var sections = authReq.sections || {};
+                var domainAuth = authReq.domain || {};
+                // Build domain info from the new structure
+                var inf = {
+                  d: matchedDomain,
+                  c: domainAuth.cookie || false,
+                  ct: domainAuth.cookie_type || '',
+                  h: domainAuth.headers || [],
+                  t: domainAuth.oauth2 || false,
+                  b: domainAuth.basic_auth || false,
+                  cookie_help: domainAuth.cookie_help || '',
+                  headers_help: domainAuth.headers_help || '',
+                  oauth2_help: domainAuth.oauth2_help || '',
+                  basic_help: domainAuth.basic_help || '',
+                  sections: sections
+                };
+                // Update allDomains if not present
+                var existing = allDomains.find(function(a) { return a.d === matchedDomain || a.domain === matchedDomain; });
+                if (!existing) { allDomains.push(inf); existing = inf; }
+                else { Object.assign(existing, inf); }
+                updateTypesForDomain(modal, matchedDomain);
+              }
+            }).catch(function() {});
+          }
+        });
+      }
+    }
+
     // Close
     modal.querySelector('.modal-overlay').addEventListener('click', closeCurrentModal);
     var clr = modal.querySelector('.btn-clear');
@@ -626,16 +689,17 @@ function initAdapters() {
           saveBtn.disabled = false;
           return;
         }
-        submitCredentialForm(d, ct, {value: val});
+        var selScope = (modal.querySelector('#dlg-scope') || {}).value || '';
+        submitCredentialForm(d, ct, {value: val, scope: selScope});
       } else if (ct === 'oauth2') {
         var tv = modal.querySelector('#dlg-oauth2-value').value.trim();
         if (!tv) { toast(gettext('Please enter refresh token'), 'error'); saveBtn.disabled = false; return; }
-        submitCredentialForm(d, ct, {value: tv});
+        submitCredentialForm(d, ct, {value: tv, scope: (modal.querySelector('#dlg-scope') || {}).value || ''});
       } else if (ct === 'basic_auth') {
         var bu = modal.querySelector('#dlg-basic-auth-username').value.trim();
         var bp = modal.querySelector('#dlg-basic-auth-password').value.trim();
         if (!bu || !bp) { toast(gettext('Please enter username and password'), 'error'); saveBtn.disabled = false; return; }
-        submitCredentialForm(d, ct, {username: bu, password: bp});
+        submitCredentialForm(d, ct, {username: bu, password: bp, scope: (modal.querySelector('#dlg-scope') || {}).value || ''});
       } else {
         var rows = modal.querySelectorAll('#dlg-header-rows > .wa-header-row');
         var sub = 0;
@@ -648,7 +712,7 @@ function initAdapters() {
           else { hn = inputs[0].value.trim(); hv = inputs[1].value.trim(); }
           if (!hn || !hv) return;
           sub++;
-          submitCredentialForm(d, ct, {value: hv, header_name: hn});
+          submitCredentialForm(d, ct, {value: hv, header_name: hn, scope: (modal.querySelector('#dlg-scope') || {}).value || ''});
         });
         if (!sub) toast(gettext('Please enter at least one header value'), 'error');
       }

@@ -239,9 +239,21 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     if (d.shadowed) {
       tags.push({ label: gettext('overridden'), cls: 'shadowed', title: gettext('Overridden by') + ' ' + (d.shadowed_by || '') });
     }
-    // Cookie needed
-    if (d.requires_cookie && !d.has_cookie) {
-      tags.push({ label: gettext('cookie needed'), cls: 'warn' });
+    // Cookie needed — show per-section if section_cookie_needs is available
+    var sectionCookieNeeds = d.section_cookie_needs || {};
+    var cookieNeededKeys = Object.keys(sectionCookieNeeds);
+    if (cookieNeededKeys.length > 0 && !d.has_cookie) {
+      if (cookieNeededKeys.length === 1 && cookieNeededKeys[0] === '') {
+        tags.push({ label: gettext('cookie needed'), cls: 'warn' });
+      } else {
+        cookieNeededKeys.forEach(function (sec) {
+          if (sec) {
+            tags.push({ label: sec + ': ' + gettext('cookie needed'), cls: 'warn' });
+          } else {
+            tags.push({ label: gettext('cookie needed'), cls: 'warn' });
+          }
+        });
+      }
     }
     return tags;
   }

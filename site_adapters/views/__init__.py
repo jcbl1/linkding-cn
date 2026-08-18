@@ -16,6 +16,7 @@ Split into submodules by responsibility:
 # Re-export all public view functions for URL routing compatibility.
 from site_adapters.views.adapters import adapters_page
 from site_adapters.views.credentials import (
+    match_domain_config,
     shared_credential_delete,
     shared_credential_list,
     shared_credential_save,

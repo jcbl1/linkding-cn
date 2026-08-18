@@ -132,6 +132,7 @@ urlpatterns = [
     path("admin/site-adapters/view-reader", views.view_reader, name="settings.site_adapters.view_reader"),
     path("settings/adapters", views.adapters_page, name="settings.adapters"),
     path("settings/adapters/credentials/api", views.user_credentials, name="settings.credentials_api"),
+    path("settings/adapters/credentials/match-domain", views.match_domain_config, name="settings.match_domain_config"),
     path("settings/adapters/snapshot_toggles", views.snapshot_toggles, name="settings.snapshot_toggles"),
     # Toasts
     path("toasts/acknowledge", views.toasts.acknowledge, name="toasts.acknowledge"),

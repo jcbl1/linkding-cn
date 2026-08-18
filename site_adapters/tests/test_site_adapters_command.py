@@ -72,7 +72,7 @@ class SiteAdaptersCommandTestCase(TestCase):
 
         def refresh_cookie_declarative(_refresh_config, _url, _domain_key):
             from site_adapters.services.auth.credentials import save_shared_cookie
-            save_shared_cookie("example.com", "session=abc")
+            save_shared_cookie(domain="example.com", cookie_str="session=abc")
             return [{"name": "session", "value": "abc", "domain": ".example.com", "path": "/"}]
 
         out = StringIO()

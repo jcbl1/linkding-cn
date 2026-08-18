@@ -46,7 +46,7 @@ def adapters_page(request):
         bm_domain = request.GET.get('domain', '')
         bm_cookie = request.GET.get('cookie', '')
         if bm_domain and bm_cookie and is_safe_domain_key(bm_domain):
-            save_user_cookie(username, bm_domain, bm_cookie)
+            save_user_cookie(username=username, domain=bm_domain, cookie_str=bm_cookie)
             return redirect(adapters_url)
 
     # ── POST actions ──
@@ -61,21 +61,21 @@ def adapters_page(request):
             if cred_type == 'cookie':
                 cookie_str = request.POST.get('value', '').strip()
                 if cookie_str:
-                    save_user_cookie(username, domain, cookie_str)
+                    save_user_cookie(username=username, domain=domain, cookie_str=cookie_str)
             elif cred_type == 'header':
                 header_name = request.POST.get('header_name', '').strip()
                 header_value = request.POST.get('value', '').strip()
                 if header_name and header_value:
-                    save_user_header(username, domain, header_name, header_value)
+                    save_user_header(username=username, domain=domain, header_name=header_name, value=header_value)
             elif cred_type == 'oauth2':
                 token_value = request.POST.get('value', '').strip()
                 if token_value:
-                    save_user_token(username, domain, token_value)
+                    save_user_token(username=username, domain=domain, refresh_token=token_value)
             elif cred_type == 'basic_auth':
                 username_val = request.POST.get('username', '').strip()
                 password_val = request.POST.get('password', '').strip()
                 if username_val and password_val:
-                    save_user_basic_auth(username, domain, username_val, password_val)
+                    save_user_basic_auth(username=username, domain=domain, username_val=username_val, password_val=password_val)
             return redirect(request.META.get('HTTP_REFERER', adapters_url))
 
         elif action == 'delete_credential':
@@ -83,15 +83,15 @@ def adapters_page(request):
             cred_type = request.POST.get('type', 'cookie')
             if domain and is_safe_domain_key(domain):
                 if cred_type == 'cookie':
-                    delete_user_cookie(username, domain)
+                    delete_user_cookie(username=username, domain=domain)
                 elif cred_type == 'header':
                     header_name = request.POST.get('header_name', '').strip()
                     if header_name:
-                        delete_user_header(username, domain, header_name)
+                        delete_user_header(username=username, domain=domain, header_name=header_name)
                 elif cred_type == 'oauth2':
-                    delete_user_token(username, domain)
+                    delete_user_token(username=username, domain=domain)
                 elif cred_type == 'basic_auth':
-                    delete_user_basic_auth(username, domain)
+                    delete_user_basic_auth(username=username, domain=domain)
             return redirect(request.META.get('HTTP_REFERER', adapters_url))
 
         elif action == 'toggle_pref':
@@ -123,6 +123,7 @@ def adapters_page(request):
         {
             'domain': cr['domain'],
             'type': cr['type'],
+            'scope': cr.get('scope', ''),
             'cookie': cr.get('cookie', ''),
             'token': cr.get('token', ''),
             'oauth2': cr.get('token', ''),
@@ -137,7 +138,7 @@ def adapters_page(request):
     # Domains needing auth (for add credential modal autocomplete)
     domains_needing_auth = _get_domains_needing_auth(base_dir)
     ctx['auth_domains_json'] = json.dumps([
-        {'d': d['domain'], 'c': d['needs_cookie'], 'h': d['needs_headers'], 't': d['needs_oauth2'], 'b': d.get('needs_basic_auth', False), 'ct': d.get('cookie_type', 'anon'), 'help': {'c': d.get('cookie_help', ''), 'h': d.get('headers_help', ''), 't': d.get('oauth2_help', ''), 'b': d.get('basic_help', '')}}
+        {'d': d['domain'], 'c': d['domain_auth'].get('cookie', False), 'h': d['domain_auth'].get('headers', []), 't': d['domain_auth'].get('oauth2', False), 'b': d['domain_auth'].get('basic_auth', False), 'ct': d['domain_auth'].get('cookie_type', 'auto'), 'help': {'c': d['domain_auth'].get('cookie_help', ''), 'h': d['domain_auth'].get('headers_help', ''), 't': d['domain_auth'].get('oauth2_help', ''), 'b': d['domain_auth'].get('basic_help', '')}, 'sections': d.get('sections', {})}
         for d in domains_needing_auth
     ])
 
