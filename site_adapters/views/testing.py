@@ -117,7 +117,8 @@ def _handle_test(request) -> JsonResponse:
 
 def _test_config(url, base_dir, username, entries):
     result = show_config(url, base_dir)
-    return _test_response({'type': 'config', 'result': result}, entries=entries)
+    issues = validate_config(base_dir)
+    return _test_response({'type': 'config', 'result': result, 'issues': issues}, entries=entries)
 
 
 def _make_default_metadata_config():

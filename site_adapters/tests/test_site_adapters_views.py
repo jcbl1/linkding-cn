@@ -179,6 +179,33 @@ class SiteAdaptersViewsTestCase(TestCase):
         result = response.json()["result"]
         self.assertEqual(result["domain_key"], "example.com")
         self.assertEqual(result["merged"]["http"]["timeout"], 1)
+        # Show config response includes structured issues from validator
+        self.assertIn("issues", response.json())
+        self.assertIsInstance(response.json()["issues"], list)
+
+    def test_action_config_reports_duplicate_key(self):
+        """Show config response includes duplicate key warnings."""
+        os.makedirs(os.path.join(self.base_dir, "adapters", "defaults"))
+        with open(os.path.join(self.base_dir, "adapters", "config.jsonc"), "w", encoding="utf-8") as f:
+            json.dump({
+                "_adapters": [{"id": "defaults", "name": "defaults", "source": "./defaults/adapters.jsonc"}]
+            }, f)
+        # Raw text with duplicate domain key
+        with open(os.path.join(self.base_dir, "adapters", "defaults", "adapters.jsonc"), "w", encoding="utf-8") as f:
+            f.write('{"domains": {"example.com": {"metadata": {"select_title": ["h1"]}}, '
+                    '"example.com": {"metadata": {"select_title": ["h2"]}}}}')
+
+        response = self.client.post(
+            reverse("linkding:settings.site_adapters.action"),
+            {"action": "test", "test_type": "config", "url": "https://example.com/post"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        issues = response.json()["issues"]
+        dup_issues = [i for i in issues if i.get("code") == "duplicate_key"]
+        self.assertEqual(len(dup_issues), 1)
+        self.assertEqual(dup_issues[0]["level"], "warning")
+        self.assertIn("example.com", dup_issues[0]["message"])
 
     def test_action_test_returns_json_error_when_test_fails(self):
         os.makedirs(os.path.join(self.base_dir, "domains"))

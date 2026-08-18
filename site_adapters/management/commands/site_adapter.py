@@ -68,8 +68,10 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("site adapters ok"))
             return
         for issue in issues:
-            style = self.style.ERROR if issue.startswith("ERROR") else self.style.WARNING
-            self.stdout.write(style(issue))
+            level = issue['level'] if isinstance(issue, dict) else 'error'
+            style = self.style.ERROR if level == 'error' else self.style.WARNING
+            msg = issue['message'] if isinstance(issue, dict) else str(issue)
+            self.stdout.write(style(msg))
 
     def handle_show_config(self, opts):
         result = show_config(opts["url"], opts["dir"] or settings.LD_SITE_ADAPTERS_DIR)
@@ -161,8 +163,10 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"subscription ok, {len(data.get('domains', {}))} domains"))
             return
         for issue in issues:
-            style = self.style.ERROR if issue.startswith("ERROR") else self.style.WARNING
-            self.stdout.write(style(issue))
+            level = issue['level'] if isinstance(issue, dict) else 'error'
+            style = self.style.ERROR if level == 'error' else self.style.WARNING
+            msg = issue['message'] if isinstance(issue, dict) else str(issue)
+            self.stdout.write(style(msg))
 
     def _load_subscription(self, source: str):
         if os.path.isdir(source):
@@ -226,42 +230,44 @@ class Command(BaseCommand):
         return data, root
 
     def _validate_subscription_data(self, data: dict, root: str):
+        from site_adapters.services.config.validator import _issue
         issues = []
         domains = data.get("domains", {})
         if not isinstance(domains, dict):
-            return ["ERROR: domains must be an object"]
+            return [_issue('error', 'domains_not_object', "domains must be an object")]
         for domain_key, value in domains.items():
             if "/" in domain_key or "\\" in domain_key or ".." in domain_key:
-                issues.append(f"ERROR: invalid domain key: {domain_key}")
+                issues.append(_issue('error', 'invalid_domain_key', f"invalid domain key: {domain_key}", path=domain_key))
                 continue
             if isinstance(value, str):
                 continue
             if not isinstance(value, dict):
-                issues.append(f"ERROR: {domain_key} must be an object")
+                issues.append(_issue('error', 'domain_not_object', f"{domain_key} must be an object", path=domain_key))
                 continue
             if value.get("type") == "alias":
                 if not value.get("target"):
-                    issues.append(f"ERROR: {domain_key} alias missing target")
+                    issues.append(_issue('error', 'alias_missing_target', f"{domain_key} alias missing target", path=domain_key))
                 continue
             for section in ("metadata", "snapshot", "reader"):
                 sec = value.get(section, {})
                 if not sec:
                     continue
                 if not isinstance(sec, dict):
-                    issues.append(f"ERROR: {domain_key}.{section} must be an object")
+                    issues.append(_issue('error', 'section_not_object', f"{domain_key}.{section} must be an object", path=f"{domain_key}.{section}"))
                     continue
                 for field, field_value in sec.items():
                     if classify_field(section, field) == "unknown":
-                        issues.append(f"WARN: {domain_key}.{section}.{field} is unknown")
+                        issues.append(_issue('warning', 'unknown_field', f"{domain_key}.{section}.{field} is unknown", path=f"{domain_key}.{section}.{field}"))
                     if field == "script" or field.endswith("_script"):
                         self._check_subscription_script(issues, root, domain_key, section, field, field_value)
         return issues
 
     def _check_subscription_script(self, issues, root, domain_key, section, field, value):
+        from site_adapters.services.config.validator import _issue
         if not value:
             return
         if not isinstance(value, str):
-            issues.append(f"ERROR: {domain_key}.{section}.{field} must be a string path or URL")
+            issues.append(_issue('error', 'script_field_not_string', f"{domain_key}.{section}.{field} must be a string path or URL", path=f"{domain_key}.{section}.{field}"))
             return
         # URL 引用：只检查格式
         if value.startswith("http://") or value.startswith("https://"):
@@ -272,7 +278,7 @@ class Command(BaseCommand):
         else:
             script_path = os.path.normpath(os.path.join(root, "scripts", value))
         if not os.path.exists(script_path):
-            issues.append(f"WARN: {domain_key}.{section}.{field} script not found locally: {value}")
+            issues.append(_issue('warning', 'script_path_not_found', f"{domain_key}.{section}.{field} script not found locally: {value}", path=f"{domain_key}.{section}.{field}"))
 
 
     def handle_from_userscript(self, opts):

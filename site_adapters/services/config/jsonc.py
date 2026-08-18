@@ -60,6 +60,31 @@ def parse(text: str) -> Any:
     return json.loads(cleaned)
 
 
+def parse_with_dups(text: str, file_label: str = "") -> tuple[Any, list[dict]]:
+    """Parse JSONC, returning (data, warnings).
+
+    Same behavior as parse(), but also detects duplicate keys at any
+    nesting depth via object_pairs_hook.  Returns a list of warnings,
+    each {'key': str, 'count': int, 'file': str}.
+    """
+    cleaned = _strip_trailing_commas(_strip_comments(text))
+    warnings: list[dict] = []
+
+    def hook(pairs):
+        result = {}
+        dup_counts: dict[str, int] = {}
+        for k, v in pairs:
+            if k in result:
+                dup_counts[k] = dup_counts.get(k, 1) + 1
+            result[k] = v  # last-wins, same as default json.loads
+        for k, count in dup_counts.items():
+            warnings.append({'key': k, 'count': count, 'file': file_label})
+        return result
+
+    data = json.loads(cleaned, object_pairs_hook=hook)
+    return data, warnings
+
+
 # ---------------------------------------------------------------------------
 # String/token scanning helpers (for comment-preserving editing)
 # ---------------------------------------------------------------------------

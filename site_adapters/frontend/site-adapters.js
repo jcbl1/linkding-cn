@@ -1120,6 +1120,35 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     return h;
   }
 
+  function renderIssues(issues) {
+    if (!issues || !issues.length) return '';
+    var errors = issues.filter(function(i) { return i.level === 'error'; });
+    var warnings = issues.filter(function(i) { return i.level === 'warning'; });
+    var infos = issues.filter(function(i) { return i.level === 'info'; });
+    var h = '';
+    function renderGroup(items, cls) {
+      if (!items.length) return '';
+      var g = '<div class="wa-issues-group ' + cls + '">';
+      items.forEach(function(i) { g += renderIssueItem(i); });
+      g += '</div>';
+      return g;
+    }
+    h += renderGroup(errors, 'wa-issues-errors');
+    h += renderGroup(warnings, 'wa-issues-warnings');
+    h += renderGroup(infos, 'wa-issues-infos');
+    return h;
+  }
+
+  function renderIssueItem(i) {
+    var h = '<div class="wa-issue-item">';
+    h += '<span class="wa-issue-code">' + esc(i.code) + '</span>';
+    if (i.path) h += ' <code class="wa-issue-path">' + esc(i.path) + '</code>';
+    h += '<span class="wa-issue-message">' + esc(i.message) + '</span>';
+    if (i.adapter) h += ' <span class="wa-issue-adapter">(' + esc(i.adapter) + ')</span>';
+    h += '</div>';
+    return h;
+  }
+
   function renderConfigResult(r) {
     var result = r.result || {};
     var h = '<div class="wa-result-section">';
@@ -1142,6 +1171,12 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       h += '<div class="wa-result-block">';
       h += '<h3 class="wa-result-heading">' + gettext('Merged Config') + '</h3>';
       h += renderConfigJSON(result.merged);
+      h += '</div>';
+    }
+    if (r.issues && r.issues.length) {
+      h += '<div class="wa-result-block">';
+      h += '<h3 class="wa-result-heading">' + gettext('Issues') + '</h3>';
+      h += renderIssues(r.issues);
       h += '</div>';
     }
     if (r.executions && r.executions.length) {

@@ -95,17 +95,17 @@ METADATA_FIELDS = {
         "example": {"atom": "http://www.w3.org/2005/Atom"},
     },
     "select_title": {
-        "type": "array<str>",
+        "type": "str|array<str>",
         "en": "Selectors for the title, tried in order. HTML uses standard CSS; XML uses standard XPath; JSON uses standard JSONPath.",
         "zh": "标题选择器，按顺序尝试，取第一个非空结果。HTML 使用标准 CSS；XML 使用标准 XPath；JSON 使用标准 JSONPath。",
     },
     "select_description": {
-        "type": "array<str>",
+        "type": "str|array<str>",
         "en": "Selectors for the description, tried in order. HTML uses standard CSS; XML uses standard XPath; JSON uses standard JSONPath.",
         "zh": "描述选择器，按顺序尝试。HTML 使用标准 CSS；XML 使用标准 XPath；JSON 使用标准 JSONPath。",
     },
     "select_image": {
-        "type": "array<str>",
+        "type": "str|array<str>",
         "en": "Selectors for the preview image, tried in order. HTML uses standard CSS; XML uses standard XPath; JSON uses standard JSONPath.",
         "zh": "预览图选择器，按顺序尝试。HTML 使用标准 CSS；XML 使用标准 XPath；JSON 使用标准 JSONPath。",
     },
@@ -192,12 +192,12 @@ SNAPSHOT_FIELDS = {
         "example": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"],
     },
     "keep_elements": {
-        "type": "array<str>",
+        "type": "str|array<str>",
         "en": "CSS selectors of elements to KEEP in the snapshot. Everything else is removed.",
         "zh": "快照中保留的元素。其余全部移除。",
     },
     "remove_elements": {
-        "type": "array<str>",
+        "type": "str|array<str>",
         "en": "CSS selectors of elements to REMOVE from the snapshot.",
         "zh": "快照中移除的元素。",
     },
@@ -208,7 +208,7 @@ SNAPSHOT_FIELDS = {
         "example": True,
     },
     "process_carousels": {
-        "type": "array<str>",
+        "type": "str|array<str>",
         "en": "CSS selectors of carousel containers to replace with a horizontal media list. Carousel conversion is opt-in.",
         "zh": "需要转换为横向媒体列表的轮播容器 CSS 选择器。轮播转换默认关闭。",
         "example": ["faceplate-carousel"],

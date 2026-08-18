@@ -2005,3 +2005,61 @@
   border-radius: 4px;
   white-space: nowrap;
 }
+
+/* Issues block */
+.wa-issues-group {
+  border-left: 3px solid var(--wa-border);
+  margin: 0;
+}
+
+.wa-issues-errors {
+  border-left-color: #dc2626;
+}
+
+.wa-issues-warnings {
+  border-left-color: #f59e0b;
+}
+
+.wa-issues-infos {
+  border-left-color: var(--wa-accent, #6366f1);
+}
+
+.wa-issue-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  border-bottom: 1px solid var(--wa-border);
+}
+
+.wa-issue-item:last-child {
+  border-bottom: none;
+}
+
+.wa-issue-code {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--wa-muted);
+  flex-shrink: 0;
+}
+
+.wa-issue-path {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-color);
+  flex-shrink: 0;
+}
+
+.wa-issue-message {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.wa-issue-adapter {
+  font-size: 11px;
+  color: var(--wa-muted);
+  flex-shrink: 0;
+}

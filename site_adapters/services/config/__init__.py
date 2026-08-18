@@ -26,6 +26,17 @@ def load_jsonc_file(path: str):
         return parse_jsonc(f.read())
 
 
+def load_jsonc_file_with_warnings(path: str, file_label: str | None = None) -> tuple:
+    """Load a JSONC file, returning (data, warnings).
+
+    warnings: list of {'key': str, 'count': int, 'file': str} for duplicate keys.
+    """
+    from site_adapters.services.config.jsonc import parse_with_dups
+    label = file_label or path
+    with open(path, encoding='utf-8') as f:
+        return parse_with_dups(f.read(), file_label=label)
+
+
 # ---------------------------------------------------------------------------
 # 深合并（null 值表示移除字段）
 # ---------------------------------------------------------------------------

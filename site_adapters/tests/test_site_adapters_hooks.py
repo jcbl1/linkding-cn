@@ -20,6 +20,7 @@ from django.test import TestCase, override_settings
 from bookmarks.services import singlefile
 from site_adapters.services.config.loader import _cache
 from site_adapters.services.config.validator import validate_config
+from site_adapters.services.config.jsonc import parse_with_dups
 from site_adapters.services.engine.script_runner import run_script
 
 
@@ -151,7 +152,7 @@ class ScriptsValidationTestCase(TestCase):
         })
 
         issues = validate_config(self.base_dir)
-        errors = [i for i in issues if "hook must be before/after/replace" in i]
+        errors = [i for i in issues if "hook must be before/after/replace" in i.get("message", "")]
         self.assertGreater(len(errors), 0,
                           f"Expected hook validation error, got: {issues}")
 
@@ -173,7 +174,7 @@ class ScriptsValidationTestCase(TestCase):
         })
 
         issues = validate_config(self.base_dir)
-        errors = [i for i in issues if "has 2 replace hooks" in i]
+        errors = [i for i in issues if "has 2 replace hooks" in i.get("message", "")]
         self.assertGreater(len(errors), 0,
                           f"Expected replace count error, got: {issues}")
 
@@ -184,7 +185,7 @@ class ScriptsValidationTestCase(TestCase):
         })
 
         issues = validate_config(self.base_dir)
-        errors = [i for i in issues if "not found" in i]
+        errors = [i for i in issues if "not found" in i.get("message", "")]
         self.assertGreater(len(errors), 0,
                           f"Expected 'not found' error, got: {issues}")
 
@@ -194,19 +195,20 @@ class ScriptsValidationTestCase(TestCase):
                           "source": "./defaults/adapters.jsonc"}]
         })
         self._write("adapters/config.jsonc", config_data)
+        # process_carousels accepts a string or array of strings; use an invalid type
         self._write(
             "adapters/defaults/adapters.jsonc",
             json.dumps({
                 "domains": {
                     "example.com": {
-                        "snapshot": {"process_carousels": "faceplate-carousel"}
+                        "snapshot": {"process_carousels": 123}
                     }
                 }
             }),
         )
 
         issues = validate_config(self.base_dir)
-        errors = [i for i in issues if "process_carousels must be an array" in i]
+        errors = [i for i in issues if "process_carousels must be" in i.get("message", "")]
         self.assertGreater(len(errors), 0,
                           f"Expected process_carousels error, got: {issues}")
 
@@ -217,7 +219,7 @@ class ScriptsValidationTestCase(TestCase):
         })
 
         issues = validate_config(self.base_dir)
-        errors = [i for i in issues if "content_type must be html/xml/json" in i]
+        errors = [i for i in issues if "content_type" in i.get("message", "") and i.get("code") == "type_mismatch"]
         self.assertGreater(
             len(errors), 0,
             f"Expected content_type validation error, got: {issues}",
@@ -241,7 +243,7 @@ class ScriptsValidationTestCase(TestCase):
         )
 
         issues = validate_config(self.base_dir)
-        errors = [i for i in issues if "snapshot.content_type must be html/xml/json" in i]
+        errors = [i for i in issues if "content_type" in i.get("message", "") and i.get("code") == "type_mismatch"]
         self.assertGreater(
             len(errors), 0,
             f"Expected snapshot content_type validation error, got: {issues}",
@@ -254,11 +256,49 @@ class ScriptsValidationTestCase(TestCase):
         })
 
         issues = validate_config(self.base_dir)
-        errors = [i for i in issues if "metadata.xmlns must be a string-to-string prefix map" in i]
+        errors = [i for i in issues if "metadata.xmlns must be a string-to-string prefix map" in i.get("message", "")]
         self.assertGreater(
             len(errors), 0,
             f"Expected xmlns validation error, got: {issues}",
         )
+
+    def test_parse_with_dups_detects_duplicate_keys(self):
+        """parse_with_dups detects duplicate keys at any nesting depth."""
+        text = '{"a": 1, "a": 2, "b": {"c": 3, "c": 4}}'
+        data, warnings = parse_with_dups(text, "test.jsonc")
+        # last-wins semantics preserved
+        self.assertEqual(data, {"a": 2, "b": {"c": 4}})
+        # both duplicate keys detected
+        keys = {w["key"] for w in warnings}
+        self.assertEqual(keys, {"a", "c"})
+        for w in warnings:
+            self.assertEqual(w["count"], 2)
+            self.assertEqual(w["file"], "test.jsonc")
+
+    def test_parse_with_dups_no_warnings_for_clean_json(self):
+        text = '{"a": 1, "b": {"c": 2}}'
+        data, warnings = parse_with_dups(text)
+        self.assertEqual(len(warnings), 0)
+
+    def test_validate_config_detects_duplicate_domain_key(self):
+        """validate_config reports duplicate domain keys as structured issues."""
+        config_data = json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults",
+                          "source": "./defaults/adapters.jsonc"}]
+        })
+        self._write("adapters/config.jsonc", config_data)
+        self._write(
+            "adapters/defaults/adapters.jsonc",
+            '{"domains": {"example.com": {"metadata": {"select_title": ["h1"]}}, '
+            '"example.com": {"metadata": {"select_title": ["h2"]}}}}',
+        )
+
+        issues = validate_config(self.base_dir)
+        dup_issues = [i for i in issues if i.get("code") == "duplicate_key"]
+        self.assertEqual(len(dup_issues), 1)
+        self.assertEqual(dup_issues[0]["level"], "warning")
+        self.assertEqual(dup_issues[0]["path"], "example.com")
+        self.assertIn("defaults", dup_issues[0]["adapter"])
 
 
 class MetadataHookDispatchTestCase(TestCase):
