@@ -174,6 +174,34 @@ def _resolve_shared_credential_domain(hostname: str) -> str | None:
     )
 
 
+def _get_cookie_expired_meta(*, cred_source: str, domain: str, scope: str = '') -> dict:
+    """Read cookie expiry metadata from encryption.meta.
+
+    cred_source: 'shared' or the username.
+    Returns the meta entry dict (may be empty).
+    """
+    meta = _load_meta()
+    key = _meta_key(cred_type='cookies', username=cred_source, domain=domain, scope=scope)
+    return meta['credentials'].get(key, {})
+
+
+def _mark_cookie_expired(*, cred_source: str, domain: str, scope: str = ''):
+    """Mark a cookie as expired (invalid) in metadata."""
+    _update_meta_entry(cred_type='cookies', username=cred_source, domain=domain,
+                       scope=scope, cookie_status='invalid', expired_at=_now_iso())
+
+
+def _clear_cookie_expired(*, cred_source: str, domain: str, scope: str = ''):
+    """Clear cookie expiry metadata (e.g. after user re-saves cookie)."""
+    meta = _load_meta()
+    key = _meta_key(cred_type='cookies', username=cred_source, domain=domain, scope=scope)
+    entry = meta['credentials'].get(key, {})
+    entry.pop('cookie_status', None)
+    entry.pop('expired_at', None)
+    meta['credentials'][key] = entry
+    _save_meta(meta)
+
+
 def _resolve_credential_path(*, username: str, hostname: str, filename: str) -> str:
     """Build a credential file path with domain matching for reads."""
     matched = _resolve_credential_domain(username, hostname)
@@ -286,13 +314,19 @@ def get_user_cookie(*, username: str, hostname: str, scope: str = '') -> tuple[s
     Uses DNS multi-level fallback: "www.zhihu.com" -> "zhihu.com".
 
     Returns (cookie_string | None, status).
-    Status: 'ok' | 'key_changed' | 'not_found' | 'error'
+    Status: 'ok' | 'key_changed' | 'not_found' | 'error' | 'invalid'
     """
     filename = _scoped_filename(cred_type='cookie', scope=scope)
     path = _resolve_credential_path(username=username, hostname=hostname, filename=filename)
     content, status = _read_encrypted_file(path)
     if content is None:
         return None, status
+    # Check if cookie was previously marked as expired/invalid
+    matched = _resolve_credential_domain(username, hostname)
+    if matched:
+        meta_entry = _get_cookie_expired_meta(cred_source=username, domain=matched, scope=scope)
+        if meta_entry.get('cookie_status') == 'invalid':
+            return None, 'invalid'
     cookie_str = _json_cookie_to_header_string(content)
     return cookie_str, status
 
@@ -315,6 +349,7 @@ def save_user_cookie(*, username: str, domain: str, cookie_str: str,
     _write_encrypted_file(path, cookie_content)
     _update_meta_entry(cred_type='cookies', username=username, domain=domain,
                        scope=scope, updated_at=_now_iso(), source='paste')
+    _clear_cookie_expired(cred_source=username, domain=domain, scope=scope)
 
 
 def delete_user_cookie(*, username: str, domain: str, scope: str = ''):
@@ -522,10 +557,15 @@ def get_shared_cookie(*, hostname: str, scope: str = '') -> tuple[str | None, st
     """Get the shared cookie credential for a hostname.
 
     Uses DNS multi-level fallback. Returns (cookie_string | None, status).
+    Status: 'ok' | 'key_changed' | 'not_found' | 'error' | 'invalid'
     """
     matched = _resolve_shared_credential_domain(hostname)
     if not matched:
         return None, 'not_found'
+    # Check if cookie was previously marked as expired/invalid
+    meta_entry = _get_cookie_expired_meta(cred_source='shared', domain=matched, scope=scope)
+    if meta_entry.get('cookie_status') == 'invalid':
+        return None, 'invalid'
     path = _shared_credential_path(domain=matched, cred_type='cookie', scope=scope)
     content, status = _read_encrypted_file(path)
     if content is None:
@@ -544,6 +584,7 @@ def save_shared_cookie(*, domain: str, cookie_str: str, scope: str = ''):
     _write_encrypted_file(path, cookie_content)
     _update_meta_entry(cred_type='cookies', username='shared', domain=domain,
                        scope=scope, updated_at=_now_iso(), source='paste')
+    _clear_cookie_expired(cred_source='shared', domain=domain, scope=scope)
 
 
 def delete_shared_cookie(*, domain: str, scope: str = ''):
@@ -874,6 +915,8 @@ def _list_credentials_in_dir(base_dir: str, meta_prefix: str,
                 'scope': scope,
                 'status': status,
                 'updated_at': m.get('updated_at', ''),
+                'cookie_status': m.get('cookie_status', ''),
+                'expired_at': m.get('expired_at', ''),
             }
 
             if include_values and content and status == 'ok':

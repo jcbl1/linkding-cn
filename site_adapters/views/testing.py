@@ -550,9 +550,9 @@ def _test_credential(url, base_dir, username, entries):
         refreshed = bool(after and (not before or after != before))
 
         # After state
-        after_user, _ = get_user_cookie(username=username, hostname=hostname, scope=test_scope) if username else (None, '')
-        after_shared, _ = get_shared_cookie(hostname=hostname, scope=test_scope)
-        after_best, _ = get_best_cookie(username=username, hostname=hostname, scope=test_scope)
+        after_user, after_user_status = get_user_cookie(username=username, hostname=hostname, scope=test_scope) if username else (None, '')
+        after_shared, after_shared_status = get_shared_cookie(hostname=hostname, scope=test_scope)
+        after_best, after_best_status = get_best_cookie(username=username, hostname=hostname, scope=test_scope)
 
         has_cookie = bool(after_best)
         cookie_preview = after_best[:50] + '...' if after_best and len(after_best) > 50 else (after_best or '')
@@ -567,9 +567,27 @@ def _test_credential(url, base_dir, username, entries):
         else:
             cookie_source = 'none'
 
+        # Check if cookie was marked as expired/invalid
+        is_invalid = after_best_status == 'invalid' or after_user_status == 'invalid' or after_shared_status == 'invalid'
+
+        # Read expired_at from metadata
+        expired_at = ''
+        if is_invalid:
+            from site_adapters.services.auth.credentials import _get_cookie_expired_meta, _resolve_credential_domain, _resolve_shared_credential_domain
+            if after_user_status == 'invalid' and username:
+                matched = _resolve_credential_domain(username, hostname)
+                if matched:
+                    expired_at = _get_cookie_expired_meta(cred_source=username, domain=matched, scope=test_scope).get('expired_at', '')
+            elif after_shared_status == 'invalid':
+                matched = _resolve_shared_credential_domain(hostname)
+                if matched:
+                    expired_at = _get_cookie_expired_meta(cred_source='shared', domain=matched, scope=test_scope).get('expired_at', '')
+
         # Status
         had_any_before = has_user_before or has_shared_before
-        if refreshed:
+        if is_invalid:
+            cookie_status = 'invalid'
+        elif refreshed:
             cookie_status = 'acquired' if not had_any_before else 'refreshed'
         else:
             cookie_status = 'existing' if has_cookie else 'none'
@@ -582,6 +600,7 @@ def _test_credential(url, base_dir, username, entries):
             'source': cookie_source,
             'status': cookie_status,
             'cookie_type': cookie_type,
+            'expired_at': expired_at,
         }
 
     # --- Headers: read all saved credentials (not limited to declared names) ---

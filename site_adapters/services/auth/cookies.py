@@ -20,7 +20,10 @@ from site_adapters.services.execution_log import log_execution
 
 from publicsuffixlist import PublicSuffixList
 
-from site_adapters.services.auth.credentials import get_shared_cookie
+from site_adapters.services.auth.credentials import (
+    get_shared_cookie, _mark_cookie_expired,
+    _resolve_credential_domain, _resolve_shared_credential_domain,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -570,6 +573,37 @@ def refresh_cookie_declarative(refresh_config: dict, url: str,
 # Verify + refresh flow (declarative)
 # ---------------------------------------------------------------------------
 
+def _mark_login_cookie_expired(source: str | None, username: str,
+                                 domain_key: str, scope: str):
+    """Mark a login-type cookie as expired in credential metadata.
+
+    Only applies to login-type cookies (auto cookies auto-refresh, so they
+    should never reach this state). Writes cookie_status='invalid' and
+    expired_at timestamp so the cookie won't be used for future requests
+    until the user re-saves it.
+
+    Resolves the actual stored domain (may differ from domain_key due to
+    wildcard/DNS fallback) so the metadata key matches the credential file.
+    """
+    # source is only set when a cookie was actually loaded; skip if None
+    if not source:
+        return
+    if source == 'user' and username:
+        cred_source = username
+        matched = _resolve_credential_domain(username, domain_key)
+    else:
+        cred_source = 'shared'
+        matched = _resolve_shared_credential_domain(domain_key)
+    if not matched:
+        matched = domain_key
+    try:
+        _mark_cookie_expired(cred_source=cred_source, domain=matched, scope=scope)
+        logger.info("Cookie marked as expired for %s (source=%s, scope=%s)",
+                    matched, cred_source, scope or 'domain')
+    except Exception as e:
+        logger.error("Failed to mark cookie expired for %s: %s", domain_key, e)
+
+
 def verify_and_refresh(*, cookie_config: dict, url: str, domain_key: str,
                        verify_context: dict, username: str = '',
                        scope: str = '') -> str | None:
@@ -668,6 +702,9 @@ def verify_and_refresh(*, cookie_config: dict, url: str, domain_key: str,
                     else:
                         logger.warning("Cookie refresh (after L1) failed for %s",
                                        domain_key)
+                        _mark_login_cookie_expired(source, username, domain_key, scope)
+                else:
+                    _mark_login_cookie_expired(source, username, domain_key, scope)
                 return None
 
     # L2 content_check: skip if disabled or no checks configured
@@ -705,6 +742,9 @@ def verify_and_refresh(*, cookie_config: dict, url: str, domain_key: str,
             return _cookie_data_to_string(data)
         else:
             logger.warning("Cookie refresh (after verification) failed for %s", domain_key)
+            _mark_login_cookie_expired(source, username, domain_key, scope)
+    else:
+        _mark_login_cookie_expired(source, username, domain_key, scope)
 
     return cookie_str
 

@@ -1339,6 +1339,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       var c = r.cookie;
       var label = c.source + ' \u00b7 ' + c.status;
       if (c.cookie_type === 'auto') label += ' (auto)';
+      if (c.status === 'invalid' && c.expired_at) label += ' (' + c.expired_at.slice(0, 10) + ')';
       h += renderSummaryRows([{label: 'cookie', value: label}]);
     }
     if (r.headers) {
@@ -1353,12 +1354,16 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     if (r.cookie) {
       h += '<div class="wa-result-block">';
       h += '<h3 class="wa-result-heading">Cookie</h3>';
-      h += renderResultRows({
+      var cookieRows = {
         'source': r.cookie.source,
         'status': r.cookie.status,
         'has_value': r.cookie.has_value,
         'preview': r.cookie.preview
-      });
+      };
+      if (r.cookie.status === 'invalid' && r.cookie.expired_at) {
+        cookieRows['expired_at'] = r.cookie.expired_at.slice(0, 10);
+      }
+      h += renderResultRows(cookieRows);
       h += '</div>';
     }
     // Headers detail

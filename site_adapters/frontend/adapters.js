@@ -265,6 +265,7 @@ function initAdapters() {
         + '</span>'
         + '<span class="wa-col-updated wa-cred-updated-cell">' + escapeHtml((c.updated_at || '').slice(0, 10))
         + (c.status !== 'ok' ? ' <span class="wa-badge wa-badge-warn">key changed</span>' : '') + '</span>'
+        + (c.cookie_status === 'invalid' ? ' <span class="wa-badge wa-badge-error"' + (c.expired_at ? ' title="' + gettext('Expired: ') + escapeHtml(c.expired_at.slice(0, 10)) + '"' : '') + '>' + gettext('expired') + '</span>' : '') + '</span>'
         + '<span class="wa-col-actions">'
         + '<button type="button" class="btn btn-sm js-edit-cred" data-domain="' + escapeHtml(c.domain) + '" data-type="' + escapeHtml(c.type) + '" data-scope="' + escapeHtml(c.scope || '') + '">' + gettext('Edit') + '</button>'
         + '<button type="button" class="btn btn-sm btn-error js-delete-cred" data-domain="' + escapeHtml(c.domain) + '" data-type="' + escapeHtml(c.type) + '" data-scope="' + escapeHtml(c.scope || '') + '"'

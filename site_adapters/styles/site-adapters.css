@@ -470,6 +470,10 @@
   background: #fef3c7;
   color: #92400e;
 }
+.wa-badge-error {
+  background: #fee2e2;
+  color: #991b1b;
+}
 .wa-alias-target {
   color: var(--wa-accent);
   font-size: 11px;
