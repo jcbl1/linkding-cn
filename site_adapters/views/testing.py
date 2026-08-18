@@ -179,7 +179,7 @@ def _snapshot_credential_state(config: dict, username: str, hostname: str) -> di
     """
     from site_adapters.services.auth.credentials import (
         get_user_cookie, get_shared_cookie, get_best_cookie,
-        get_user_headers, get_shared_headers, get_best_header,
+        get_user_headers, get_shared_headers, get_best_header, get_best_headers,
         get_user_token, get_shared_token, get_best_token,
         get_auth_requirements_for_domain,
     )
@@ -203,12 +203,14 @@ def _snapshot_credential_state(config: dict, username: str, hostname: str) -> di
             source = 'http_header'
         state['cookie'] = {'value': best, 'source': source}
 
-    # Headers
-    header_names = auth_req.get('headers', [])
-    if header_names:
+    # Headers: read all saved credentials (not limited to declared names)
+    if auth_req.get('headers_active'):
+        declared_names = auth_req.get('headers', [])
+        all_saved, _ = get_best_headers(username=username, hostname=hostname, scope=scope)
+        all_names = sorted(set(declared_names) | set(all_saved.keys()))
         header_state = {}
-        for h in header_names:
-            best, _ = get_best_header(username=username, hostname=hostname, header_name=h, scope=scope)
+        for h in all_names:
+            best = all_saved.get(h)
             user_h, _ = get_user_header(username=username, hostname=hostname, header_name=h, scope=scope) if username else (None, '')
             shared_h, _ = get_shared_header(hostname=hostname, header_name=h, scope=scope)
             source = 'none'
@@ -581,13 +583,15 @@ def _test_credential(url, base_dir, username, entries):
             'cookie_type': cookie_type,
         }
 
-    # --- Headers ---
+    # --- Headers: read all saved credentials (not limited to declared names) ---
     headers_info = None
-    header_names = auth_req.get('headers', [])
-    if header_names:
+    if auth_req.get('headers_active'):
+        declared_names = auth_req.get('headers', [])
+        all_saved, _ = get_best_headers(username=username, hostname=hostname, scope=test_scope)
+        all_names = sorted(set(declared_names) | set(all_saved.keys()))
         header_list = []
-        for h in header_names:
-            best, _ = get_best_header(username=username, hostname=hostname, header_name=h, scope=test_scope)
+        for h in all_names:
+            best = all_saved.get(h)
             user_h, _ = get_user_header(username=username, hostname=hostname, header_name=h, scope=test_scope) if username else (None, '')
             shared_h, _ = get_shared_header(hostname=hostname, header_name=h, scope=test_scope)
             source = 'none'
@@ -599,6 +603,7 @@ def _test_credential(url, base_dir, username, entries):
                 'name': h,
                 'has_value': bool(best),
                 'source': source,
+                'declared': h in declared_names,
             })
         h_sources = {h['source'] for h in header_list}
         if 'user' in h_sources:

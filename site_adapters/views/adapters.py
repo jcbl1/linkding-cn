@@ -138,7 +138,7 @@ def adapters_page(request):
     # Domains needing auth (for add credential modal autocomplete)
     domains_needing_auth = _get_domains_needing_auth(base_dir)
     ctx['auth_domains_json'] = json.dumps([
-        {'d': d['domain'], 'c': d['domain_auth'].get('cookie', False), 'h': d['domain_auth'].get('headers', []), 't': d['domain_auth'].get('oauth2', False), 'b': d['domain_auth'].get('basic_auth', False), 'ct': d['domain_auth'].get('cookie_type', 'auto'), 'help': {'c': d['domain_auth'].get('cookie_help', ''), 'h': d['domain_auth'].get('headers_help', ''), 't': d['domain_auth'].get('oauth2_help', ''), 'b': d['domain_auth'].get('basic_help', '')}, 'sections': d.get('sections', {})}
+        {'d': d['domain'], 'c': d['domain_auth'].get('cookie', False), 'h': d['domain_auth'].get('headers', []), 'ha': d['domain_auth'].get('headers_active', False), 't': d['domain_auth'].get('oauth2', False), 'b': d['domain_auth'].get('basic_auth', False), 'ct': d['domain_auth'].get('cookie_type', 'auto'), 'help': {'c': d['domain_auth'].get('cookie_help', ''), 'h': d['domain_auth'].get('headers_help', ''), 't': d['domain_auth'].get('oauth2_help', ''), 'b': d['domain_auth'].get('basic_help', '')}, 'sections': d.get('sections', {})}
         for d in domains_needing_auth
     ])
 

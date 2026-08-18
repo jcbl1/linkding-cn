@@ -25,9 +25,12 @@ from site_adapters.services.auth.cookies import (
     merge_cookie,
 )
 from site_adapters.services.auth.credentials import (
+    _merge_headers_block,
+    _normalize_headers_block,
     get_best_basic_auth,
     get_best_cookie,
     get_best_header,
+    get_best_headers,
     get_best_token,
 )
 from site_adapters.services.auth.oauth2 import (
@@ -87,9 +90,8 @@ def _merge_auth(*auth_blocks: dict) -> dict:
             result['cookie'] = merge_cookie(result.get('cookie', {}), block['cookie'])
         # Headers
         if 'headers' in block:
-            existing_headers = result.get('headers', {})
-            existing_headers.update(block['headers'])
-            result['headers'] = existing_headers
+            result['headers'] = _merge_headers_block(
+                result.get('headers', {}), block['headers'])
         # OAuth2 (was token)
         if 'oauth2' in block:
             result['oauth2'] = dict(block['oauth2'])
@@ -292,31 +294,33 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
                     user_cookie_str, _ = get_best_cookie(
                         username=username, hostname=hostname, scope='')
 
-        # --- Headers: sequential merge ---
-        # 1. Config default values (lowest priority)
-        # 2. Within effective scope: user > shared
-        # 3. If section-level, supplement with domain-level for keys not yet covered
-        if merged_auth.get('headers'):
-            merged_headers = merged_auth['headers']
-            effective_header_scope = section if section_has_headers else ''
+        # --- Headers: read all saved credentials + config defaults ---
+        # Priority: existing http headers > saved user/shared credentials > config defaults
+        if 'headers' in merged_auth:
+            headers_norm = _normalize_headers_block(merged_auth['headers'])
+            if headers_norm.get('enabled', True):
+                effective_header_scope = section if section_has_headers else ''
 
-            for header_name, default_val in merged_headers.items():
-                if not isinstance(default_val, str):
-                    default_val = ''
-                # Look up in effective scope first
-                best_val, _ = get_best_header(
-                    username=username, hostname=hostname,
-                    header_name=header_name, scope=effective_header_scope)
-                # If section-level and not found, fall back to domain-level
-                if not best_val and section_has_headers:
-                    best_val, _ = get_best_header(
-                        username=username, hostname=hostname,
-                        header_name=header_name, scope='')
-                # If still not found, use config default
-                if not best_val and default_val:
-                    best_val = default_val
-                if best_val:
-                    headers[header_name] = best_val
+                # Step 1: read ALL saved header credentials (not limited to declared names)
+                all_saved, _ = get_best_headers(
+                    username=username, hostname=hostname, scope=effective_header_scope)
+                # Section-level: fall back to domain-level if nothing found
+                if not all_saved and section_has_headers:
+                    all_saved, _ = get_best_headers(
+                        username=username, hostname=hostname, scope='')
+
+                # Step 2: inject saved headers (don't overwrite existing http headers)
+                for name, val in all_saved.items():
+                    if name not in headers:
+                        headers[name] = val
+
+                # Step 3: for declared headers without saved credentials, use config default
+                declared_values = headers_norm.get('values', {})
+                for header_name, default_val in declared_values.items():
+                    if not isinstance(default_val, str):
+                        default_val = ''
+                    if header_name not in headers and default_val:
+                        headers[header_name] = default_val
 
         # --- OAuth2: no cross-scope fallback ---
         merged_oauth2 = merged_auth.get('oauth2', {})

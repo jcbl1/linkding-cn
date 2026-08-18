@@ -414,12 +414,12 @@ function initAdapters() {
     var inf = allDomains.find(function(a) { return a.d === domainKey || a.domain === domainKey; }) || {};
     var autoType = null;
     if (inf.c) autoType = 'cookie';
-    else if (inf.h && inf.h.length) autoType = 'header';
+    else if (inf.ha) autoType = 'header';
     else if (inf.t) autoType = 'oauth2';
     else if (inf.b) autoType = 'basic_auth';
 
     var localNeeded = (inf.c ? ['cookie'] : []).concat(
-      (inf.h && inf.h.length ? ['header'] : []),
+      (inf.ha ? ['header'] : []),
       (inf.t ? ['oauth2'] : []),
       (inf.b ? ['basic_auth'] : [])
     );
@@ -490,14 +490,14 @@ function initAdapters() {
     var selectedType = type || 'cookie';
     if (domain && !type) {
       if (info.c) selectedType = 'cookie';
-      else if (info.h && info.h.length) selectedType = 'header';
+      else if (info.ha) selectedType = 'header';
       else if (info.t) selectedType = 'oauth2';
       else if (info.b) selectedType = 'basic_auth';
     }
 
     var neededTypes = domain ? (
       (info.c ? ['cookie'] : []).concat(
-        (info.h && info.h.length ? ['header'] : []),
+        (info.ha ? ['header'] : []),
         (info.t ? ['oauth2'] : []),
         (info.b ? ['basic_auth'] : [])
       )
@@ -588,7 +588,7 @@ function initAdapters() {
           item.className = 'wa-url-dropdown-item';
           var labels = [];
           if (d.c || d.needs_cookie) { var cookieType = d.ct || d.cookie_type || ''; var cookieLabel = (cookieType === 'login') ? 'Cookie (login)' : 'Cookie (auto)'; labels.push(cookieLabel); }
-          if ((d.h && d.h.length) || (d.needs_headers && d.needs_headers.length)) labels.push('Header');
+          if (d.ha || (d.needs_headers && d.needs_headers.length)) labels.push('Header');
           if (d.t || d.needs_oauth2) labels.push('Token');
           if (d.b || d.needs_basic_auth) labels.push('Basic Auth');
           item.innerHTML = '<span>' + escapeHtml(d.d || d.domain) + (labels.length ? ' <span class="text-gray" style="font-size:12px">(' + escapeHtml(labels.join(' + ')) + ')</span>' : '') + '</span>';
@@ -644,6 +644,7 @@ function initAdapters() {
                   c: domainAuth.cookie || false,
                   ct: domainAuth.cookie_type || '',
                   h: domainAuth.headers || [],
+                  ha: domainAuth.headers_active || false,
                   t: domainAuth.oauth2 || false,
                   b: domainAuth.basic_auth || false,
                   cookie_help: domainAuth.cookie_help || '',

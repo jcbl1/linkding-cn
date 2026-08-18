@@ -48,11 +48,11 @@ def _get_domains_needing_auth(base_dir):
         sections = req.get('sections', {})
 
         # Check if domain or any section needs auth
-        has_any = domain_auth.get('cookie') or domain_auth.get('headers') or \
+        has_any = domain_auth.get('cookie') or domain_auth.get('headers_active') or \
                   domain_auth.get('oauth2') or domain_auth.get('basic_auth')
         for sec in ('metadata', 'snapshot', 'reader'):
             sec_auth = sections.get(sec, {})
-            if sec_auth.get('cookie') or sec_auth.get('headers') or \
+            if sec_auth.get('cookie') or sec_auth.get('headers_active') or \
                sec_auth.get('oauth2') or sec_auth.get('basic_auth'):
                 has_any = True
 

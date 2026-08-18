@@ -216,13 +216,37 @@ def _validate_auth_block(issues: list[str], label: str, auth: dict, file_dir: st
         if not isinstance(headers, dict):
             issues.append(f"ERROR: {label}.headers must be an object")
         else:
-            for name, config in headers.items():
-                if name == "help":
-                    continue
-                if not isinstance(name, str):
-                    issues.append(f"ERROR: {label}.headers key must be a string")
-                if config is not None and not isinstance(config, str):
-                    issues.append(f"ERROR: {label}.headers.{name} must be a string")
+            reserved = ('enabled', 'help', 'values')
+            has_values = 'values' in headers
+            if has_values:
+                # Structured form: validate enabled, help, values
+                if 'enabled' in headers and not isinstance(headers['enabled'], bool):
+                    issues.append(f"ERROR: {label}.headers.enabled must be a boolean")
+                if 'help' in headers and not isinstance(headers['help'], str):
+                    issues.append(f"ERROR: {label}.headers.help must be a string")
+                vals = headers.get('values')
+                if vals is not None:
+                    if not isinstance(vals, dict):
+                        issues.append(f"ERROR: {label}.headers.values must be an object")
+                    else:
+                        for name, config in vals.items():
+                            if not isinstance(name, str):
+                                issues.append(f"ERROR: {label}.headers.values key must be a string")
+                            if config is not None and not isinstance(config, str):
+                                issues.append(f"ERROR: {label}.headers.values.{name} must be a string")
+                # Warn about unknown keys outside values/enabled/help
+                for key in headers:
+                    if key not in reserved:
+                        issues.append(f"WARN: {label}.headers.{key} is unknown, will be ignored")
+            else:
+                # Flat form: enabled/help are reserved, rest are header names
+                for name, config in headers.items():
+                    if name in ('enabled', 'help'):
+                        continue
+                    if not isinstance(name, str):
+                        issues.append(f"ERROR: {label}.headers key must be a string")
+                    if config is not None and not isinstance(config, str):
+                        issues.append(f"ERROR: {label}.headers.{name} must be a string")
     # Validate oauth2 sub-block
     oauth2 = auth.get("oauth2")
     if oauth2 is not None:

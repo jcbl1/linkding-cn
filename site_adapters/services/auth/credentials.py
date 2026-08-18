@@ -740,6 +740,29 @@ def get_best_header(*, username: str, hostname: str, header_name: str,
     return get_shared_header(hostname=hostname, header_name=header_name, scope=scope)
 
 
+def get_best_headers(*, username: str, hostname: str,
+                     scope: str = '') -> tuple[dict, str]:
+    """Get all saved header credentials within a single scope: user first, shared fallback.
+
+    Returns (merged headers dict, status).
+    """
+    result: dict[str, str] = {}
+    status = 'not_found'
+    if username:
+        user_hdrs, status = get_user_headers(username=username, hostname=hostname, scope=scope)
+        if user_hdrs:
+            result.update(user_hdrs)
+    shared_hdrs, shared_status = get_shared_headers(hostname=hostname, scope=scope)
+    if shared_hdrs:
+        for k, v in shared_hdrs.items():
+            if k not in result:
+                result[k] = v
+        status = status if status != 'not_found' else shared_status
+    if result:
+        status = 'ok' if status != 'error' else status
+    return result, status
+
+
 def get_best_token(*, username: str, hostname: str,
                    scope: str = '') -> tuple[str | None, str]:
     """Get the best available token within a single scope: user first, shared fallback."""
@@ -758,6 +781,26 @@ def get_best_basic_auth(*, username: str, hostname: str,
         if result:
             return result, status
     return get_shared_basic_auth(hostname=hostname, scope=scope)
+
+
+
+
+def get_best_headers(*, username: str, hostname: str,
+                     scope: str = '') -> tuple[dict, str]:
+    """Get all available headers within a single scope: user first, shared fallback.
+
+    Returns (merged dict of all saved headers, status).
+    """
+    result = {}
+    if username:
+        user_hdrs, status = get_user_headers(username=username, hostname=hostname, scope=scope)
+        if user_hdrs:
+            result.update(user_hdrs)
+    shared_hdrs, _ = get_shared_headers(hostname=hostname, scope=scope)
+    for k, v in shared_hdrs.items():
+        if k not in result:
+            result[k] = v
+    return result, 'ok' if result else 'not_found'
 
 
 # ---------------------------------------------------------------------------
@@ -916,6 +959,70 @@ def save_user_token_cache(*, username: str, domain: str, cache_data: dict,
 
 
 # ---------------------------------------------------------------------------
+# Headers block normalization
+# ---------------------------------------------------------------------------
+
+# Reserved keys in a headers block that are not header names.
+_HEADERS_RESERVED_KEYS = ('enabled', 'help', 'values')
+
+
+def _normalize_headers_block(headers_cfg) -> dict:
+    """Normalize a headers config block to {enabled, help, values}.
+
+    Two input forms are supported:
+    - Structured: {'enabled': bool, 'help': str, 'values': {name: val}}
+    - Flat (legacy): {'name': val, 'enabled': bool?, 'help': str?}
+
+    In flat form, 'enabled'/'help'/'values' are treated as reserved keys,
+    not header names. To declare a header literally named 'enabled' or
+    'help', use the structured form with a 'values' sub-key.
+    """
+    if not isinstance(headers_cfg, dict):
+        return {'enabled': True, 'help': '', 'values': {}}
+
+    if 'values' in headers_cfg:
+        # Structured form
+        enabled = headers_cfg.get('enabled', True)
+        help_text = headers_cfg.get('help', '')
+        values = dict(headers_cfg.get('values', {}))
+        if not isinstance(values, dict):
+            values = {}
+        return {'enabled': enabled, 'help': help_text, 'values': values}
+
+    # Flat form: separate reserved keys from header name→value pairs
+    enabled = headers_cfg.get('enabled', True)
+    help_text = headers_cfg.get('help', '')
+    values = {}
+    for k, v in headers_cfg.items():
+        if k in _HEADERS_RESERVED_KEYS:
+            continue
+        values[k] = v
+    return {'enabled': enabled, 'help': help_text, 'values': values}
+
+
+def _merge_headers_block(*blocks) -> dict:
+    """Merge multiple normalized headers blocks.
+
+    enabled: False wins (any layer disabling → disabled).
+    help: last non-empty wins.
+    values: later overrides same key.
+    """
+    result_enabled = True
+    result_help = ''
+    result_values: dict[str, str] = {}
+    for block in blocks:
+        if not block:
+            continue
+        norm = _normalize_headers_block(block)
+        if not norm.get('enabled', True):
+            result_enabled = False
+        if norm.get('help'):
+            result_help = norm['help']
+        result_values.update(norm.get('values', {}))
+    return {'enabled': result_enabled, 'help': result_help, 'values': result_values}
+
+
+# ---------------------------------------------------------------------------
 # Auth requirements
 # ---------------------------------------------------------------------------
 
@@ -929,10 +1036,10 @@ def _extract_auth_block(auth: dict) -> dict:
     has_cookie = bool(cookie_cfg) and (
         cookie_cfg.get('enabled', True) if isinstance(cookie_cfg, dict) else True
     )
-    has_headers = bool(headers_cfg) and (
-        headers_cfg.get('enabled', True) if isinstance(headers_cfg, dict) else True
-    )
-    header_names = sorted(headers_cfg.keys()) if isinstance(headers_cfg, dict) else []
+    # headers: key presence + enabled flag (empty values dict is OK)
+    headers_norm = _normalize_headers_block(headers_cfg)
+    has_headers = 'headers' in auth and headers_norm.get('enabled', True)
+    header_names = sorted(headers_norm.get('values', {}).keys())
     has_oauth2 = bool(oauth2_cfg) and (
         oauth2_cfg.get('enabled', True) if isinstance(oauth2_cfg, dict) else True
     ) and bool(oauth2_cfg.get('endpoint'))
@@ -945,11 +1052,12 @@ def _extract_auth_block(auth: dict) -> dict:
         'cookie': has_cookie,
         'cookie_type': cookie_type if has_cookie else '',
         'headers': header_names if has_headers else [],
+        'headers_active': has_headers,
         'oauth2': has_oauth2,
         'token': has_oauth2,  # backward compat
         'basic_auth': has_basic_auth,
         'cookie_help': cookie_cfg.get('help', '') if isinstance(cookie_cfg, dict) else '',
-        'headers_help': headers_cfg.get('help', '') if isinstance(headers_cfg, dict) else '',
+        'headers_help': headers_norm.get('help', ''),
         'oauth2_help': oauth2_cfg.get('help', '') if isinstance(oauth2_cfg, dict) else '',
         'basic_help': basic_cfg.get('help', '') if isinstance(basic_cfg, dict) else '',
     }
@@ -965,7 +1073,7 @@ def _build_section_auth_requirements(*, section_data: dict, domain_auth: dict) -
     # auth: null → disabled
     if section_auth_raw is None and isinstance(section_data, dict) and 'auth' in section_data:
         return {
-            'cookie': False, 'cookie_type': '', 'headers': [],
+            'cookie': False, 'cookie_type': '', 'headers': [], 'headers_active': False,
             'oauth2': False, 'token': False, 'basic_auth': False,
             'cookie_help': '', 'headers_help': '', 'oauth2_help': '', 'basic_help': '',
             'source': 'disabled',
@@ -987,9 +1095,8 @@ def _build_section_auth_requirements(*, section_data: dict, domain_auth: dict) -
         merged['cookie'] = domain_auth.get('cookie', {})
     # Headers
     if 'headers' in section_auth_raw:
-        existing_h = dict(domain_auth.get('headers', {}))
-        existing_h.update(section_auth_raw['headers'])
-        merged['headers'] = existing_h
+        merged['headers'] = _merge_headers_block(
+            domain_auth.get('headers', {}), section_auth_raw['headers'])
     else:
         merged['headers'] = domain_auth.get('headers', {})
     # OAuth2
@@ -1023,7 +1130,7 @@ def get_auth_requirements_for_domain(hostname: str, base_dir: str = '') -> dict:
     url = f'https://{hostname}'
     config = load_domain_config(url, base_dir)
     if not config:
-        return {'cookie': False, 'headers': [], 'token': False, 'cookie_type': '',
+        return {'cookie': False, 'headers': [], 'headers_active': False, 'token': False, 'cookie_type': '',
                 'oauth2': False, 'basic_auth': False,
                 'cookie_help': '', 'headers_help': '', 'oauth2_help': '', 'basic_help': ''}
 
@@ -1054,7 +1161,7 @@ def get_auth_requirements_for_domain_key(domain_key: str, base_dir: str = '') ->
         base_dir = _get_base_dir()
 
     empty_block = {
-        'cookie': False, 'cookie_type': '', 'headers': [],
+        'cookie': False, 'cookie_type': '', 'headers': [], 'headers_active': False,
         'oauth2': False, 'token': False, 'basic_auth': False,
         'cookie_help': '', 'headers_help': '', 'oauth2_help': '', 'basic_help': '',
     }

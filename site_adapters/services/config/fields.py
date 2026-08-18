@@ -487,11 +487,33 @@ AUTH_OAUTH2_FIELDS = {
 }
 
 AUTH_HEADERS_OBJECT_INFO = {
-    "type": "object<string, string>",
-    "en": "Custom HTTP request headers. Keys are header names; values are string defaults. Use an empty string when there is no config-level default.",
-    "zh": "自定义 HTTP 请求头。键为 header 名称；值为字符串默认值。没有配置默认值时使用空字符串。",
+    "type": "object",
+    "en": 'Custom HTTP request headers. Two forms: flat {"X-API-Key": ""} where keys are header names and values are string defaults; or structured {"enabled": true, "help": "...", "values": {"X-API-Key": ""}} when you need special fields. Reserved keys in flat form: enabled, help, values. To declare a header literally named \'enabled\' or \'help\', use the structured form with a \'values\' sub-key.',
+    "zh": '自定义 HTTP 请求头。支持两种形式：扁平形式（{"X-API-Key": ""}），键为 header 名称，值为字符串默认值；或结构化形式（{"enabled": true, "help": "...", "values": {"X-API-Key": ""}}），当需要特殊字段时使用。扁平形式中保留键：enabled、help、values。如需声明名为 \'enabled\' 或 \'help\' 的 header，请使用结构化形式并在 values 中声明。',
     "example_key": "X-API-Key",
     "example_value": "",
+}
+
+AUTH_HEADERS_FIELDS = {
+    "enabled": {
+        "type": "bool",
+        "en": "Enable or disable header auth for this block. Defaults to true.",
+        "zh": "启用或禁用此块的 header 认证。默认为 true。",
+        "example": True,
+    },
+    "help": {
+        "type": "str",
+        "en": "Help text shown in the credentials UI.",
+        "zh": "凭据管理界面显示的帮助文本。",
+        "example": "Enter your API key",
+    },
+    "values": {
+        "type": "object<string, string>",
+        "en": "Header name to default value mapping. Use this when you need to declare headers named 'enabled' or 'help'.",
+        "zh": "Header 名称到默认值的映射。当需要声明名为 'enabled' 或 'help' 的 header 时使用。",
+        "example_key": "X-API-Key",
+        "example_value": "",
+    },
 }
 
 AUTH_BASIC_FIELDS = {

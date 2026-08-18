@@ -53,6 +53,7 @@ def site_adapters_page(request):
                 'd': d['domain'],
                 'c': d['domain_auth'].get('cookie', False),
                 'h': d['domain_auth'].get('headers', []),
+                'ha': d['domain_auth'].get('headers_active', False),
                 't': d['domain_auth'].get('oauth2', False),
                 'b': d['domain_auth'].get('basic_auth', False),
                 'ct': d['domain_auth'].get('cookie_type', 'auto'),

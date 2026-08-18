@@ -123,9 +123,10 @@
           "extra_params": {},                              // Extra key-value pairs included in the token request body.
         },
 
-        // Custom HTTP headers
+        // Custom HTTP headers. Two forms: flat {"name": ""} or structured {"enabled": true, "help": "...", "values": {"name": ""}}.
+        // Reserved keys in flat form: enabled, help, values. Saved header credentials are injected regardless of declaration.
         "headers": {
-          "X-API-Key": "",                                 // Custom HTTP request headers. Keys are header names; values are string defaults. Use an empty string when there is no config-level default.
+          "X-API-Key": "",                                 // Header name → string default. Use empty string when there is no config-level default.
         },
 
         // HTTP Basic Auth

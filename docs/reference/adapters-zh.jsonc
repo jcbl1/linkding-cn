@@ -123,9 +123,10 @@
           "extra_params": {},                              // Token 请求体中的额外键值对。
         },
 
-        // 自定义 HTTP 请求头
+        // 自定义 HTTP 请求头。支持两种形式：扁平 {"名称": ""} 或结构化 {"enabled": true, "help": "...", "values": {"名称": ""}}。
+        // 扁平形式中保留键：enabled、help、values。已保存的 header 凭据无论是否声明都会被注入。
         "headers": {
-          "X-API-Key": "",                                 // 自定义 HTTP 请求头。键为 header 名称；值为字符串默认值。没有配置默认值时使用空字符串。
+          "X-API-Key": "",                                 // Header 名称 → 字符串默认值。没有配置默认值时使用空字符串。
         },
 
         // HTTP Basic Auth 认证

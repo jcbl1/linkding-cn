@@ -11,8 +11,10 @@ from site_adapters.services.auth.cookies import (
     verify_and_refresh,
 )
 from site_adapters.services.auth.credentials import (
+    _normalize_headers_block,
     get_best_cookie,
     get_best_header,
+    get_best_headers,
     get_best_token,
     get_best_basic_auth,
     save_user_cookie,
@@ -58,14 +60,22 @@ def get_auth_for_request(*, url: str, domain_key: str, section: str,
     if best:
         cookie_str = best
 
-    # Best headers: user first, shared fallback (within scope)
-    if merged_auth.get('headers'):
-        for header_name in merged_auth['headers']:
-            if header_name not in headers:
-                best_val, _ = get_best_header(username=username, hostname=domain_key,
-                                             header_name=header_name, scope=scope)
-                if best_val:
-                    headers[header_name] = best_val
+    # Headers: read ALL saved credentials, then apply config defaults
+    if 'headers' in merged_auth:
+        headers_norm = _normalize_headers_block(merged_auth['headers'])
+        if headers_norm.get('enabled', True):
+            # Step 1: read all saved header credentials (not limited to declared names)
+            all_saved, _ = get_best_headers(
+                username=username, hostname=domain_key, scope=scope)
+            for name, val in all_saved.items():
+                if name not in headers:
+                    headers[name] = val
+            # Step 2: for declared headers without saved credentials, use config default
+            for header_name, default_val in headers_norm.get('values', {}).items():
+                if not isinstance(default_val, str):
+                    default_val = ''
+                if header_name not in headers and default_val:
+                    headers[header_name] = default_val
 
     # OAuth2: user first, shared fallback (within scope)
     merged_oauth2 = merged_auth.get('oauth2', merged_auth.get('token', {}))
