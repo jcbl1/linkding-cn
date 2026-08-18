@@ -157,7 +157,7 @@ function initAdapters() {
   container.addEventListener('click', function(e) {
     if (!e.target.closest('#btn-add-credential')) return;
     e.preventDefault();
-    showModal('Add credentials', null, null);
+    showModal(gettext('Add credentials'), null, null);
   });
 
   // ===================================================================
@@ -167,7 +167,7 @@ function initAdapters() {
     var btn = e.target.closest('.js-edit-cred');
     if (!btn) return;
     e.preventDefault();
-    showModal('Edit: ' + btn.dataset.domain, btn.dataset.domain, btn.dataset.type, btn.dataset.scope || '');
+    showModal(gettext('Edit: ') + btn.dataset.domain, btn.dataset.domain, btn.dataset.type, btn.dataset.scope || '');
   });
 
   // ===================================================================
@@ -253,18 +253,18 @@ function initAdapters() {
 
     var html = '';
     credentials.forEach(function(c) {
-      var scopeLabel = c.scope ? c.scope : 'domain';
+      var scopeLabel = c.scope ? c.scope : gettext('domain');
       html += '<div class="wa-cred-row">'
         + '<span class="wa-col-domain wa-cred-domain-cell">' + escapeHtml(c.domain) + '</span>'
         + '<span class="wa-col-type wa-cred-type-cell">'
-        + '<span class="wa-badge">' + (c.type === 'cookie' ? 'Cookie' : c.type === 'oauth2' ? 'OAuth2' : c.type === 'token' ? 'OAuth2' : c.type === 'basic_auth' ? 'Basic Auth' : 'Header') + '</span>'
+        + '<span class="wa-badge">' + (c.type === 'cookie' ? gettext('Cookie') : c.type === 'oauth2' ? gettext('OAuth2') : c.type === 'token' ? gettext('OAuth2') : c.type === 'basic_auth' ? gettext('Basic Auth') : gettext('Header')) + '</span>'
         + (c.type === 'header' && c.header_names ? '<span class="wa-cred-header-names">(' + escapeHtml(c.header_names.slice(0, 3).join(', ')) + (c.header_names.length > 3 ? '...' : '') + ')</span>' : '')
         + '</span>'
         + '<span class="wa-col-scope wa-cred-scope-cell">'
         + '<span class="wa-badge wa-badge-scope">' + escapeHtml(scopeLabel) + '</span>'
         + '</span>'
         + '<span class="wa-col-updated wa-cred-updated-cell">' + escapeHtml((c.updated_at || '').slice(0, 10))
-        + (c.status !== 'ok' ? ' <span class="wa-badge wa-badge-warn">key changed</span>' : '') + '</span>'
+        + (c.status !== 'ok' ? ' <span class="wa-badge wa-badge-warn">' + gettext('key changed') + '</span>' : '')
         + (c.cookie_status === 'invalid' ? ' <span class="wa-badge wa-badge-error"' + (c.expired_at ? ' title="' + gettext('Expired: ') + escapeHtml(c.expired_at.slice(0, 10)) + '"' : '') + '>' + gettext('expired') + '</span>' : '') + '</span>'
         + '<span class="wa-col-actions">'
         + '<button type="button" class="btn btn-sm js-edit-cred" data-domain="' + escapeHtml(c.domain) + '" data-type="' + escapeHtml(c.type) + '" data-scope="' + escapeHtml(c.scope || '') + '">' + gettext('Edit') + '</button>'
@@ -401,7 +401,7 @@ function initAdapters() {
       }
     }
     if (help) {
-      helpText.textContent = "How to get it: " + help;
+      helpText.textContent = gettext("How to get it: ") + help;
       helpArea.hidden = false;
     } else {
       helpArea.hidden = true;
@@ -588,10 +588,10 @@ function initAdapters() {
           var item = document.createElement('div');
           item.className = 'wa-url-dropdown-item';
           var labels = [];
-          if (d.c || d.needs_cookie) { var cookieType = d.ct || d.cookie_type || ''; var cookieLabel = (cookieType === 'login') ? 'Cookie (login)' : 'Cookie (auto)'; labels.push(cookieLabel); }
-          if (d.ha || (d.needs_headers && d.needs_headers.length)) labels.push('Header');
-          if (d.t || d.needs_oauth2) labels.push('Token');
-          if (d.b || d.needs_basic_auth) labels.push('Basic Auth');
+          if (d.c || d.needs_cookie) { var cookieType = d.ct || d.cookie_type || ''; var cookieLabel = (cookieType === 'login') ? gettext('Cookie (login)') : gettext('Cookie (auto)'); labels.push(cookieLabel); }
+          if (d.ha || (d.needs_headers && d.needs_headers.length)) labels.push(gettext('Header'));
+          if (d.t || d.needs_oauth2) labels.push(gettext('Token'));
+          if (d.b || d.needs_basic_auth) labels.push(gettext('Basic Auth'));
           item.innerHTML = '<span>' + escapeHtml(d.d || d.domain) + (labels.length ? ' <span class="text-gray" style="font-size:12px">(' + escapeHtml(labels.join(' + ')) + ')</span>' : '') + '</span>';
           item.addEventListener('mousedown', function(ev) {
             ev.preventDefault();
@@ -753,14 +753,14 @@ function initAdapters() {
       nameEl = document.createElement('input');
       nameEl.type = 'text';
       nameEl.className = 'form-input wa-header-row-name-input';
-      nameEl.placeholder = 'Header-Name';
+      nameEl.placeholder = gettext('Header-Name');
       nameEl.value = name;
     }
 
     var valEl = document.createElement('input');
     valEl.type = 'text';
     valEl.className = 'form-input wa-header-row-value';
-    valEl.placeholder = 'value';
+    valEl.placeholder = gettext('value');
     valEl.value = value;
 
     row.appendChild(nameEl);
