@@ -129,8 +129,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && \
     apt-get -y install nodejs
 # install single-file from upstream
+# pin transitive simple-cdp dependency, newer versions require Node >= 23 (CloseEvent global)
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install -g single-file-cli@2.0.83
+    npm install -g single-file-cli@2.0.83 && \
+    npm install --prefix "$(npm root -g)/single-file-cli" simple-cdp@1.8.6
 # playwright Python package (needed by browser_fallback in chromium mode)
 RUN pip install --no-cache-dir playwright>=1.59.0
 # node_modules for JS runtime scripts (playwright-core)
