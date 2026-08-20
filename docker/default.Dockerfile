@@ -21,7 +21,7 @@ FROM python:3.13.7-slim-bookworm AS build-deps
 # libpq-dev: build Postgres client from source
 # libicu-dev libsqlite3-dev: build Sqlite ICU extension
 # llibffi-dev libssl-dev curl rustup: build Python cryptography from source
-RUN apt-get update && apt-get -y install build-essential pkg-config libpq-dev libicu-dev libsqlite3-dev wget unzip libffi-dev libssl-dev curl
+RUN apt-get update && apt-get -y install build-essential pkg-config libpq-dev libicu-dev libsqlite3-dev wget unzip libffi-dev libssl-dev curl git
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 WORKDIR /etc/linkding
