@@ -23,6 +23,13 @@ FROM python:3.13.7-alpine3.21 AS build-deps
 # libpq-dev: build Postgres client from source
 # icu-dev sqlite-dev: build Sqlite ICU extension
 # libffi-dev openssl-dev rust cargo: build Python cryptography from source
+# Optional: replace Alpine apk mirror for faster downloads.
+# Domestic (China): --build-arg APK_MIRROR=mirrors.tuna.tsinghua.edu.cn
+# Overseas or unspecified: leave APK_MIRROR empty to use the official Alpine source.
+ARG APK_MIRROR=""
+RUN if [ -n "$APK_MIRROR" ]; then \
+        sed -i "s|dl-cdn.alpinelinux.org|$APK_MIRROR|g" /etc/apk/repositories; \
+    fi
 RUN apk update && apk add alpine-sdk linux-headers libpq-dev pkgconfig icu-dev sqlite-dev libffi-dev openssl-dev rust cargo git
 WORKDIR /etc/linkding
 # install uv, use installer script for now as distroless images are not availabe for armv7
@@ -57,6 +64,13 @@ RUN wget https://www.sqlite.org/${SQLITE_RELEASE_YEAR}/sqlite-amalgamation-${SQL
 FROM python:3.13.7-alpine3.21 AS linkding
 LABEL org.opencontainers.image.source="https://github.com/sissbruecker/linkding"
 # install runtime dependencies
+# Optional: replace Alpine apk mirror for faster downloads.
+# Domestic (China): --build-arg APK_MIRROR=mirrors.tuna.tsinghua.edu.cn
+# Overseas or unspecified: leave APK_MIRROR empty to use the official Alpine source.
+ARG APK_MIRROR=""
+RUN if [ -n "$APK_MIRROR" ]; then \
+        sed -i "s|dl-cdn.alpinelinux.org|$APK_MIRROR|g" /etc/apk/repositories; \
+    fi
 RUN apk update && apk add bash curl icu libpq mailcap libssl3 gettext
 # create www-data user and group
 RUN set -x ; \
@@ -102,12 +116,39 @@ FROM --platform=$BUILDPLATFORM node:22-alpine AS ublock-build
 WORKDIR /etc/linkding
 COPY scripts/setup-ublock.sh .
 # Download and unzip uBlock Origin Lite, patch manifest to enable annoyances by default
+# Optional: replace Alpine apk mirror for faster downloads.
+# Domestic (China): --build-arg APK_MIRROR=mirrors.tuna.tsinghua.edu.cn
+# Overseas or unspecified: leave APK_MIRROR empty to use the official Alpine source.
+ARG APK_MIRROR=""
+RUN if [ -n "$APK_MIRROR" ]; then \
+        sed -i "s|dl-cdn.alpinelinux.org|$APK_MIRROR|g" /etc/apk/repositories; \
+    fi
 RUN apk add --no-cache curl jq unzip && \
     sh setup-ublock.sh
+
+# Install runtime node_modules (playwright-core) in parallel with linkding-plus apk/npm steps
+FROM --platform=$BUILDPLATFORM node:22-alpine AS node-runtime
+WORKDIR /tmp/npm-runtime
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev && mkdir -p /opt/node-runtime && mv node_modules /opt/node-runtime/
+
+# Install playwright Python package into venv in parallel with linkding-plus apk/npm steps
+FROM build-deps AS playwright-install
+ENV VIRTUAL_ENV=/etc/linkding/.venv
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /root/.local/bin/uv pip install 'playwright>=1.59.0'
 
 
 FROM linkding AS linkding-plus
 # install node, chromium
+# Optional: replace Alpine apk mirror for faster downloads.
+# Domestic (China): --build-arg APK_MIRROR=mirrors.tuna.tsinghua.edu.cn
+# Overseas or unspecified: leave APK_MIRROR empty to use the official Alpine source.
+ARG APK_MIRROR=""
+RUN if [ -n "$APK_MIRROR" ]; then \
+        sed -i "s|dl-cdn.alpinelinux.org|$APK_MIRROR|g" /etc/apk/repositories; \
+    fi
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     apk update && \
     apk add nodejs npm chromium
@@ -116,11 +157,10 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     npm install -g single-file-cli@2.0.83 && \
     npm install --prefix "$(npm root -g)/single-file-cli" simple-cdp@1.8.6
-# playwright Python package (needed by browser_fallback in chromium mode)
-RUN pip install --no-cache-dir playwright>=1.59.0
-# node_modules for JS runtime scripts (playwright-core)
-COPY package.json package-lock.json /tmp/npm-runtime/
-RUN cd /tmp/npm-runtime && npm ci --no-cache --omit=dev && mkdir -p /opt/node-runtime && mv node_modules /opt/node-runtime/ && rm -rf /tmp/npm-runtime
+# copy playwright Python package from parallel build stage
+COPY --from=playwright-install /etc/linkding/.venv /etc/linkding/.venv
+# copy runtime node_modules from parallel build stage
+COPY --from=node-runtime /opt/node-runtime /opt/node-runtime
 ENV NODE_PATH=/opt/node-runtime/node_modules
 # copy uBlock
 COPY --from=ublock-build /etc/linkding/uBOLite.chromium.mv3 uBOLite.chromium.mv3/

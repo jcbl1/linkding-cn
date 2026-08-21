@@ -3,8 +3,9 @@ FROM --platform=$BUILDPLATFORM node:22-alpine AS node-build
 WORKDIR /etc/linkding
 # install build dependencies
 COPY rollup.config.mjs postcss.config.js esbuild.config.mjs package.json package-lock.json ./
-# Disable npm cache and install dependencies
-RUN npm ci --no-cache
+# install dependencies
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-cache
 # copy files needed for JS build
 COPY bookmarks/frontend ./bookmarks/frontend
 COPY bookmarks/styles ./bookmarks/styles
@@ -19,20 +20,28 @@ RUN npm run build
 
 FROM python:3.13.7-slim-bookworm AS build-deps
 # Add required packages
-# build-essential pkg-config: build Python packages from source
+# build-essential pkg-config: build Python packages from source (e.g. uwsgi)
 # libpq-dev: build Postgres client from source
 # libicu-dev libsqlite3-dev: build Sqlite ICU extension
-# llibffi-dev libssl-dev curl rustup: build Python cryptography from source
-RUN apt-get update && apt-get -y install build-essential pkg-config libpq-dev libicu-dev libsqlite3-dev wget unzip libffi-dev libssl-dev curl git
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
+# libffi-dev libssl-dev: fallback for C extension builds (cryptography/cffi have aarch64 wheels)
+# Optional: replace Debian apt mirror for faster downloads.
+# Domestic (China): --build-arg APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+# Overseas or unspecified: leave APT_MIRROR empty to use the official Debian source.
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+    fi
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get -y install build-essential pkg-config libpq-dev libicu-dev libsqlite3-dev wget unzip libffi-dev libssl-dev curl git
 WORKDIR /etc/linkding
 # install uv, use installer script for now as distroless images are not availabe for armv7
 ADD https://astral.sh/uv/0.8.13/install.sh /uv-installer.sh
 RUN chmod +x /uv-installer.sh && /uv-installer.sh
 # install python dependencies
 COPY pyproject.toml uv.lock ./
-RUN /root/.local/bin/uv sync --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /root/.local/bin/uv sync --no-dev
 
 
 FROM build-deps AS compile-icu
@@ -58,8 +67,17 @@ RUN wget https://www.sqlite.org/${SQLITE_RELEASE_YEAR}/sqlite-amalgamation-${SQL
 
 FROM python:3.13.7-slim-bookworm AS linkding
 LABEL org.opencontainers.image.source="https://github.com/sissbruecker/linkding"
+# Optional: replace Debian apt mirror for faster downloads.
+# Domestic (China): --build-arg APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+# Overseas or unspecified: leave APT_MIRROR empty to use the official Debian source.
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+    fi
 # install runtime dependencies
-RUN apt-get update && apt-get -y install mime-support libpq-dev libicu-dev libssl3 curl gettext
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get -y install mime-support libpq-dev libicu-dev libssl3 curl gettext
 WORKDIR /etc/linkding
 # copy python dependencies
 COPY --from=build-deps /etc/linkding/.venv /etc/linkding/.venv
@@ -103,8 +121,28 @@ COPY scripts/setup-ublock.sh .
 RUN apk add --no-cache curl jq unzip && \
     sh setup-ublock.sh
 
+# Install runtime node_modules (playwright-core) in parallel with linkding-plus apt/npm steps
+FROM --platform=$BUILDPLATFORM node:22-alpine AS node-runtime
+WORKDIR /tmp/npm-runtime
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev && mkdir -p /opt/node-runtime && mv node_modules /opt/node-runtime/
+
+# Install playwright Python package into venv in parallel with linkding-plus apt/npm steps
+FROM build-deps AS playwright-install
+ENV VIRTUAL_ENV=/etc/linkding/.venv
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /root/.local/bin/uv pip install 'playwright>=1.59.0'
+
 
 FROM linkding AS linkding-plus
+# Optional: replace Debian apt mirror for faster downloads.
+# Domestic (China): --build-arg APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+# Overseas or unspecified: leave APT_MIRROR empty to use the official Debian source.
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+    fi
 # install chromium and node dependencies
 ENV NODE_MAJOR=20
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -124,11 +162,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     npm install -g single-file-cli@2.0.83 && \
     npm install --prefix "$(npm root -g)/single-file-cli" simple-cdp@1.8.6
-# playwright Python package (needed by browser_fallback in chromium mode)
-RUN pip install --no-cache-dir playwright>=1.59.0
-# node_modules for JS runtime scripts (playwright-core)
-COPY package.json package-lock.json /tmp/npm-runtime/
-RUN cd /tmp/npm-runtime && npm ci --no-cache --omit=dev && mkdir -p /opt/node-runtime && mv node_modules /opt/node-runtime/ && rm -rf /tmp/npm-runtime
+# copy playwright Python package from parallel build stage
+COPY --from=playwright-install /etc/linkding/.venv /etc/linkding/.venv
+# copy runtime node_modules from parallel build stage
+COPY --from=node-runtime /opt/node-runtime /opt/node-runtime
 ENV NODE_PATH=/opt/node-runtime/node_modules
 # copy uBlock
 COPY --from=ublock-build /etc/linkding/uBOLite.chromium.mv3 uBOLite.chromium.mv3/
