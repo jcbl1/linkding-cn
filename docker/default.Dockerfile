@@ -9,6 +9,8 @@ RUN npm ci --no-cache
 COPY bookmarks/frontend ./bookmarks/frontend
 COPY bookmarks/styles ./bookmarks/styles
 COPY bookmarks/services/vendor/defuddle_entry.js ./bookmarks/services/vendor/defuddle_entry.js
+COPY site_adapters/frontend ./site_adapters/frontend
+COPY site_adapters/styles ./site_adapters/styles
 # Disable PostCSS cache and run build
 ENV POSTCSS_DISABLE_CACHE=true
 ENV NODE_ENV=production

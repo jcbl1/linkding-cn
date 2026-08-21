@@ -9,6 +9,8 @@ RUN npm ci --no-cache
 COPY bookmarks/frontend ./bookmarks/frontend
 COPY bookmarks/styles ./bookmarks/styles
 COPY bookmarks/services/vendor/defuddle_entry.js ./bookmarks/services/vendor/defuddle_entry.js
+COPY site_adapters/frontend ./site_adapters/frontend
+COPY site_adapters/styles ./site_adapters/styles
 # Disable PostCSS cache and run build
 ENV POSTCSS_DISABLE_CACHE=true
 ENV NODE_ENV=production
@@ -21,7 +23,7 @@ FROM python:3.13.7-alpine3.21 AS build-deps
 # libpq-dev: build Postgres client from source
 # icu-dev sqlite-dev: build Sqlite ICU extension
 # libffi-dev openssl-dev rust cargo: build Python cryptography from source
-RUN apk update && apk add alpine-sdk linux-headers libpq-dev pkgconfig icu-dev sqlite-dev libffi-dev openssl-dev rust cargo
+RUN apk update && apk add alpine-sdk linux-headers libpq-dev pkgconfig icu-dev sqlite-dev libffi-dev openssl-dev rust cargo git
 WORKDIR /etc/linkding
 # install uv, use installer script for now as distroless images are not availabe for armv7
 ADD https://astral.sh/uv/0.8.13/install.sh /uv-installer.sh

@@ -3,6 +3,7 @@
 
 # Include files required for build or at runtime
 !/bookmarks
+!/site_adapters
 !/locale
 
 !/bootstrap.sh
