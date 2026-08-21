@@ -174,7 +174,7 @@ class BookmarkBundleForm(forms.ModelForm):
     html_snapshot = forms.ChoiceField(
         choices=BookmarkSearchForm.FILTER_ASSET_CHOICES,
         widget=forms.RadioSelect,
-        label=_("HTML snapshot"),
+        label=_("Snapshot"),
         required=False,
     )
     preview_image = forms.ChoiceField(

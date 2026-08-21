@@ -171,10 +171,10 @@
                     data-chip-value="{{ details.bookmark.unread|yesno:'true,false' }}"
                     data-chip-active-icon="#ld-icon-read-check"
                     data-chip-inactive-icon="#ld-icon-unread-x"
-                    data-chip-active-text="{% translate "Read" context "bookmark status" %}"
+                    data-chip-active-text="{% translate "Read" context "bookmark_status" %}"
                     data-chip-inactive-text="{% translate 'Unread' %}">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"><use xlink:href="{% if details.bookmark.unread %}#ld-icon-unread-x{% else %}#ld-icon-read-check{% endif %}"></use></svg>
-              <span>{% if details.bookmark.unread %}{% translate "Unread" %}{% else %}{% translate "Read" context "bookmark status" %}{% endif %}</span>
+              <span>{% if details.bookmark.unread %}{% translate "Unread" %}{% else %}{% translate "Read" context "bookmark_status" %}{% endif %}</span>
             </button>
             {% if details.profile.enable_sharing %}
               <button type="button"
@@ -201,7 +201,7 @@
                 <span class="detail-files-actions">
                   {% if details.snapshots_enabled %}
                     <button type="button" class="btn btn-link btn-sm" data-action="create-snapshot"
-                            {% if details.has_pending_assets %}disabled{% endif %}>{% translate "Create HTML snapshot" %}</button>
+                            {% if details.has_pending_assets %}disabled{% endif %}>{% translate "Create snapshot" %}</button>
                   {% endif %}
                   {% if details.uploads_enabled %}
                     <button type="button" class="btn btn-link btn-sm" data-action="upload-asset">{% translate "Upload file" %}</button>

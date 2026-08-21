@@ -757,8 +757,8 @@ class BookmarkSearchForm(forms.Form):
     ]
     FILTER_UNREAD_CHOICES = [
         (BookmarkSearch.FILTER_UNREAD_OFF, _("Off")),
-        (BookmarkSearch.FILTER_UNREAD_YES, pgettext_lazy("bookmark filter", "Unread")),
-        (BookmarkSearch.FILTER_UNREAD_NO, pgettext_lazy("bookmark filter", "Read")),
+        (BookmarkSearch.FILTER_UNREAD_YES, pgettext_lazy("bookmark_status", "Unread")),
+        (BookmarkSearch.FILTER_UNREAD_NO, pgettext_lazy("bookmark_status", "Read")),
     ]
     FILTER_TAGGED_CHOICES = [
         (BookmarkSearch.FILTER_TAGGED_OFF, _("Off")),
@@ -986,7 +986,7 @@ class UserProfile(models.Model):
     ACTION_REMOVE = "remove"
     ACTION_KEYS = [ACTION_READ, ACTION_VIEW, ACTION_HIGHLIGHT, ACTION_EDIT, ACTION_ARCHIVE, ACTION_REMOVE]
     ACTION_LABELS = {
-        ACTION_READ: pgettext_lazy("bookmark action", "Read"),
+        ACTION_READ: pgettext_lazy("bookmark_action", "Read"),
         ACTION_VIEW: _("View"),
         ACTION_HIGHLIGHT: _("Highlights"),
         ACTION_EDIT: _("Edit"),
@@ -1014,9 +1014,9 @@ class UserProfile(models.Model):
     STATUS_UNREAD = "unread"
     STATUS_KEYS = [STATUS_NOTES, STATUS_SHARE, STATUS_UNREAD]
     STATUS_LABELS = {
-        STATUS_NOTES: pgettext_lazy("bookmark status", "Notes"),
-        STATUS_SHARE: pgettext_lazy("bookmark status", "Share"),
-        STATUS_UNREAD: pgettext_lazy("bookmark status", "Unread"),
+        STATUS_NOTES: pgettext_lazy("bookmark_status", "Notes"),
+        STATUS_SHARE: pgettext_lazy("bookmark_status", "Share"),
+        STATUS_UNREAD: pgettext_lazy("bookmark_status", "Unread"),
     }
     STATUS_ICONS = {
         STATUS_NOTES: "ld-icon-note",

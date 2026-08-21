@@ -39,7 +39,7 @@
     <div class="assets-actions">
       {% if details.snapshots_enabled %}
         <button type="submit" name="create_html_snapshot" value="{{ details.bookmark.id }}" class="btn btn-sm"
-                {% if details.has_pending_assets %}disabled{% endif %}>{% translate "Create HTML snapshot" %}
+                {% if details.has_pending_assets %}disabled{% endif %}>{% translate "Create snapshot" %}
         </button>
       {% endif %}
       {% if details.uploads_enabled %}

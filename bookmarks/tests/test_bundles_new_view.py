@@ -150,9 +150,16 @@ class BundleNewViewTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         response = self.client.get(reverse("linkding:bundles.new"))
         soup = self.make_soup(response.content.decode())
 
+        # 标签文案随 i18n 变化，改用 label id 检查渲染顺序
         html = response.content.decode()
-        self.assertLess(html.index("HTML snapshot"), html.index("Preview image"))
-        self.assertLess(html.index("Preview image"), html.index("Favicon"))
+        self.assertLess(
+            html.index('bundle-html-snapshot-label'),
+            html.index('bundle-preview-image-label'),
+        )
+        self.assertLess(
+            html.index('bundle-preview-image-label'),
+            html.index('bundle-favicon-label'),
+        )
 
         self.assertTrue(
             soup.select_one('input[name="html_snapshot"][value="off"]').has_attr(

@@ -653,9 +653,9 @@ reddit.com/r/Music music reddit</pre>
             {% if has_snapshot_support %}
               <div class="settings-row">
                 <div class="settings-copy">
-                  <label for="{{ profile_quick_form.enable_automatic_html_snapshots.id_for_label }}" class="settings-label">{% translate "HTML snapshots" %}</label>
+                  <label for="{{ profile_quick_form.enable_automatic_html_snapshots.id_for_label }}" class="settings-label">{% translate "Snapshots" %}</label>
                   <div class="form-input-hint">
-                    {% translate "Automatically create HTML snapshots when adding new bookmarks." %}
+                    {% translate "Automatically create snapshots when adding new bookmarks." %}
                     {% translate "If disabled, snapshots can still be created manually from the bookmark details view." %}
                   </div>
                 </div>
@@ -666,7 +666,7 @@ reddit.com/r/Music music reddit</pre>
               </div>
               <div class="settings-row">
                 <div class="settings-copy">
-                  <label class="settings-label">{% translate "Create missing HTML snapshots" %}</label>
+                  <label class="settings-label">{% translate "Create missing snapshots" %}</label>
                 </div>
                 <div class="settings-inline-action">
                   <button class="btn btn-primary"
@@ -679,9 +679,9 @@ reddit.com/r/Music music reddit</pre>
             {% else %}
               <div class="settings-row is-disabled">
                 <div class="settings-copy">
-                  <label class="settings-label">{% translate "HTML snapshots" %}</label>
+                  <label class="settings-label">{% translate "Snapshots" %}</label>
                   <div class="form-input-hint">
-                    {% translate "This instance does not currently support HTML snapshots." %}
+                    {% translate "This instance does not currently support snapshots." %}
                   </div>
                 </div>
                 <label class="form-switch settings-switch">
