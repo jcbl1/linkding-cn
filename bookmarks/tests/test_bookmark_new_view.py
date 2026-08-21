@@ -280,7 +280,8 @@ class BookmarkNewViewTestCase(TestCase, BookmarkFactoryMixin):
         response = self.client.get(reverse("linkding:favicon_image", args=["nonexistent.com"]))
         self.assertEqual(response.status_code, 200)
         self.assertIn('Cache-Control', response)
-        self.assertIn('max-age=3600', response['Cache-Control'])
+        # 兜底图标使用 no-cache，确保后台任务完成后浏览器能立即拉取真实图标
+        self.assertIn('no-cache', response['Cache-Control'])
 
     def test_should_show_respective_share_hint(self):
         self.user.profile.enable_sharing = True
