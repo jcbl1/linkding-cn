@@ -667,7 +667,12 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
           apiGet(urls.subscriptionManage + '?action=detect_id&source=' + encodeURIComponent(src)).then(function (r) {
             if (r) {
               if (r.id) { idEl.value = r.id; }
-              if (r.name) { nameEl.value = r.name; }
+              if (r.name) {
+                nameEl.value = r.name;
+                // _meta.name is the canonical display name; prefer it over the
+                // path-derived placeholder set above.
+                displayNameEl.placeholder = r.name;
+              }
             }
           }).catch(function () {});
         }

@@ -831,7 +831,7 @@ def extract(url, config, html_content=None, output_path=None):
 5. `_create_snapshot(url, output_path, config)` — 快照回退
 
 **安全约束**：
-- 脚本必须在 `data/site_adapters/` 目录树内（`is_allowed_script_path` 校验）
+- 脚本必须在所属适配器目录内（`is_allowed_script_path` 校验，基准为适配器的 `local_path`，回退到 `data/site_adapters/`）
 - 超时默认 30 秒
 - 超时后线程标记为 daemon（不会强制杀死，进程退出时自动清理）
 

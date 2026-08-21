@@ -3675,8 +3675,8 @@ msgid "Source"
 msgstr "来源"
 
 #: site_adapters/templates/site_adapters/site_adapters.html:144
-msgid "Remote: https:// URL. Local: relative path under adapters/."
-msgstr "远程：https:// URL。本地：adapters/ 下的相对路径。"
+msgid "Remote: https:// URL. Local: absolute path or relative path under adapters/ ."
+msgstr "远程：https:// URL。本地：绝对路径或 adapters/ 下的相对路径。"
 
 #: site_adapters/templates/site_adapters/site_adapters.html:147
 msgid "Display Name"

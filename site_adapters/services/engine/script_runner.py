@@ -73,9 +73,15 @@ def run_script(script_path: str, *, hook_name: str = None, url: str = '',
         logger.error("Unsupported script extension: %s", script_path)
         return None
 
-    # Runtime defense: check script path is in allowed directory
+    # Runtime defense: check script path is in allowed directory.
+    # Base dir follows the adapter's physical location (config._adapter.local_path),
+    # falling back to the global LD_SITE_ADAPTERS_DIR. This supports absolute-path
+    # sources whose scripts live outside the global adapters dir.
     from django.conf import settings
     base_dir = getattr(settings, 'LD_SITE_ADAPTERS_DIR', '')
+    adapter = config.get('_adapter') if isinstance(config, dict) else None
+    if isinstance(adapter, dict) and adapter.get('local_path'):
+        base_dir = os.path.dirname(os.path.realpath(adapter['local_path']))
     if base_dir and not is_allowed_script_path(script_path, base_dir):
         logger.error("Script path not allowed: %s", script_path)
         return None

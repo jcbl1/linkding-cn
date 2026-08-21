@@ -140,8 +140,8 @@
             <input type="hidden" name="id" value="">
             <div class="wa-form-group">
               <label class="wa-form-label" for="sub-source">{% translate "Source" %} <span class="wa-required">*</span></label>
-              <input type="text" id="sub-source" name="source" class="form-input" required autocomplete="off" placeholder="./my_subcription/adapters.jsonc or https://...">
-              <span class="form-input-hint">{% translate "Remote: https:// URL. Local: relative path under adapters/." %}</span>
+              <input type="text" id="sub-source" name="source" class="form-input" required autocomplete="off" placeholder="./my_subscription/adapters.jsonc, /abs/path/adapters.jsonc, or https://...">
+              <span class="form-input-hint">{% translate "Remote: https:// URL. Local: absolute path or relative path under adapters/ ." %}</span>
             </div>
             <div class="wa-form-group">
               <label class="wa-form-label" for="sub-display-name">{% translate "Display Name" %} <span class="wa-optional">({% translate 'optional' %})</span></label>
