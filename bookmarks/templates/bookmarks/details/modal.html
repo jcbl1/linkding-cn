@@ -259,7 +259,7 @@
               {% if details.bookmark.preview_image_file %}
                 <img class="info-preview-image" src="{% static details.bookmark.preview_image_file %}" alt=""/>
               {% elif details.bookmark.preview_image_remote_url %}
-                <img class="info-preview-image" src="{{ details.bookmark.preview_image_remote_url }}" referrerpolicy="unsafe-url" alt="" onerror="this.closest('.detail-section').style.display='none'"/>
+                <img class="info-preview-image" src="{{ details.bookmark.preview_image_remote_url }}" referrerpolicy="strict-origin-when-cross-origin" alt="" onerror="this.closest('.detail-section').style.display='none'"/>
               {% endif %}
             </div>
           {% endif %}
