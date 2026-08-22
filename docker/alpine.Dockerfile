@@ -153,10 +153,8 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     apk update && \
     apk add nodejs npm chromium
 # install single-file from upstream
-# pin transitive simple-cdp dependency, newer versions require Node >= 23 (CloseEvent global)
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install -g single-file-cli@2.0.83 && \
-    npm install --prefix "$(npm root -g)/single-file-cli" simple-cdp@1.8.6
+    npm install -g single-file-cli@2.1.3
 # copy playwright Python package from parallel build stage
 COPY --from=playwright-install /etc/linkding/.venv /etc/linkding/.venv
 # copy runtime node_modules from parallel build stage

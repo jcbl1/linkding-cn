@@ -144,7 +144,7 @@ RUN if [ -n "$APT_MIRROR" ]; then \
         sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
     fi
 # install chromium and node dependencies
-ENV NODE_MAJOR=20
+ENV NODE_MAJOR=24
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
@@ -158,10 +158,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && \
     apt-get -y install nodejs
 # install single-file from upstream
-# pin transitive simple-cdp dependency, newer versions require Node >= 23 (CloseEvent global)
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install -g single-file-cli@2.0.83 && \
-    npm install --prefix "$(npm root -g)/single-file-cli" simple-cdp@1.8.6
+    npm install -g single-file-cli@2.1.3
 # copy playwright Python package from parallel build stage
 COPY --from=playwright-install /etc/linkding/.venv /etc/linkding/.venv
 # copy runtime node_modules from parallel build stage
