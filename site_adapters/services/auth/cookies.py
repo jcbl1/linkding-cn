@@ -746,7 +746,7 @@ def verify_and_refresh(*, cookie_config: dict, url: str, domain_key: str,
     else:
         _mark_login_cookie_expired(source, username, domain_key, scope)
 
-    return cookie_str
+    return None
 
 
 def copy_cookie_data_to_temp(data) -> str | None:

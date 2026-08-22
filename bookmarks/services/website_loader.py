@@ -21,6 +21,7 @@ from bookmarks.utils import get_registrable_domain
 from site_adapters.services.auth.cookies import (
     verify_and_refresh,
 )
+from site_adapters.services.auth.cookies import _should_refresh_cookie
 from site_adapters.services.auth.credentials import get_shared_cookie
 from site_adapters.services.config import (
     apply_request_url,
@@ -393,6 +394,53 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
                 )
         except NonRetryableMetadataError as exc:
             logger.info("Metadata request failed without retry. url=%s", exc_info=exc)
+
+            # If the HTTP status indicates an auth failure (e.g. 401/403),
+            # attempt cookie refresh before giving up.  The L1
+            # http_head_probe would normally detect this inside
+            # verify_and_refresh, but load_page raises before that runs.
+            cookie_config = config.get("cookie") if config else {}
+            invalid_status = (
+                cookie_config.get("verify", {})
+                .get("http_head_probe", {})
+                .get("invalid_status", [401, 403])
+            ) if cookie_config else [401, 403]
+
+            if (
+                cookie_config
+                and _should_refresh_cookie(cookie_config)
+                and exc.status_code in invalid_status
+                and attempt < _METADATA_MAX_RETRIES
+            ):
+                domain_key = config.get("_domain_key")
+                logger.info(
+                    "Non-retryable status %s for %s, attempting cookie refresh",
+                    exc.status_code, domain_key,
+                )
+                new_cookie = verify_and_refresh(
+                    cookie_config=cookie_config, url=fetch_url, domain_key=domain_key,
+                    verify_context={
+                        "url": fetch_url,
+                        "status": exc.status_code or 0,
+                        "title": "",
+                        "body_preview": "",
+                    },
+                    username=username,
+                    scope=config.get("_effective_cookie_scope", ""),
+                )
+                if new_cookie:
+                    config["_user_cookie"] = new_cookie
+                    logger.info(
+                        "Cookie refreshed for %s after %s, retrying request",
+                        domain_key, exc.status_code,
+                    )
+                    continue
+                else:
+                    logger.warning(
+                        "Cookie refresh failed for %s after %s",
+                        domain_key, exc.status_code,
+                    )
+
             if include_sources:
                 return _empty_metadata(url), {"error": str(exc)}
             return _empty_metadata(url)
