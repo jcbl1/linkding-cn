@@ -238,17 +238,18 @@
         input.checked = value;
       }
 
-      function updatePreviewImageDisplay() {
+      function updatePreviewImageDisplay(overrideSrc) {
         const previewImageImg = document.getElementById('preview-image-img');
         const previewImageDetails = document.querySelector('details.preview-image');
+        const displaySrc = overrideSrc !== undefined ? overrideSrc : (previewImageRemoteUrlInput.value || '');
         if (previewImageImg) {
           // Reset fallback attempt flag when src changes
           delete previewImageImg.dataset.fallbackAttempted;
-          previewImageImg.src = previewImageRemoteUrlInput.value || '';
-          previewImageImg.style.display = previewImageRemoteUrlInput.value ? '' : 'none';
+          previewImageImg.src = displaySrc;
+          previewImageImg.style.display = displaySrc ? '' : 'none';
         }
         if (previewImageDetails) {
-          previewImageDetails.open = !!previewImageRemoteUrlInput.value;
+          previewImageDetails.open = !!displaySrc;
         }
       }
 
@@ -312,6 +313,9 @@
               updateInput(tagsInput, existingBookmark.tag_names.join(" "));
               updateCheckbox(unreadCheckbox, existingBookmark.unread);
               updateCheckbox(sharedCheckbox, existingBookmark.shared);
+              // 更新预览图：优先使用已存在书签的本地预览图文件 URL，其次使用远程 URL
+              updateInput(previewImageRemoteUrlInput, existingBookmark.preview_image_remote_url || '');
+              updatePreviewImageDisplay(existingBookmark.preview_image_url || existingBookmark.preview_image_remote_url || '');
             } else {
               // Update title and description with website metadata, unless they have been modified
               if (!isTitleModified) {
