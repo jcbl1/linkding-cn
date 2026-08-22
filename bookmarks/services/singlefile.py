@@ -140,6 +140,11 @@ _BROWSER_HOOK_BOILERPLATE = r"""
           );
         }
       }
+      // Wait for cleanup (including wait_elements) if the cleanup script
+      // registered an async cleanup function.
+      if (typeof window.__linkdingCleanup === "function") {
+        await window.__linkdingCleanup();
+      }
     } finally {
       dispatchEvent(new CustomEvent("single-file-on-before-capture-response"));
     }
@@ -153,6 +158,31 @@ _BROWSER_HOOK_BOILERPLATE = r"""
 """
 
 
+_WAIT_ELEMENTS_TIMEOUT_CAP = 30  # seconds
+
+
+def _resolve_wait_elements_timeout(config: dict) -> int:
+    """Resolve wait_elements_timeout: explicit value, or min(timeout, 30), or 0."""
+    if not config:
+        return 0
+    explicit = config.get("wait_elements_timeout")
+    if explicit is not None:
+        try:
+            val = int(explicit)
+            return val if val > 0 else 0
+        except (TypeError, ValueError):
+            pass
+    section_timeout = config.get("timeout")
+    if section_timeout is not None:
+        try:
+            val = int(section_timeout)
+            if val > 0:
+                return min(val, _WAIT_ELEMENTS_TIMEOUT_CAP)
+        except (TypeError, ValueError):
+            pass
+    return 0
+
+
 def _wrap_user_hook_script(source: str) -> str:
     checks = [
         "if (typeof before === 'function') "
@@ -164,7 +194,7 @@ def _wrap_user_hook_script(source: str) -> str:
 def _build_browser_script(config: dict, url: str = '') -> str | None:
     if not config:
         # No config at all — still enable default lazy image fix
-        cleanup = {"keep": [], "remove": [], "lazy": True, "removeClasses": {}, "setStyles": {}}
+        cleanup = {"keep": [], "remove": [], "lazy": True, "removeClasses": {}, "setStyles": {}, "waitElements": [], "waitElementsTimeout": 0}
     else:
         lazy = config.get("process_lazy_images")
         # process_lazy_images: true → default attrs; ["data-actualsrc", ...] → custom attrs
@@ -182,6 +212,8 @@ def _build_browser_script(config: dict, url: str = '') -> str | None:
             "lazy": lazy_config,
             "removeClasses": config.get("remove_classes") or {},
             "setStyles": config.get("set_styles") or {},
+            "waitElements": _as_list(config.get("wait_elements")),
+            "waitElementsTimeout": _resolve_wait_elements_timeout(config),
         }
     import site_adapters.services as _sa_services; vendor_path = os.path.join(os.path.dirname(_sa_services.__file__), 'engine', 'scripts', 'snapshot_browser_script.js')
     with open(vendor_path, encoding='utf-8') as f:

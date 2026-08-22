@@ -209,8 +209,8 @@ SNAPSHOT_FIELDS = {
     },
     "process_lazy_images": {
         "type": "bool|array<str>",
-        "en": 'Fix lazy-loaded images. true = built-in attr list; ["data-actualsrc"] = custom attrs.',
-        "zh": "修复懒加载图片。true 使用内置属性列表；数组指定自定义属性名。",
+        "en": 'Fix lazy-loaded images. true = built-in attr list; ["data-actualsrc"] = custom attrs (merged with built-in list). false disables.',
+        "zh": "修复懒加载图片。true 使用内置属性列表；数组指定自定义属性名（与内置列表合并）。false 禁用。",
         "example": True,
     },
     "process_carousels": {
@@ -226,8 +226,20 @@ SNAPSHOT_FIELDS = {
     },
     "set_styles": {
         "type": "object",
-        "en": 'Set inline styles on elements. Format: {"selector": {"prop": "value"}}.',
-        "zh": "设置指定元素的内联样式。格式: {\"selector\": {\"prop\": \"value\"}}。",
+        "en": 'Set inline styles on elements. Format: {"selector": {"prop": "value"}}. Supports !important and CSS custom properties (--var). ":root" selector targets documentElement.',
+        "zh": '设置指定元素的内联样式。格式：{"selector": {"prop": "value"}}。支持 !important 和 CSS 自定义属性（--var）。\":root\" 选择器指向 documentElement。',
+    },
+    "wait_elements": {
+        "type": "array<str>",
+        "en": 'CSS selectors to wait for before capture. Each entry is a selector; "|" separates OR alternatives. e.g. [".a | .b", ".c"] waits until (".a" OR ".b") AND ".c" are present. Non-matching selectors time out gracefully (capture proceeds with whatever is present).',
+        "zh": '捕获前等待元素出现。每个条目是一个选择器，"|" 分隔 OR 关系。如 [".a | .b", ".c"] 等待 (".a" 或 ".b") 且 ".c" 同时存在。未匹配的选择器超时后降级执行。',
+        "example": [".notion-scroller"],
+    },
+    "wait_elements_timeout": {
+        "type": "int",
+        "en": "Timeout (seconds) for wait_elements. When omitted, defaults to min(timeout, 30).",
+        "zh": "wait_elements 的超时时间（秒）。省略时默认取 min(timeout, 30)。",
+        "example": 10,
     },
     "singlefile_args": {
         "type": "object",

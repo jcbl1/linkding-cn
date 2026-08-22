@@ -272,14 +272,30 @@ global.CustomEvent = dom.window.CustomEvent;
 global.dispatchEvent = dom.window.dispatchEvent.bind(dom.window);
 global.addEventListener = dom.window.addEventListener.bind(dom.window);
 global.getComputedStyle = () => ({ whiteSpace: "normal" });
+global.MutationObserver = class { observe(){} disconnect(){} };
 eval(fs.readFileSync(process.argv[2], "utf8"));
-window.dispatchEvent(new window.CustomEvent("single-file-on-before-capture-request"));
-const meta = document.querySelector("meta[name=linkding-cleanup-stats]");
-console.log(JSON.stringify({
-  wrap: document.querySelectorAll(".interaction_bar__wrap").length,
-  indicator: document.querySelectorAll(".swiper_indicator_wrp_pc").length,
-  stats: meta && meta.getAttribute("content")
-}));
+
+(async () => {
+  // If the cleanup script registered __linkdingCleanup (standalone mode),
+  // call it directly. Otherwise dispatch the capture request event which
+  // triggers the boilerplate's async handler.
+  if (typeof window.__linkdingCleanup === "function") {
+    await window.__linkdingCleanup();
+  } else {
+    window.dispatchEvent(new window.CustomEvent("single-file-on-before-capture-request"));
+    // Wait for the async response event (standalone mode dispatches it)
+    await new Promise(resolve => {
+      addEventListener("single-file-on-before-capture-response", resolve, { once: true });
+      window.dispatchEvent(new window.CustomEvent("single-file-on-before-capture-request"));
+    });
+  }
+  const meta = document.querySelector("meta[name=linkding-cleanup-stats]");
+  console.log(JSON.stringify({
+    wrap: document.querySelectorAll(".interaction_bar__wrap").length,
+    indicator: document.querySelectorAll(".swiper_indicator_wrp_pc").length,
+    stats: meta && meta.getAttribute("content")
+  }));
+})();
 """
         result = subprocess.run(
             [

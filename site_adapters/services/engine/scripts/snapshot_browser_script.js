@@ -22,7 +22,19 @@
 (() => {
   dispatchEvent(new CustomEvent("single-file-user-script-init"));
 
-  addEventListener("single-file-on-before-capture-request", () => {
+  const shadowHosts = new Map();
+  const queryAll = (root, selector) => {
+    const matches = Array.from(root.querySelectorAll(selector));
+    root.querySelectorAll("*").forEach((el) => {
+      if (el.shadowRoot) {
+        shadowHosts.set(el.shadowRoot, el);
+        matches.push(...queryAll(el.shadowRoot, selector));
+      }
+    });
+    return matches;
+  };
+
+  const cleanupFn = async () => {
     const config = window.__linkding_cleanup_config || {};
     const stats = { removed: 0, kept: 0, carousels: 0, media: 0 };
 
@@ -44,18 +56,6 @@
       "figcaption", "figure", "footer", "form", "header", "li", "main",
       "nav", "ol", "section", "td", "th", "ul",
     ]);
-
-    const shadowHosts = new Map();
-    const queryAll = (root, selector) => {
-      const matches = Array.from(root.querySelectorAll(selector));
-      root.querySelectorAll("*").forEach((el) => {
-        if (el.shadowRoot) {
-          shadowHosts.set(el.shadowRoot, el);
-          matches.push(...queryAll(el.shadowRoot, selector));
-        }
-      });
-      return matches;
-    };
 
     const isWithin = (ancestor, node) => {
       let current = node;
@@ -244,8 +244,13 @@
       }
     };
 
+    // Default lazy-load attribute names, used when config.lazy is true (boolean).
+    // When config.lazy is an array, those attributes are used instead.
+    const DEFAULT_LAZY_ATTRS = ["data-src", "data-actualsrc", "data-original", "data-lazy-src", "data-original-src", "data-actual-image", "data-lazy", "data-defer-src", "src"];
+
     // Shared by lazy-image fixing and carousel extraction.
-    const resolveMediaUrl = (el) => {
+    // When lazyAttrs is provided, only those attributes are checked.
+    const resolveMediaUrl = (el, lazyAttrs) => {
       if (el.tagName === "VIDEO") {
         const source = el.querySelector("source");
         const candidates = [
@@ -262,7 +267,7 @@
       const srcsetUrl = selectSrcset(srcset);
       if (srcsetUrl) return toAbsoluteUrl(srcsetUrl);
 
-      const attrs = ["data-src", "data-actualsrc", "data-original", "data-lazy-src", "data-original-src", "data-actual-image", "data-lazy", "data-defer-src", "src"];
+      const attrs = Array.isArray(lazyAttrs) && lazyAttrs.length ? lazyAttrs : DEFAULT_LAZY_ATTRS;
       for (const attr of attrs) {
         const value = el.getAttribute(attr);
         if (value && !isPlaceholderSrc(value)) return toAbsoluteUrl(value);
@@ -421,7 +426,7 @@
       } catch {}
       collectMedia(container).forEach((el) => {
         prepareCarouselMediaForMeasurement(el);
-        const url = resolveMediaUrl(el);
+        const url = resolveMediaUrl(el, Array.isArray(config.lazy) ? config.lazy : null);
         if (el.tagName === "IMG") {
           if (!url || seen.has(url)) return;
           seen.add(url);
@@ -526,9 +531,25 @@
     }
 
     // Set styles: { ".selector": { "prop": "value" } }
+    // Supports !important (via setProperty) and CSS custom properties (--var).
+    // ":root" selector routes to documentElement for custom property assignment.
+    // Note: ":root" only matches documentElement; for ":root selector" combos
+    // like ":root .foo", use the selector as-is (queryAll handles it).
     for (const [selector, styles] of Object.entries(config.setStyles || {})) {
-      queryAll(document, selector).forEach((el) => {
-        for (const [prop, value] of Object.entries(styles)) el.style[prop] = value;
+      const elements = selector === ":root"
+        ? [document.documentElement]
+        : queryAll(document, selector);
+      elements.forEach((el) => {
+        for (const [prop, value] of Object.entries(styles)) {
+          const val = String(value);
+          if (prop.startsWith("--") || val.includes("!important")) {
+            const cleanVal = val.replace("!important", "").trim();
+            const priority = val.includes("!important") ? "important" : "";
+            el.style.setProperty(prop, cleanVal, priority);
+          } else {
+            el.style[prop] = val;
+          }
+        }
       });
     }
 
@@ -581,5 +602,68 @@
     meta.name = 'linkding-cleanup-stats';
     meta.content = JSON.stringify(stats);
     document.head && document.head.appendChild(meta);
+  };
+
+  // Wait for specified elements to appear before running cleanup.
+  // Each entry in waitElements is a selector string; "|" separates OR alternatives.
+  // e.g. [".a | .b", ".c"] means: (".a" OR ".b") AND ".c" must be present.
+  const waitForElements = async () => {
+    const cfg = window.__linkding_cleanup_config || {};
+    const waitElements = Array.isArray(cfg.waitElements) ? cfg.waitElements : [];
+    if (!waitElements.length) return;
+
+    const timeoutSec = (cfg.waitElementsTimeout || 0) * 1000; // ms
+    const deadline = timeoutSec > 0 ? Date.now() + timeoutSec : 0;
+
+    for (const entry of waitElements) {
+      // Split on "|" for OR semantics
+      const alternatives = String(entry).split("|").map(s => s.trim()).filter(Boolean);
+      if (!alternatives.length) continue;
+
+      // Check if any alternative already matches
+      const check = () => alternatives.some(sel => queryAll(document, sel).length > 0);
+
+      if (check()) continue;
+
+      // Poll with MutationObserver
+      await new Promise(resolve => {
+        if (check()) { resolve(); return; }
+
+        const observer = new MutationObserver(() => {
+          if (check()) { observer.disconnect(); resolve(); }
+        });
+        observer.observe(document.documentElement, {
+          childList: true, subtree: true, attributes: true,
+        });
+
+        if (deadline > 0) {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) { observer.disconnect(); resolve(); return; }
+          setTimeout(() => { observer.disconnect(); resolve(); }, remaining);
+        }
+        // If no timeout, wait indefinitely (shouldn't happen in practice)
+      });
+    }
+  };
+
+  const runWithWait = async () => { await waitForElements(); await cleanupFn(); };
+
+  // Register cleanup so the before-hook boilerplate can await it.
+  window.__linkdingCleanup = runWithWait;
+
+  // Also listen to the capture request event. When no before-hook boilerplate
+  // is present (standalone mode), we handle preventDefault + response ourselves.
+  // When the boilerplate IS present, it calls window.__linkdingCleanup directly
+  // and dispatches the response event, so this listener is a no-op fallback.
+  addEventListener("single-file-on-before-capture-request", (event) => {
+    // If the boilerplate already registered (window.__linkdingHooks exists),
+    // let it handle the async flow — our cleanup runs via __linkdingCleanup.
+    if (window.__linkdingHooks) return;
+
+    // Standalone mode: manage preventDefault + response ourselves.
+    event.preventDefault();
+    runWithWait().finally(() => {
+      dispatchEvent(new CustomEvent("single-file-on-before-capture-response"));
+    });
   });
 })();

@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — 完整字段参考
-//  由 fields.py 自动生成（单一信源）  |  2026-08-22 10:27:26
+//  由 fields.py 自动生成（单一信源）  |  2026-08-22 17:10:12
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -180,10 +180,12 @@
         "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。用于改写真正发起请求的 URL。
         "keep_elements": [],                               // 快照中保留的元素。其余全部移除。
         "remove_elements": [],                             // 快照中移除的元素。
-        "process_lazy_images": true,                       // 修复懒加载图片。true 使用内置属性列表；数组指定自定义属性名。
+        "process_lazy_images": true,                       // 修复懒加载图片。true 使用内置属性列表；数组指定自定义属性名（与内置列表合并）。false 禁用。
         "process_carousels": ["faceplate-carousel"],       // 需要转换为横向媒体列表的轮播容器 CSS 选择器。轮播转换默认关闭。
         "remove_classes": {},                              // 移除指定元素的 CSS class。格式: {"selector": ["class1", "class2"]}。
-        "set_styles": {},                                  // 设置指定元素的内联样式。格式: {"selector": {"prop": "value"}}。
+        "set_styles": {},                                  // 设置指定元素的内联样式。格式：{"selector": {"prop": "value"}}。支持 !important 和 CSS 自定义属性（--var）。":root" 选择器指向 documentElement。
+        "wait_elements": [".notion-scroller"],             // 捕获前等待元素出现。每个条目是一个选择器，"|" 分隔 OR 关系。如 [".a | .b", ".c"] 等待 (".a" 或 ".b") 且 ".c" 同时存在。未匹配的选择器超时后降级执行。
+        "wait_elements_timeout": 10,                       // wait_elements 的超时时间（秒）。省略时默认取 min(timeout, 30)。
         "singlefile_args": {},                             // SingleFile CLI 参数，如 {"--browser-wait-delay": 2000}。
         "toggles": {},                                     // 用户可切换的元素去除。{"id": {"selector": "...", "label": "...", "default": true}}。
         "scripts": [

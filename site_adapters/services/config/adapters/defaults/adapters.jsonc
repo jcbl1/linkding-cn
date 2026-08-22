@@ -43,7 +43,10 @@
       ]
     },
     "snapshot": {
-      "process_lazy_images": true,
+      "process_lazy_images": [
+        "data-src", "data-actualsrc", "data-original", "data-lazy-src",
+        "data-original-src", "data-actual-image", "data-lazy", "data-defer-src"
+      ],
       "singlefile_args": {
         "--browser-arg": "--disable-blink-features=AutomationControlled",
         "--block-fonts": true

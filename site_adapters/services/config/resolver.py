@@ -58,6 +58,23 @@ logger = logging.getLogger(__name__)
 # Merge helpers
 # ---------------------------------------------------------------------------
 
+# Default lazy-load attribute names used when process_lazy_images is true.
+# Kept in sync with DEFAULT_LAZY_ATTRS in snapshot_browser_script.js.
+_DEFAULT_LAZY_ATTRS = [
+    "data-src", "data-actualsrc", "data-original", "data-lazy-src",
+    "data-original-src", "data-actual-image", "data-lazy", "data-defer-src",
+]
+
+
+def _merge_lazy_attrs(section_attrs: list) -> list:
+    """Merge section-level lazy attrs with built-in defaults (union, deduplicated)."""
+    merged = list(_DEFAULT_LAZY_ATTRS)
+    for attr in section_attrs:
+        if attr and attr not in merged:
+            merged.append(attr)
+    return merged
+
+
 def _merge_dicts(base: dict, override: dict) -> dict:
     """Merge two dicts: override values replace base, None removes key."""
     result = dict(base)
@@ -397,7 +414,12 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
         if 'content_type' in section_data:
             result['content_type'] = section_data['content_type']
         if 'process_lazy_images' in section_data:
-            result['process_lazy_images'] = section_data['process_lazy_images']
+            lazy = section_data['process_lazy_images']
+            if isinstance(lazy, list):
+                # Merge with built-in default attributes (union, deduplicated)
+                result['process_lazy_images'] = _merge_lazy_attrs(lazy)
+            else:
+                result['process_lazy_images'] = lazy
         if 'process_carousels' in section_data:
             result['process_carousels'] = section_data['process_carousels']
         result['remove_classes'] = section_data.get('remove_classes')
@@ -405,6 +427,8 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
         result['scripts'] = section_data.get('scripts')
         result['singlefile_args'] = section_data.get('singlefile_args', {})
         result['toggles'] = section_data.get('toggles', {})
+        result['wait_elements'] = section_data.get('wait_elements')
+        result['wait_elements_timeout'] = section_data.get('wait_elements_timeout')
         result['remove_elements'], result['keep_elements'] = _apply_toggles(section_data, full_config, username)
 
     elif section == 'reader':

@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — Complete Field Reference
-//  Auto-generated from fields.py (single source of truth)  |  2026-08-22 10:27:26
+//  Auto-generated from fields.py (single source of truth)  |  2026-08-22 17:10:12
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -180,10 +180,12 @@
         "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Changes the URL used for the actual request.
         "keep_elements": [],                               // CSS selectors of elements to KEEP in the snapshot. Everything else is removed.
         "remove_elements": [],                             // CSS selectors of elements to REMOVE from the snapshot.
-        "process_lazy_images": true,                       // Fix lazy-loaded images. true = built-in attr list; ["data-actualsrc"] = custom attrs.
+        "process_lazy_images": true,                       // Fix lazy-loaded images. true = built-in attr list; ["data-actualsrc"] = custom attrs (merged with built-in list). false disables.
         "process_carousels": ["faceplate-carousel"],       // CSS selectors of carousel containers to replace with a horizontal media list. Carousel conversion is opt-in.
         "remove_classes": {},                              // Remove CSS classes from elements. Format: {"selector": ["class1", "class2"]}.
-        "set_styles": {},                                  // Set inline styles on elements. Format: {"selector": {"prop": "value"}}.
+        "set_styles": {},                                  // Set inline styles on elements. Format: {"selector": {"prop": "value"}}. Supports !important and CSS custom properties (--var). ":root" selector targets documentElement.
+        "wait_elements": [".notion-scroller"],             // CSS selectors to wait for before capture. Each entry is a selector; "|" separates OR alternatives. e.g. [".a | .b", ".c"] waits until (".a" OR ".b") AND ".c" are present. Non-matching selectors time out gracefully (capture proceeds with whatever is present).
+        "wait_elements_timeout": 10,                       // Timeout (seconds) for wait_elements. When omitted, defaults to min(timeout, 30).
         "singlefile_args": {},                             // SingleFile CLI arguments, e.g. {"--browser-wait-delay": 2000}.
         "toggles": {},                                     // User-toggleable element removal. {"toggle-id": {"selector": "...", "label": "...", "default": true}}.
         "scripts": [
