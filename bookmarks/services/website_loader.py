@@ -28,7 +28,7 @@ from site_adapters.services.config import (
     apply_rewrite_url,
 )
 from site_adapters.services.config.resolver import get_metadata_config
-from site_adapters.services.engine.script_runner import run_script
+from site_adapters.services.engine.script_runner import run_script, resolve_hook_timeout
 from site_adapters.services.execution_log import log_execution
 
 logger = logging.getLogger(__name__)
@@ -190,7 +190,9 @@ def _load_with_hooks(url: str, config: dict, scripts: list, username: str = '',
         if not script_path or not os.path.exists(script_path):
             continue
         logger.debug("Running metadata before hook: %s", script_path)
-        result = run_script(script_path, hook_name='before', url=url, config=dict(config))
+        hook_timeout = resolve_hook_timeout(entry, config)
+        result = run_script(script_path, hook_name='before', url=url,
+                            config=dict(config), timeout=hook_timeout)
         _apply_metadata_before_result(url, config, result)
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("After before hook, config keys: %s", list(config.keys()))
@@ -206,7 +208,9 @@ def _load_with_hooks(url: str, config: dict, scripts: list, username: str = '',
             if not script_path or not os.path.exists(script_path):
                 continue
             logger.debug("Running metadata replace hook: %s", script_path)
-            result = run_script(script_path, hook_name='replace', url=url, config=dict(config))
+            hook_timeout = resolve_hook_timeout(entry, config)
+            result = run_script(script_path, hook_name='replace', url=url,
+                                config=dict(config), timeout=hook_timeout)
             if result is None:
                 return _empty_metadata(url)
             if isinstance(result, dict):
@@ -244,12 +248,14 @@ def _load_with_hooks(url: str, config: dict, scripts: list, username: str = '',
         if not script_path or not os.path.exists(script_path):
             continue
         logger.debug("Running metadata after hook: %s", script_path)
+        hook_timeout = resolve_hook_timeout(entry, config)
         after_result = run_script(
             script_path,
             hook_name='after',
             url=url,
             config=dict(config),
             result_dict=result_dict,
+            timeout=hook_timeout,
         )
         if isinstance(after_result, dict):
             result_dict.update(after_result)

@@ -450,6 +450,11 @@ def _validate_domain_config(issues: list[dict], label: str, data: dict, file_dir
                             issues.append(_issue('error', 'script_hook_invalid', f"{label}.{section}.scripts[{i}].hook must be before/after/replace, got '{hook_val}'", file=file, adapter=adapter, path=f"{label}.{section}.scripts[{i}].hook"))
                         if hook_val == 'replace':
                             replace_count += 1
+                        # Validate optional per-script timeout
+                        script_timeout = item.get('timeout')
+                        if script_timeout is not None:
+                            if not isinstance(script_timeout, int) or isinstance(script_timeout, bool) or script_timeout <= 0:
+                                issues.append(_issue('error', 'script_timeout_invalid', f"{label}.{section}.scripts[{i}].timeout must be a positive integer", file=file, adapter=adapter, path=f"{label}.{section}.scripts[{i}].timeout"))
                         if script_path:
                             if '/' not in script_path and not os.path.isabs(script_path):
                                 script_path = os.path.join('scripts', script_path)

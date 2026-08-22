@@ -146,20 +146,20 @@ METADATA_FIELDS = {
         "example": {},
     },
     "scripts": {
-        "type": "array<{path, hook}>",
-        "en": 'Script hooks. hook: "before" | "replace" | "after". before runs inside the built-in engine; after modifies the saved snapshot HTML; replace bypasses the engine.',
-        "zh": "自定义脚本钩子。hook: before | replace | after。before 在内置引擎中运行，after 修改保存后的快照 HTML；replace 完全接管内置引擎。",
+        "type": "array<{path, hook, timeout?}>",
+        "en": 'Script hooks. hook: "before" | "replace" | "after". before runs inside the built-in engine; after modifies the saved snapshot HTML; replace bypasses the engine. Optional per-script timeout (seconds) overrides the section-level timeout for this script only; when omitted, the section-level timeout is used.',
+        "zh": '自定义脚本钩子。hook: before | replace | after。before 在内置引擎中运行，after 修改保存后的快照 HTML；replace 完全接管内置引擎。可选的 per-script timeout（秒）仅为此脚本覆盖 section 级 timeout；省略时继承 section 级 timeout。',
         "example": [],
         "example_items": [
             {"path": "example_before.py", "hook": "before"},
             {"path": "example_replace.py", "hook": "replace"},
-            {"path": "example_after.py", "hook": "after"},
+            {"path": "example_after.py", "hook": "after", "timeout": 120},
         ],
     },
     "timeout": {
         "type": "int",
-        "en": "Request timeout in seconds.",
-        "zh": "请求超时时间（秒）。",
+        "en": "Request timeout in seconds. Also serves as the fallback timeout for script hooks that do not declare their own.",
+        "zh": "请求超时时间（秒）。同时作为未声明自身 timeout 的脚本钩子的回退超时。",
         "example": 30,
     },
     "proxy": {
@@ -240,20 +240,20 @@ SNAPSHOT_FIELDS = {
         "zh": "用户可切换的元素去除。{\"id\": {\"selector\": \"...\", \"label\": \"...\", \"default\": true}}。",
     },
     "scripts": {
-        "type": "array<{path, hook}>",
-        "en": 'Script hooks. hook: "before" | "replace" | "after". before runs inside SingleFile; after modifies the saved snapshot file; replace bypasses SingleFile and declarative fields.',
-        "zh": "自定义脚本钩子。hook: before | replace | after。before 在 SingleFile 内运行，after 修改保存后的快照文件；replace 接管 SingleFile，并绕过声明式快照字段。",
+        "type": "array<{path, hook, timeout?}>",
+        "en": 'Script hooks. hook: "before" | "replace" | "after". before runs inside SingleFile; after modifies the saved snapshot file; replace bypasses SingleFile and declarative fields. Optional per-script timeout (seconds) overrides the section-level timeout for this script only; when omitted, the section-level timeout is used.',
+        "zh": '自定义脚本钩子。hook: before | replace | after。before 在 SingleFile 内运行，after 修改保存后的快照文件；replace 接管 SingleFile，并绕过声明式快照字段。可选的 per-script timeout（秒）仅为此脚本覆盖 section 级 timeout；省略时继承 section 级 timeout。',
         "example": [],
         "example_items": [
             {"path": "example_before.py", "hook": "before"},
             {"path": "example_replace.py", "hook": "replace"},
-            {"path": "example_after.py", "hook": "after"},
+            {"path": "example_after.py", "hook": "after", "timeout": 120},
         ],
     },
     "timeout": {
         "type": "int",
-        "en": "Snapshot timeout in seconds.",
-        "zh": "快照超时时间（秒）。",
+        "en": "Snapshot timeout in seconds. Also serves as the fallback timeout for script hooks that do not declare their own.",
+        "zh": "快照超时时间（秒）。同时作为未声明自身 timeout 的脚本钩子的回退超时。",
         "example": 30,
     },
     "proxy": {

@@ -30,6 +30,7 @@ _INTERNAL_TO_USER_KEY = {
     '_rewrite_url': 'rewrite_url',
     '_user_cookie': 'user_cookie',
     '_domain_key': 'domain_key',
+    '_url': 'url',
 }
 
 
@@ -42,6 +43,45 @@ def _sanitize_config(config: dict) -> dict:
         elif not key.startswith('_'):
             result[key] = value
     return result
+
+
+def resolve_hook_timeout(entry: dict, config: dict, default: int = 30) -> int:
+    """Resolve the timeout for a script hook entry.
+
+    Inheritance chain (first non-empty wins):
+    1. Per-script ``timeout`` declared in the scripts entry.
+    2. Section-level ``timeout`` from the resolved config (already merges
+       defaults → section overrides).
+    3. *default* (30 s — the script_runner baseline).
+
+    Args:
+        entry: The script entry dict from the ``scripts`` array.
+        config: The resolved section config dict.
+        default: Fallback when neither entry nor config declares a timeout.
+
+    Returns:
+        Timeout in seconds as a positive int.
+    """
+    # 1. Per-script timeout
+    script_timeout = entry.get('timeout') if isinstance(entry, dict) else None
+    if script_timeout is not None:
+        try:
+            val = int(script_timeout)
+            if val > 0:
+                return val
+        except (TypeError, ValueError):
+            pass
+    # 2. Section-level timeout (already includes defaults merge)
+    section_timeout = (config or {}).get('timeout')
+    if section_timeout is not None:
+        try:
+            val = int(section_timeout)
+            if val > 0:
+                return val
+        except (TypeError, ValueError):
+            pass
+    # 3. Baseline default
+    return default
 
 
 def run_script(script_path: str, *, hook_name: str = None, url: str = '',

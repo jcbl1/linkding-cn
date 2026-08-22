@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — Complete Field Reference
-//  Auto-generated from fields.py (single source of truth)  |  2026-08-19 01:23:02
+//  Auto-generated from fields.py (single source of truth)  |  2026-08-22 10:27:26
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -165,9 +165,9 @@
         "scripts": [
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},
-//           {"path": "example_after.py", "hook": "after"}
-        ],                                                 // Script hooks. hook: "before" | "replace" | "after". before runs inside the built-in engine; after modifies the saved snapshot HTML; replace bypasses the engine.
-        "timeout": 30,                                     // Request timeout in seconds.
+//           {"path": "example_after.py", "hook": "after", "timeout": 120}
+        ],                                                 // Script hooks. hook: "before" | "replace" | "after". before runs inside the built-in engine; after modifies the saved snapshot HTML; replace bypasses the engine. Optional per-script timeout (seconds) overrides the section-level timeout for this script only; when omitted, the section-level timeout is used.
+        "timeout": 30,                                     // Request timeout in seconds. Also serves as the fallback timeout for script hooks that do not declare their own.
         "proxy": null,                                     // HTTP proxy URL.
       },
 
@@ -189,9 +189,9 @@
         "scripts": [
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},
-//           {"path": "example_after.py", "hook": "after"}
-        ],                                                 // Script hooks. hook: "before" | "replace" | "after". before runs inside SingleFile; after modifies the saved snapshot file; replace bypasses SingleFile and declarative fields.
-        "timeout": 30,                                     // Snapshot timeout in seconds.
+//           {"path": "example_after.py", "hook": "after", "timeout": 120}
+        ],                                                 // Script hooks. hook: "before" | "replace" | "after". before runs inside SingleFile; after modifies the saved snapshot file; replace bypasses SingleFile and declarative fields. Optional per-script timeout (seconds) overrides the section-level timeout for this script only; when omitted, the section-level timeout is used.
+        "timeout": 30,                                     // Snapshot timeout in seconds. Also serves as the fallback timeout for script hooks that do not declare their own.
         "proxy": null,                                     // HTTP proxy URL.
       },
 

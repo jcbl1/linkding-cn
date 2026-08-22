@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — 完整字段参考
-//  由 fields.py 自动生成（单一信源）  |  2026-08-19 01:23:02
+//  由 fields.py 自动生成（单一信源）  |  2026-08-22 10:27:26
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -165,9 +165,9 @@
         "scripts": [
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},
-//           {"path": "example_after.py", "hook": "after"}
-        ],                                                 // 自定义脚本钩子。hook: before | replace | after。before 在内置引擎中运行，after 修改保存后的快照 HTML；replace 完全接管内置引擎。
-        "timeout": 30,                                     // 请求超时时间（秒）。
+//           {"path": "example_after.py", "hook": "after", "timeout": 120}
+        ],                                                 // 自定义脚本钩子。hook: before | replace | after。before 在内置引擎中运行，after 修改保存后的快照 HTML；replace 完全接管内置引擎。可选的 per-script timeout（秒）仅为此脚本覆盖 section 级 timeout；省略时继承 section 级 timeout。
+        "timeout": 30,                                     // 请求超时时间（秒）。同时作为未声明自身 timeout 的脚本钩子的回退超时。
         "proxy": null,                                     // HTTP 代理地址。
       },
 
@@ -189,9 +189,9 @@
         "scripts": [
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},
-//           {"path": "example_after.py", "hook": "after"}
-        ],                                                 // 自定义脚本钩子。hook: before | replace | after。before 在 SingleFile 内运行，after 修改保存后的快照文件；replace 接管 SingleFile，并绕过声明式快照字段。
-        "timeout": 30,                                     // 快照超时时间（秒）。
+//           {"path": "example_after.py", "hook": "after", "timeout": 120}
+        ],                                                 // 自定义脚本钩子。hook: before | replace | after。before 在 SingleFile 内运行，after 修改保存后的快照文件；replace 接管 SingleFile，并绕过声明式快照字段。可选的 per-script timeout（秒）仅为此脚本覆盖 section 级 timeout；省略时继承 section 级 timeout。
+        "timeout": 30,                                     // 快照超时时间（秒）。同时作为未声明自身 timeout 的脚本钩子的回退超时。
         "proxy": null,                                     // HTTP 代理地址。
       },
 

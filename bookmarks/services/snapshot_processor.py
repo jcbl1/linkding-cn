@@ -10,7 +10,7 @@ from site_adapters.services.auth.cookies import (
 )
 from site_adapters.services.auth.credentials import get_shared_cookie
 from site_adapters.services.config.resolver import get_snapshot_config
-from site_adapters.services.engine.script_runner import run_script
+from site_adapters.services.engine.script_runner import run_script, resolve_hook_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
             continue
         hook = entry.get('hook')
         if hook == 'replace':
-            replace_scripts.append(script_path)
+            replace_scripts.append(entry)
         elif hook == 'before':
             if script_path.endswith('.js') and singlefile.uses_builtin_engine(script_path, 'before'):
                 browser_before.append(script_path)
@@ -87,8 +87,10 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
     # 1. Run external before hooks
     for entry in external_before:
         script_path = entry.get('path', '')
-        logger.debug("Running snapshot before hook: %s", script_path)
-        result = run_script(script_path, hook_name='before', url=url, config=dict(config))
+        hook_timeout = resolve_hook_timeout(entry, config)
+        logger.debug("Running snapshot before hook: %s (timeout=%ds)", script_path, hook_timeout)
+        result = run_script(script_path, hook_name='before', url=url,
+                            config=dict(config), timeout=hook_timeout)
         if isinstance(result, str):
             suffix = raw_format if is_raw else "html"
             with tempfile.NamedTemporaryFile(
@@ -104,10 +106,12 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
             logger.warning(
                 "Snapshot SingleFile browser hooks are ignored when a replace hook is present"
             )
-        for script_path in replace_scripts:
-            logger.debug("Running snapshot replace hook: %s", script_path)
+        for entry_replace in replace_scripts:
+            script_path = entry_replace.get('path', '')
+            hook_timeout = resolve_hook_timeout(entry_replace, config)
+            logger.debug("Running snapshot replace hook: %s (timeout=%ds)", script_path, hook_timeout)
             run_script(script_path, hook_name='replace', url=url,
-                       config=dict(config), output_path=filepath)
+                       config=dict(config), output_path=filepath, timeout=hook_timeout)
             break  # Only one replace allowed
     elif is_raw:
         config_copy = dict(config)
@@ -134,14 +138,18 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
                 script_path,
             )
         else:
-            _run_builtin_after_hook(script_path, url, filepath, config)
+            _run_builtin_after_hook(script_path, url, filepath, config,
+                                     resolve_hook_timeout({}, config))
 
     # 4. Run external after hooks
     for entry in external_after:
         script_path = entry.get('path', '')
-        logger.debug("Running snapshot after hook: %s", script_path)
+        hook_timeout = resolve_hook_timeout(entry, config)
+        logger.debug("Running snapshot after hook: %s (timeout=%ds)", script_path, hook_timeout)
+        after_config = dict(config)
+        after_config['_url'] = url
         run_script(script_path, hook_name='after', output_path=filepath,
-                   config=dict(config))
+                   config=after_config, timeout=hook_timeout)
 
     # Cleanup temp file
     if before_content_path:
@@ -149,7 +157,8 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
             os.unlink(before_content_path)
 
 
-def _run_builtin_after_hook(script_path: str, url: str, filepath: str, config: dict):
+def _run_builtin_after_hook(script_path: str, url: str, filepath: str,
+                            config: dict, timeout: int = 30):
     """Run a SingleFile built-in after hook against the saved snapshot HTML."""
     import site_adapters.services as _sa_services
     from site_adapters.services.engine.script_runner import _sanitize_config
@@ -172,7 +181,7 @@ def _run_builtin_after_hook(script_path: str, url: str, filepath: str, config: d
             input=json.dumps(payload, ensure_ascii=False),
             capture_output=True,
             text=True,
-            timeout=config.get("timeout") or 30,
+            timeout=timeout,
         )
         if result.returncode != 0:
             logger.error(

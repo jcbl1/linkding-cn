@@ -21,7 +21,7 @@ from bookmarks.services import singlefile
 from site_adapters.services.config.loader import _cache
 from site_adapters.services.config.validator import validate_config
 from site_adapters.services.config.jsonc import parse_with_dups
-from site_adapters.services.engine.script_runner import run_script
+from site_adapters.services.engine.script_runner import run_script, resolve_hook_timeout
 
 
 class ScriptsPathResolutionTestCase(TestCase):
@@ -779,7 +779,8 @@ def replace(url, config, output_path):
             self.assertIn(before_js, passed_config["_browser_before_scripts"])
             self.assertNotIn("_browser_after_scripts", passed_config)
             mock_after.assert_called_once_with(
-                after_js, "https://example.com/page", output_path, config
+                after_js, "https://example.com/page", output_path, config,
+                mock.ANY
             )
 
     def test_js_external_node_before_stays_external(self):
@@ -1005,3 +1006,36 @@ def replace(url, config):
             metadata = load_website_metadata("https://example.com/page")
             self.assertIsNotNone(metadata)
             self.assertEqual(metadata.title, "done->done2")
+
+
+class ResolveHookTimeoutTestCase(TestCase):
+    """Test resolve_hook_timeout inheritance chain."""
+
+    def test_per_script_timeout_takes_priority(self):
+        entry = {"path": "foo.py", "hook": "after", "timeout": 120}
+        config = {"timeout": 30}
+        self.assertEqual(resolve_hook_timeout(entry, config), 120)
+
+    def test_section_timeout_when_no_script_timeout(self):
+        entry = {"path": "foo.py", "hook": "after"}
+        config = {"timeout": 60}
+        self.assertEqual(resolve_hook_timeout(entry, config), 60)
+
+    def test_default_when_neither_present(self):
+        entry = {"path": "foo.py", "hook": "after"}
+        config = {}
+        self.assertEqual(resolve_hook_timeout(entry, config), 30)
+
+    def test_default_when_config_none(self):
+        entry = {"path": "foo.py", "hook": "after"}
+        self.assertEqual(resolve_hook_timeout(entry, None), 30)
+
+    def test_invalid_script_timeout_falls_back(self):
+        entry = {"path": "foo.py", "hook": "after", "timeout": -5}
+        config = {"timeout": 60}
+        self.assertEqual(resolve_hook_timeout(entry, config), 60)
+
+    def test_invalid_script_timeout_falls_back_to_default(self):
+        entry = {"path": "foo.py", "hook": "after", "timeout": "abc"}
+        config = {}
+        self.assertEqual(resolve_hook_timeout(entry, config), 30)
