@@ -99,6 +99,14 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
                 tmp.write(result)
             before_content_path = tmp.name
             logger.debug("Before hook returned content, saved to: %s", before_content_path)
+        elif isinstance(result, dict):
+            # Before hook returned config overrides (e.g. dynamic User-Agent).
+            # Deep-merge into config so SingleFile picks up the changes.
+            from site_adapters.services.config.resolver import _merge_dicts
+            merged = _merge_dicts(config, result)
+            config.clear()
+            config.update(merged)
+            logger.debug("Before hook returned config overrides, merged: %s", result)
 
     # 2. Run replace hook or built-in engine
     if replace_scripts:
