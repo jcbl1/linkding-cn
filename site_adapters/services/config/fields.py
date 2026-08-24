@@ -320,6 +320,15 @@ ALL_SECTIONS = {
     "reader":   READER_FIELDS,
 }
 
+# ── routes (domain-level path routing) ───────────────────────────────────
+
+ROUTES_FIELD = {
+    "type": "object<path_pattern, domain_config>",
+    "en": "Path-based route overrides. Keys are regex patterns matched against the URL path (document order, first match wins). Values are domain configs with the same structure (auth, defaults, metadata, snapshot, reader). Route config deep-merges over the domain-level config. Domains without 'routes' behave exactly as before.",
+    "zh": "基于路径的路由覆盖。键为正则表达式，匹配 URL 路径（按文档顺序，首个匹配生效）。值为域名配置结构（auth、defaults、metadata、snapshot、reader），深合并到域名级配置之上。没有 routes 的域名行为不变。",
+    "example": {},
+}
+
 # ── auth sub-fields ──────────────────────────────────────────────────────
 
 AUTH_COOKIE_FIELDS = {
@@ -812,6 +821,7 @@ PRIORITY_NOTES = {
         "defaults: ( _builtin < _builtin_overrides < ) adapter-level defaults < domain-level defaults < metadata/snapshot/reader",
         "auth: auth < defaults.auth < section.auth; http.Cookie < auth.cookie",
         "Merge strategy: objects deep-merge (higher priority inherits, overrides and merges lower priority); scalar and array values replace; `null` deletes the key.",
+        "routes: when a domain has a 'routes' object, the URL path is matched against regex patterns in document order. The first matching route's config deep-merges over the domain-level config. Unmatched URLs fall back to the domain-level config. Routes are optional; domains without 'routes' behave exactly as before.",
     ],
     "zh": [
         "跨订阅源：config.jsonc._adapters 列表中越靠前的订阅源优先级越高。",
@@ -819,6 +829,7 @@ PRIORITY_NOTES = {
         "defaults: ( _builtin < _builtin_overrides < ) 适配器级 defaults < 域名级 defaults < metadata/snapshot/reader",
         "auth: auth < defaults.auth < section.auth；http.Cookie < auth.cookie",
         "合并策略：对象类型深合并（高优先级继承覆盖并合并低优先级）；标量、数组整体替换；`null` 表示删除该键。",
+        "routes：域名配置中的 'routes' 对象按文档顺序用正则匹配 URL 路径，首个匹配的 route 配置深合并到域名级配置之上。未匹配任何 route 时使用域名级配置。routes 为可选项，没有 routes 的域名行为不变。",
     ],
 }
 
@@ -914,6 +925,10 @@ SECTION_TITLES = {
     "sec_reader": {
         "en": "reader — article extraction via defuddle",
         "zh": "reader — 文章提取（defuddle 引擎）",
+    },
+    "sec_routes": {
+        "en": "routes — path-based config overrides (optional, first-match-wins)",
+        "zh": "routes — 基于路径的配置覆盖（可选，首个匹配生效）",
     },
     "defuddle_title": {
         "en": "Defuddle options; only contentSelector is shown, all other options are commented out",

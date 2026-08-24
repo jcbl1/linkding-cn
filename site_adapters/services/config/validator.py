@@ -15,6 +15,7 @@ Issue 结构:
 import json
 import logging
 import os
+import re
 
 from site_adapters.services.config import (
     is_safe_script_path,
@@ -393,7 +394,40 @@ def _validate_auth_block(issues: list[dict], label: str, auth: dict, file_dir: s
             issues.append(_issue('warning', 'unknown_field', f"{label}.{key} is unknown, will be ignored", file=file, adapter=adapter, path=f"{label}.{key}"))
 
 
-def _validate_domain_config(issues: list[dict], label: str, data: dict, file_dir: str, file: str | None = None, adapter: str | None = None):
+def _validate_routes(issues: list[dict], label: str, routes, file_dir: str, file: str | None = None, adapter: str | None = None):
+    """Validate a routes block."""
+    if not isinstance(routes, dict):
+        issues.append(_issue('error', 'routes_not_object',
+            f"{label}.routes must be an object (pattern -> config)",
+            file=file, adapter=adapter, path=f"{label}.routes"))
+        return
+    for pattern, route_config in routes.items():
+        route_label = f'{label}.routes["{pattern}"]'
+        # Validate regex
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            issues.append(_issue('error', 'route_pattern_invalid',
+                f"{route_label} invalid regex: {e}",
+                file=file, adapter=adapter, path=route_label))
+        # Validate route config structure
+        if not isinstance(route_config, dict):
+            issues.append(_issue('error', 'route_config_not_object',
+                f"{route_label} must be an object",
+                file=file, adapter=adapter, path=route_label))
+            continue
+        if route_config.get('type') == 'alias':
+            issues.append(_issue('warning', 'route_alias_not_supported',
+                f"{route_label}: alias type not supported in routes, will be ignored",
+                file=file, adapter=adapter, path=route_label))
+            continue
+        # Recursively validate route config as domain config,
+        # but disallow nested routes
+        _validate_domain_config(issues, route_label, route_config, file_dir,
+                                file=file, adapter=adapter, allow_routes=False)
+
+
+def _validate_domain_config(issues: list[dict], label: str, data: dict, file_dir: str, file: str | None = None, adapter: str | None = None, allow_routes: bool = True):
     if not isinstance(data, dict):
         issues.append(_issue('error', 'domain_not_object', f"{label} top level must be an object", file=file, adapter=adapter, path=label))
         return
@@ -420,6 +454,16 @@ def _validate_domain_config(issues: list[dict], label: str, data: dict, file_dir
             auth = default.get('auth')
             if auth is not None:
                 _validate_auth_block(issues, f"{label}.defaults.auth", auth, file_dir, file=file, adapter=adapter)
+
+    # Validate routes
+    routes = data.get('routes')
+    if routes is not None:
+        if not allow_routes:
+            issues.append(_issue('warning', 'routes_unexpected_location',
+                f"{label}.routes is not supported here (only at domain level), will be ignored",
+                file=file, adapter=adapter, path=f"{label}.routes"))
+        else:
+            _validate_routes(issues, label, routes, file_dir, file=file, adapter=adapter)
 
     # Validate sections
     for section in ('metadata', 'snapshot', 'reader'):
@@ -620,9 +664,9 @@ def validate_config(base_dir: str, domain_filename: str = '') -> list[dict]:
                     glob_defaults = data.get('defaults')
                     global_defaults_data = data.get('_builtin')
                     if glob_defaults and isinstance(glob_defaults, dict):
-                        _validate_domain_config(issues, f"{name}.defaults", glob_defaults, os.path.dirname(file_path), file=file_path, adapter=adapter_label)
+                        _validate_domain_config(issues, f"{name}.defaults", glob_defaults, os.path.dirname(file_path), file=file_path, adapter=adapter_label, allow_routes=False)
                     if global_defaults_data and isinstance(global_defaults_data, dict):
-                        _validate_domain_config(issues, f"{name}._builtin", global_defaults_data, os.path.dirname(file_path), file=file_path, adapter=adapter_label)
+                        _validate_domain_config(issues, f"{name}._builtin", global_defaults_data, os.path.dirname(file_path), file=file_path, adapter=adapter_label, allow_routes=False)
                 except json.JSONDecodeError as e:
                     issues.append(_issue('error', 'config_parse_error', f"{name} parse failed: {e}", file=file_path, adapter=adapter_label))
     else:

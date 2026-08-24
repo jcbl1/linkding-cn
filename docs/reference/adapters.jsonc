@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — Complete Field Reference
-//  Auto-generated from fields.py (single source of truth)  |  2026-08-24 23:03:32
+//  Auto-generated from fields.py (single source of truth)  |  2026-08-25 00:01:30
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -12,6 +12,7 @@
 //  - defaults: ( _builtin < _builtin_overrides < ) adapter-level defaults < domain-level defaults < metadata/snapshot/reader
 //  - auth: auth < defaults.auth < section.auth; http.Cookie < auth.cookie
 //  - Merge strategy: objects deep-merge (higher priority inherits, overrides and merges lower priority); scalar and array values replace; `null` deletes the key.
+//  - routes: when a domain has a 'routes' object, the URL path is matched against regex patterns in document order. The first matching route's config deep-merges over the domain-level config. Unmatched URLs fall back to the domain-level config. Routes are optional; domains without 'routes' behave exactly as before.
 
 {
 
@@ -224,7 +225,17 @@
 //           "removeContentPatterns": true,                   // Remove content-based boilerplate such as reading-time hints and article cards. Defaults to true.
 //           "fetch": null,                                   // [reserved] Reserved for future script-like support. Upstream Defuddle accepts a custom fetch function used for all HTTP requests during extraction, including async extractor requests such as YouTube transcripts or Reddit comments. A function cannot be expressed as a JSONC value.
         },
-      }
+      },
+
+      // routes — path-based config overrides (optional, first-match-wins)
+      "routes": {
+            "^/article/": {
+                  "metadata": { "select_title": [".article-title"] },
+            },
+            "^/video/": {
+                  "snapshot": { "keep_elements": [".video-player"] }
+            }
+      },
 
     }
   }

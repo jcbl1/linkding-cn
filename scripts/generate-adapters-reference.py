@@ -36,6 +36,7 @@ from site_adapters.services.config.fields import (
     DEFUDDLE_ARG_FIELDS,
     METADATA_FIELDS,
     PRIORITY_NOTES,
+    ROUTES_FIELD,
     READER_FIELDS,
     REFERENCE_META,
     SECTION_TITLES,
@@ -348,7 +349,18 @@ def generate(lang="en"):
     out.extend(_build_section(READER_FIELDS, 8, skip={"defuddle_args"}))
     out.append(f'{sec4}// {t("defuddle_title")}')
     out.extend(_render_defuddle_args(8))
-    out.append(f'{sec4}}}')
+    out.append(f'{sec4}}},')
+    out.append("")
+
+    out.append(f'{sec4}// {t("sec_routes")}')
+    out.append(f'{sec4}"routes": {{')
+    out.append(f'{sec4*2}"^/article/": {{')
+    out.append(f'{sec4*3}"metadata": {{ "select_title": [".article-title"] }},')
+    out.append(f'{sec4*2}}},')
+    out.append(f'{sec4*2}"^/video/": {{')
+    out.append(f'{sec4*3}"snapshot": {{ "keep_elements": [".video-player"] }}')
+    out.append(f'{sec4*2}}}')
+    out.append(f'{sec4}}},')
     out.append("")
 
     out.append(f'{_B*2}}}')

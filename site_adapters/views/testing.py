@@ -312,11 +312,12 @@ def _compute_credential_sources(config: dict, username: str, hostname: str,
 def _extract_match_info(config):
     """从 config 中提取匹配信息。"""
     if not config:
-        return {'matched': False, 'domain_key': None, 'adapter': None}
+        return {'matched': False, 'domain_key': None, 'adapter': None, 'route_key': None}
     return {
         'matched': True,
         'domain_key': config.get('_domain_key'),
         'adapter': config.get('_adapter'),
+        'route_key': config.get('_route_key'),
     }
 
 
@@ -343,6 +344,7 @@ def _test_metadata(url, base_dir, username, entries):
         'matched': match_info['matched'],
         'domain_key': match_info['domain_key'],
         'adapter': match_info['adapter'],
+        'route_key': match_info['route_key'],
         'config': config,
         'raw_config': show_cfg.get('raw_config'),
         'merged_config': show_cfg.get('merged'),
@@ -392,6 +394,7 @@ def _test_snapshot(url, base_dir, username, entries):
         'matched': match_info['matched'],
         'domain_key': match_info['domain_key'],
         'adapter': match_info['adapter'],
+        'route_key': match_info['route_key'],
         'config': config,
         'raw_config': show_cfg.get('raw_config'),
         'merged_config': show_cfg.get('merged'),
@@ -486,6 +489,7 @@ def _test_reader(url, base_dir, username, entries):
         'matched': match_info['matched'],
         'domain_key': match_info['domain_key'],
         'adapter': match_info['adapter'],
+        'route_key': match_info['route_key'],
         'config': config,
         'raw_config': show_cfg.get('raw_config'),
         'merged_config': show_cfg.get('merged'),
@@ -738,6 +742,7 @@ def _test_pipeline(url, base_dir, username, entries):
             'matched': md_match['matched'],
             'domain_key': md_match['domain_key'],
             'adapter': md_match['adapter'],
+            'route_key': md_match['route_key'],
             'credential_sources': credential_sources_meta,
             'no_match': metadata_no_match,
             'original_url': url,
@@ -754,6 +759,7 @@ def _test_pipeline(url, base_dir, username, entries):
             'domain_key': snap_match['domain_key'],
             'credential_sources': credential_sources_snap,
             'adapter': snap_match['adapter'],
+            'route_key': snap_match['route_key'],
             'no_match': snapshot_no_match,
             'original_url': url,
             'request_url': snap_config.get('_request_url', url) if snap_config else url,
@@ -771,6 +777,7 @@ def _test_pipeline(url, base_dir, username, entries):
             'domain_key': rd_match['domain_key'],
             'credential_sources': credential_sources_reader,
             'adapter': rd_match['adapter'],
+            'route_key': rd_match['route_key'],
             'no_match': reader_no_match,
             'original_url': url,
             'request_url': reader_config.get('_request_url', url) if reader_config else url,

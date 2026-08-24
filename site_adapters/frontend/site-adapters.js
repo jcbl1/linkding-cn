@@ -1053,6 +1053,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
   function renderMatchedConfig(r) {
     var matched = r.matched !== false;
     var domainKey = r.domain_key || '';
+    var routeKey = r.route_key || '';
     var adapter = r.adapter || null;
     var config = r.raw_config || r.config;
 
@@ -1060,6 +1061,9 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     if (matched && domainKey) {
       var name = (adapter && adapter.name) ? ' (' + esc(adapter.name) + ')' : '';
       summaryValue = esc(domainKey) + esc(name);
+      if (routeKey) {
+        summaryValue += ' \u2192 route: ' + esc(routeKey);
+      }
     } else {
       summaryValue = gettext('Not matched');
     }
@@ -1168,6 +1172,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       matched: result.matched !== false,
       domain_key: result.domain_key || '',
       adapter: result.adapter || null,
+      route_key: result.route_key || '',
       raw_config: result.raw_config
     };
     h += renderMatchedConfig(matchObj);
@@ -1415,6 +1420,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
         matched: cfg.matched !== false,
         domain_key: cfg.domain_key || '',
         adapter: cfg.adapter || null,
+        route_key: cfg.route_key || '',
         raw_config: cfg.raw_config
       };
       h += renderMatchedConfig(pipeCfgMatchObj);

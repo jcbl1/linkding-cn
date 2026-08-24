@@ -40,6 +40,7 @@ import logging
 import os
 import threading
 import time
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -495,6 +496,34 @@ def _resolve_alias(config, domain_map: dict, visited: set | None = None, _depth:
 # Core: load domain config
 # ---------------------------------------------------------------------------
 
+def _apply_route_matching(url: str, config: dict) -> tuple[dict, str | None]:
+    """Apply route matching to a domain config.
+
+    Extracts 'routes' from config, matches URL path against patterns
+    in document order, deep-merges the first matching route config.
+
+    Returns (config_with_routes_removed_and_route_applied, matched_pattern).
+    If no route matches, returns (config_without_routes, None).
+    """
+    routes = config.get('routes')
+    # Remove routes key regardless of whether a route matched
+    config = {k: v for k, v in config.items() if k != 'routes'}
+    if not routes or not isinstance(routes, dict):
+        return config, None
+    path = urlparse(url).path or '/'
+    for pattern, route_config in routes.items():
+        if not isinstance(route_config, dict):
+            continue
+        try:
+            if re.search(pattern, path):
+                config = deep_merge(config, route_config)
+                return config, pattern
+        except re.error:
+            logger.warning("Invalid route pattern: %s", pattern)
+            continue
+    return config, None
+
+
 def load_domain_config(url: str, base_dir: str) -> dict | None:
     """
     Load the domain config for a URL.
@@ -525,7 +554,10 @@ def load_domain_config(url: str, base_dir: str) -> dict | None:
         return None
 
     result = copy.deepcopy(domain_config)
+    # Apply route matching
+    result, route_key = _apply_route_matching(url, result)
     result['_domain_key'] = domain_key
+    result['_route_key'] = route_key
     result['_raw'] = copy.deepcopy(all_config.get('_raw_domain_configs', {}).get(domain_key, domain_config))
     adapter_map = all_config.get('_adapter_map', {})
     adapter = adapter_map.get(domain_key)
@@ -555,14 +587,18 @@ def show_config(url: str, base_dir: str) -> dict:
     adapter_map = all_config.get('_adapter_map', {})
     adapter = adapter_map.get(domain_key)
     raw_config = all_config.get('_raw_domain_configs', {}).get(domain_key, domain_config)
+    # Apply route matching to merged config
+    merged_config = copy.deepcopy(domain_config)
+    merged_config, route_key = _apply_route_matching(url, merged_config)
     result = {
         'url': url,
         'domain': _get_domain(url),
         'domain_key': domain_key,
         'matched': True,
         'adapter': adapter,
+        'route_key': route_key,
         'raw_config': raw_config,
-        'merged': copy.deepcopy(domain_config),
+        'merged': merged_config,
     }
     return result
 

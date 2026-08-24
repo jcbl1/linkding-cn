@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — 完整字段参考
-//  由 fields.py 自动生成（单一信源）  |  2026-08-24 23:03:32
+//  由 fields.py 自动生成（单一信源）  |  2026-08-25 00:01:30
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -12,6 +12,7 @@
 //  - defaults: ( _builtin < _builtin_overrides < ) 适配器级 defaults < 域名级 defaults < metadata/snapshot/reader
 //  - auth: auth < defaults.auth < section.auth；http.Cookie < auth.cookie
 //  - 合并策略：对象类型深合并（高优先级继承覆盖并合并低优先级）；标量、数组整体替换；`null` 表示删除该键。
+//  - routes：域名配置中的 'routes' 对象按文档顺序用正则匹配 URL 路径，首个匹配的 route 配置深合并到域名级配置之上。未匹配任何 route 时使用域名级配置。routes 为可选项，没有 routes 的域名行为不变。
 
 {
 
@@ -224,7 +225,17 @@
 //           "removeContentPatterns": true,                   // 移除阅读时长提示、文章卡片等内容型模板。默认为 true。
 //           "fetch": null,                                   // [预留] 预留给未来的脚本式扩展。上游 Defuddle 允许传入自定义 fetch 函数，用于提取过程中的所有 HTTP 请求，包括 YouTube 字幕、Reddit 评论等异步请求；函数无法表达为 JSONC 值。
         },
-      }
+      },
+
+      // routes — 基于路径的配置覆盖（可选，首个匹配生效）
+      "routes": {
+            "^/article/": {
+                  "metadata": { "select_title": [".article-title"] },
+            },
+            "^/video/": {
+                  "snapshot": { "keep_elements": [".video-player"] }
+            }
+      },
 
     }
   }
