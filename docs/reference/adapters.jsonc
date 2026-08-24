@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — Complete Field Reference
-//  Auto-generated from fields.py (single source of truth)  |  2026-08-22 17:10:12
+//  Auto-generated from fields.py (single source of truth)  |  2026-08-24 23:03:32
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -104,6 +104,7 @@
             "wait_cookie": [],                             // Cookie name(s) to wait for after page load.
             "timeout": 30,                                 // Browser refresh timeout in seconds. Defaults to 30.
             "interval": 14400,                             // Minimum seconds between refresh attempts. Defaults to 14400 (4 hours).
+            "user_data_dir": "default",                    // Persistent browser profile directory for cookie refresh. "default" uses the project Chromium profile (shared with SingleFile snapshots), which helps bypass bot detection on sites like Reddit. Absolute or BASE_DIR-relative paths are also accepted. Omit to use a fresh ephemeral context.
           },
         },
 

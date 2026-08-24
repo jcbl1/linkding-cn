@@ -497,6 +497,21 @@ def refresh_cookie_declarative(refresh_config: dict, url: str,
     timeout = int(refresh_config.get('timeout', 30) * 1000)  # s → ms for Playwright
     license_key = getattr(django_settings, 'LD_BROWSER_CLOAKBROWSER_LICENSE_KEY', '')
 
+    # Resolve persistent profile directory (optional).
+    # "default" → {BASE_DIR}/chromium-profile (same path SingleFile uses).
+    # Relative paths resolve against BASE_DIR; absolute paths used as-is.
+    raw_profile = refresh_config.get('user_data_dir', '')
+    user_data_dir = ''
+    if raw_profile:
+        if raw_profile == 'default':
+            base_dir = getattr(django_settings, 'BASE_DIR', '')
+            user_data_dir = os.path.join(base_dir, 'chromium-profile') if base_dir else ''
+        elif os.path.isabs(raw_profile):
+            user_data_dir = raw_profile
+        else:
+            base_dir = getattr(django_settings, 'BASE_DIR', '')
+            user_data_dir = os.path.join(base_dir, raw_profile) if base_dir else raw_profile
+
     # 使用临时文件作为 Node 子进程的 I/O 载体
     tmp_path = None
     try:
@@ -515,6 +530,7 @@ def refresh_cookie_declarative(refresh_config: dict, url: str,
             'chromium_path': chromium_path,
             'timeout': timeout,
             'licenseKey': license_key,
+            'user_data_dir': user_data_dir,
         }
         cmd = ['node', script_path]
         subprocess_timeout = max(timeout / 1000 + 30, 60)

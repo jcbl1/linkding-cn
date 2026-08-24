@@ -428,6 +428,12 @@ AUTH_COOKIE_FIELDS = {
         "zh": "最小刷新间隔（秒）。默认为 14400（4 小时）。",
         "example": 14400,
     },
+    "refresh.user_data_dir": {
+        "type": '"default" | str',
+        "en": 'Persistent browser profile directory for cookie refresh. "default" uses the project Chromium profile (shared with SingleFile snapshots), which helps bypass bot detection on sites like Reddit. Absolute or BASE_DIR-relative paths are also accepted. Omit to use a fresh ephemeral context.',
+        "zh": 'Cookie 刷新使用的持久化浏览器用户目录。"default" 使用项目内置 Chromium profile（与 SingleFile 快照共享），可绕过 Reddit 等站点的 bot 检测。也支持绝对路径或相对于 BASE_DIR 的路径。省略则使用临时无状态上下文。',
+        "example": "default",
+    },
 }
 
 AUTH_OAUTH2_FIELDS = {

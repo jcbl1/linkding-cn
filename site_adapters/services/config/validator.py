@@ -297,7 +297,7 @@ def _validate_cookie_block(issues: list[dict], label: str, cookie: dict, file_di
             issues.append(_issue('error', 'cookie_block_error', f"{label}.refresh must be an object", file=file, adapter=adapter, path=f"{label}.refresh"))
         else:
             for key in refresh:
-                if key not in ("url", "wait_cookie", "timeout", "interval"):
+                if key not in ("url", "wait_cookie", "timeout", "interval", "user_data_dir"):
                     issues.append(_issue('warning', 'unknown_field', f"{label}.refresh.{key} is unknown, will be ignored", file=file, adapter=adapter, path=f"{label}.refresh.{key}"))
     # refresh_interval
     refresh_block = cookie.get("refresh")

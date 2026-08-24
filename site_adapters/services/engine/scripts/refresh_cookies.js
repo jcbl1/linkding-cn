@@ -21,6 +21,7 @@ const {
   chromium_path = "",
   timeout = 30000,
   licenseKey = "",
+  user_data_dir = "",
 } = input;
 const outPath = cookie_file || outputPath;
 const waitForCookie = wait_cookie || waitCookie;
@@ -82,6 +83,19 @@ async function getLauncher() {
   // chromium 模式
   const pw = require("playwright-core");
   const execPath = findChromium();
+
+  // When user_data_dir is configured, use a persistent context so that
+  // existing session/cookies/fingerprint in the profile are reused.  This
+  // is required for sites that detect fresh headless contexts (e.g. Reddit).
+  if (user_data_dir) {
+    return {
+      launch: null, // signal: caller uses launchPersistentContext directly
+      opts: {},
+      userDataDir: user_data_dir,
+      execPath,
+    };
+  }
+
   return {
     launch: (opts) => pw.chromium.launch({
       headless: true,
@@ -94,17 +108,35 @@ async function getLauncher() {
 }
 
 (async () => {
-  const { launch, opts } = await getLauncher();
-  const browser = await launch(opts);
-  const context = await browser.newContext();
+  const launcher = await getLauncher();
+  const { launch, opts } = launcher;
+
+  let browser, context;
+  if (launcher.userDataDir) {
+    // Persistent context: browser and context are the same object
+    const pw = require("playwright-core");
+    context = await pw.chromium.launchPersistentContext(launcher.userDataDir, {
+      headless: true,
+      executablePath: launcher.execPath,
+      args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+    });
+  } else {
+    browser = await launch(opts);
+    context = await browser.newContext();
+  }
   const page = await context.newPage();
 
-  try {
-    await page.goto(url, { waitUntil: "networkidle", timeout });
+ try {
+    // Use domcontentloaded: networkidle can hang on heavy sites (e.g. Reddit
+    // with a persistent profile), and the waitForCookie loop below handles
+    // the actual readiness check.
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout });
 
     if (waitForCookie.length > 0) {
+      // Normalize to array: "loid" → ["loid"], ["loid","token"] → as-is
+      const targets = Array.isArray(waitForCookie) ? waitForCookie : [waitForCookie];
+      const targetSet = new Set(targets);
       const deadline = Date.now() + timeout;
-      const targetSet = new Set(waitForCookie);
       let allFound = false;
       while (Date.now() < deadline) {
         const cookies = await context.cookies();
@@ -133,6 +165,8 @@ async function getLauncher() {
     console.log(`${result.length} cookies (${freshCookies.length} fresh, ${result.length - freshCookies.length} preserved)`);
   } finally {
     await context.close();
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
   }
 })().catch(err => { console.error(err.message); process.exit(1); });
