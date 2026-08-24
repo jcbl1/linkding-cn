@@ -1335,3 +1335,125 @@ class UseBrowserTestCase(TestCase):
             result = website_loader._load_page_via_browser("https://example.com", config)
 
         self.assertIsNone(result)
+
+
+class BrowserEventLoopLeakTestCase(TestCase):
+    """Regression tests for Playwright event-loop leak that caused
+    SynchronousOnlyOperation on all subsequent DB access.
+
+    When _load_page_via_browser uses Playwright sync API, the event loop
+    must be stopped via pw.stop() in the finally block.  Without it the
+    loop leaks into the calling thread and Django's async-unsafe guard
+    rejects every subsequent ORM call (e.g. session lookups).
+    """
+
+    def setUp(self):
+        website_loader._load_website_metadata_cached.cache_clear()
+        website_loader._load_website_metadata_config_cached.cache_clear()
+
+    def _make_mock_browser(self):
+        """Build a mock browser + playwright pair matching _launch_chromium."""
+        pw = mock.MagicMock()
+        browser = mock.MagicMock()
+        browser.__playwright__ = pw
+        context = mock.MagicMock()
+        page = mock.MagicMock()
+        page.content.return_value = "<html><head><title>Mock</title></head></html>"
+        browser.new_context.return_value = context
+        context.new_page.return_value = page
+        return browser, pw, page
+
+    def test_browser_load_calls_pw_stop_on_success(self):
+        """pw.stop() must be called after a successful browser load."""
+        config = {"use_browser": {}}
+        browser, pw, page = self._make_mock_browser()
+
+        with mock.patch(
+            "site_adapters.services.engine.browser_provider.launch_browser",
+            return_value=browser,
+        ):
+            result = website_loader._load_page_via_browser(
+                "https://example.com", config
+            )
+
+        self.assertIn("Mock", result)
+        pw.stop.assert_called_once()
+
+    def test_browser_load_calls_pw_stop_on_exception(self):
+        """pw.stop() must be called even when page.goto raises."""
+        config = {"use_browser": {}}
+        browser, pw, page = self._make_mock_browser()
+        page.goto.side_effect = Exception("Navigation failed")
+
+        with mock.patch(
+            "site_adapters.services.engine.browser_provider.launch_browser",
+            return_value=browser,
+        ):
+            result = website_loader._load_page_via_browser(
+                "https://example.com", config
+            )
+
+        self.assertIsNone(result)
+        pw.stop.assert_called_once()
+
+    def test_browser_load_calls_pw_stop_on_browser_close_error(self):
+        """pw.stop() must be called even if browser.close() itself raises."""
+        config = {"use_browser": {}}
+        browser, pw, page = self._make_mock_browser()
+        browser.close.side_effect = Exception("close failed")
+
+        with mock.patch(
+            "site_adapters.services.engine.browser_provider.launch_browser",
+            return_value=browser,
+        ):
+            result = website_loader._load_page_via_browser(
+                "https://example.com", config
+            )
+
+        self.assertIn("Mock", result)
+        pw.stop.assert_called_once()
+
+    def test_browser_close_wrapped_to_stop_playwright(self):
+        """browser_provider._launch_chromium wraps browser.close() to also
+        call pw.stop(), preventing event-loop leaks for any caller."""
+        from site_adapters.services.engine import browser_provider
+
+        pw = mock.MagicMock()
+        mock_browser = mock.MagicMock()
+
+        with (
+            mock.patch.object(browser_provider, "_find_chromium_path", return_value="/fake/chromium"),
+            mock.patch("playwright.sync_api.sync_playwright") as mock_sync_pw,
+        ):
+            mock_pw_cm = mock.MagicMock()
+            mock_pw_cm.start.return_value = pw
+            mock_sync_pw.return_value = mock_pw_cm
+            pw.chromium.launch.return_value = mock_browser
+
+            browser = browser_provider._launch_chromium(headless=True)
+
+        # __playwright__ is attached for callers that access it directly
+        self.assertIs(getattr(browser, "__playwright__"), pw)
+        # Calling browser.close() should call pw.stop() via the wrapper
+        browser.close()
+        pw.stop.assert_called_once()
+
+    def test_no_event_loop_after_browser_load(self):
+        """After _load_page_via_browser completes, no asyncio running loop
+        should be left in the current thread."""
+        import asyncio
+        config = {"use_browser": {}}
+        browser, pw, page = self._make_mock_browser()
+
+        with mock.patch(
+            "site_adapters.services.engine.browser_provider.launch_browser",
+            return_value=browser,
+        ):
+            website_loader._load_page_via_browser("https://example.com", config)
+
+        # No running event loop should exist after the call
+        try:
+            asyncio.get_running_loop()
+            self.fail("Event loop leaked after browser load")
+        except RuntimeError:
+            pass  # expected: no running loop

@@ -95,6 +95,7 @@ def _launch_cloakbrowser(headless: bool = True, **kwargs):
 
 def _launch_chromium(headless: bool = True, **kwargs):
     from playwright.sync_api import sync_playwright
+    from contextlib import suppress
     exec_path = _find_chromium_path()
     pw = sync_playwright().start()
     launch_args = ['--no-sandbox', '--disable-blink-features=AutomationControlled']
@@ -107,4 +108,16 @@ def _launch_chromium(headless: bool = True, **kwargs):
         **kwargs,
     )
     browser.__playwright__ = pw
+    # Wrap browser.close() so stopping the Playwright event loop is automatic.
+    # Without pw.stop() the asyncio loop leaks into the calling thread, and
+    # Django's async-unsafe guard then raises SynchronousOnlyOperation on
+    # every subsequent DB access (e.g. session lookups) on that pooled thread.
+    _original_close = browser.close
+    def _close_and_stop_playwright(*a, **kw):
+        try:
+            _original_close(*a, **kw)
+        finally:
+            with suppress(Exception):
+                pw.stop()
+    browser.close = _close_and_stop_playwright
     return browser

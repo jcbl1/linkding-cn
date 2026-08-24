@@ -1056,6 +1056,16 @@ def _load_page_via_browser(url: str, config: dict) -> str | None:
                 browser.close()
             except Exception:
                 pass
+            # Playwright sync API runs an asyncio event loop in this thread.
+            # If pw.stop() is not called, the loop keeps running and Django's
+            # async-unsafe guard raises SynchronousOnlyOperation for every
+            # subsequent DB access on this (pooled) thread.
+            pw = getattr(browser, "__playwright__", None)
+            if pw is not None:
+                try:
+                    pw.stop()
+                except Exception:
+                    pass
         _browser_semaphore.release()
 
 
