@@ -1257,7 +1257,12 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     h += renderCredentialSources(r.credential_sources);
     h += renderCommandInfo(filterExecutions(r.executions, ['snapshot', 'snapshot_script']));
     h += '</div>';
-    if (r.result) {
+    if (r.disabled) {
+      h += '<div class="wa-result-block">';
+      h += '<h3 class="wa-result-heading">' + gettext('Result') + '</h3>';
+      h += '<div class="wa-result-disabled-hint">' + gettext('Snapshots are disabled (snapshot.enabled is false)') + '</div>';
+      h += '</div>';
+    } else if (r.result) {
       var fields = r.result;
       h += '<div class="wa-result-block">';
       h += '<h3 class="wa-result-heading">' + gettext('Result') + '</h3>';
@@ -1469,7 +1474,9 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       h += renderSummaryRows(pipeSnapUrlRows);
       h += renderMatchedConfig(s);
       h += renderCredentialSources(s.credential_sources);
-      if (s.result) {
+      if (s.disabled) {
+        h += '<div class="wa-result-disabled-hint">' + gettext('Snapshots are disabled (snapshot.enabled is false)') + '</div>';
+      } else if (s.result) {
         var pipeSnapFields = {};
         Object.keys(s.result).forEach(function (k) {
           if (k !== 'view_url' && k !== 'size') pipeSnapFields[k] = s.result[k];

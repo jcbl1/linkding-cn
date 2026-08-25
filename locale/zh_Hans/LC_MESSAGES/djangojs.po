@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-19 00:52+0800\n"
+"POT-Creation-Date: 2026-08-25 17:43+0800\n"
 "PO-Revision-Date: 2026-04-22 20:55+0800\n"
 "Last-Translator: Codex\n"
 "Language-Team: Simplified Chinese\n"
@@ -24,8 +24,8 @@ msgstr "名称不能为空。"
 #: bookmarks/frontend/components/asset-rename.js:122
 #: bookmarks/frontend/components/confirm-dropdown.js:77
 #: bookmarks/frontend/components/confirm-inline.js:80
-#: bookmarks/frontend/reader/reader-sidebar.js:217
-#: bookmarks/frontend/reader/reader-sidebar.js:364
+#: bookmarks/frontend/reader/reader-sidebar.js:211
+#: bookmarks/frontend/reader/reader-sidebar.js:358
 #: bookmarks/frontend/reader/reader.js:298
 #: bookmarks/frontend/reader/reader.js:1778
 #: bookmarks/frontend/reader/reading-progress.js:439
@@ -35,34 +35,34 @@ msgstr "取消"
 #: bookmarks/frontend/components/asset-rename.js:130
 #: bookmarks/frontend/components/confirm-dropdown.js:80
 #: bookmarks/frontend/components/confirm-inline.js:80
-#: bookmarks/frontend/reader/reader-sidebar.js:217
+#: bookmarks/frontend/reader/reader-sidebar.js:211
 msgid "Confirm"
 msgstr "确认"
 
-#: bookmarks/frontend/components/bookmark-page.js:630
+#: bookmarks/frontend/components/bookmark-page.js:627
 msgid "Enter notes here"
 msgstr "在此输入笔记"
 
-#: bookmarks/frontend/components/bookmark-page.js:749
+#: bookmarks/frontend/components/bookmark-page.js:746
 msgid "Enter tags"
 msgstr "输入标签"
 
-#: bookmarks/frontend/components/bookmark-page.js:1273
+#: bookmarks/frontend/components/bookmark-page.js:1270
 msgid "Shared"
 msgstr "已分享"
 
-#: bookmarks/frontend/components/bookmark-page.js:1273
-#: bookmarks/frontend/reader/reader-sidebar.js:527
+#: bookmarks/frontend/components/bookmark-page.js:1270
+#: bookmarks/frontend/reader/reader-sidebar.js:521
 msgid "Share"
 msgstr "分享"
 
-#: bookmarks/frontend/components/bookmark-page.js:1279
-#: bookmarks/frontend/reader/reader-sidebar.js:532
+#: bookmarks/frontend/components/bookmark-page.js:1276
+#: bookmarks/frontend/reader/reader-sidebar.js:526
 msgid "Mark as unread"
 msgstr "标记为未读"
 
-#: bookmarks/frontend/components/bookmark-page.js:1279
-#: bookmarks/frontend/reader/reader-sidebar.js:532
+#: bookmarks/frontend/components/bookmark-page.js:1276
+#: bookmarks/frontend/reader/reader-sidebar.js:526
 msgid "Mark as read"
 msgstr "标记为已读"
 
@@ -72,15 +72,16 @@ msgstr "已选中 %(count)s 个"
 
 #: bookmarks/frontend/components/confirm-dropdown.js:65
 #: bookmarks/frontend/components/confirm-inline.js:72
-#: bookmarks/frontend/reader/reader-sidebar.js:212
-#: bookmarks/frontend/reader/reader-sidebar.js:362
+#: bookmarks/frontend/reader/reader-sidebar.js:206
+#: bookmarks/frontend/reader/reader-sidebar.js:356
+#: bookmarks/frontend/reader/reader.js:1776
 msgid "Are you sure?"
 msgstr "确认执行操作？"
 
-#: bookmarks/frontend/components/details-modal.js:515
-#: bookmarks/frontend/components/details-modal.js:579
-#: bookmarks/frontend/reader/reader-sidebar.js:459
-#: bookmarks/frontend/reader/reader-sidebar.js:462
+#: bookmarks/frontend/components/details-modal.js:512
+#: bookmarks/frontend/components/details-modal.js:576
+#: bookmarks/frontend/reader/reader-sidebar.js:453
+#: bookmarks/frontend/reader/reader-sidebar.js:456
 msgid "Click to edit tags"
 msgstr "点击编辑标签"
 
@@ -108,11 +109,12 @@ msgid "icon"
 msgstr "图标"
 
 #: bookmarks/frontend/components/settings-page.js:31
-#: bookmarks/frontend/reader/reader-sidebar.js:357
-#: bookmarks/frontend/reader/reader-sidebar.js:365
-#: site_adapters/frontend/adapters.js:272
+#: bookmarks/frontend/reader/reader-sidebar.js:351
+#: bookmarks/frontend/reader/reader-sidebar.js:359
+#: bookmarks/frontend/reader/reader.js:1779
+#: site_adapters/frontend/adapters.js:273
 #: site_adapters/frontend/site-adapters.js:473
-#: site_adapters/frontend/site-adapters.js:774
+#: site_adapters/frontend/site-adapters.js:779
 msgid "Delete"
 msgstr "删除"
 
@@ -145,6 +147,8 @@ msgstr "请检查高亮字段。"
 #: bookmarks/frontend/components/settings-page.js:751
 #: bookmarks/frontend/components/settings-page.js:753
 #: bookmarks/frontend/reader/reader.js:1149
+#: bookmarks/frontend/reader/reader.js:1182
+#: site_adapters/frontend/site-adapters.js:643
 msgid "Saved"
 msgstr "已保存"
 
@@ -211,381 +215,406 @@ msgstr "折叠"
 msgid "Expand"
 msgstr "展开"
 
-#: bookmarks/frontend/components/update-checker.js:117
+#: bookmarks/frontend/components/update-checker.js:111
 msgid "Unable to load release notes."
 msgstr "无法加载更新日志。"
 
-#: bookmarks/frontend/components/update-checker.js:120
+#: bookmarks/frontend/components/update-checker.js:114
 msgid "View on GitHub"
 msgstr "在 GitHub 上查看"
 
-#: bookmarks/frontend/components/update-checker.js:121
+#: bookmarks/frontend/components/update-checker.js:115
 msgid "Got it"
 msgstr "知道了"
 
-#: bookmarks/frontend/reader/anchoring/highlighter.js:49
+#: bookmarks/frontend/reader/anchoring/highlighter.js:41
+#: bookmarks/frontend/reader/reader.js:61
 msgid "Yellow"
 msgstr "黄色"
 
-#: bookmarks/frontend/reader/anchoring/highlighter.js:50
+#: bookmarks/frontend/reader/anchoring/highlighter.js:42
+#: bookmarks/frontend/reader/reader.js:62
 msgid "Green"
 msgstr "绿色"
 
-#: bookmarks/frontend/reader/anchoring/highlighter.js:51
+#: bookmarks/frontend/reader/anchoring/highlighter.js:43
+#: bookmarks/frontend/reader/reader.js:63
 msgid "Blue"
 msgstr "蓝色"
 
-#: bookmarks/frontend/reader/anchoring/highlighter.js:52
+#: bookmarks/frontend/reader/anchoring/highlighter.js:44
+#: bookmarks/frontend/reader/reader.js:64
 msgid "Pink"
 msgstr "粉色"
 
-#: bookmarks/frontend/reader/anchoring/highlighter.js:55
-#: bookmarks/frontend/reader/reader-toolbar.js:597
+#: bookmarks/frontend/reader/anchoring/highlighter.js:47
+#: bookmarks/frontend/reader/reader-toolbar.js:591
+#: bookmarks/frontend/reader/reader.js:65
 msgid "Theme"
 msgstr "主题"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:207
+#: bookmarks/frontend/reader/reader-sidebar.js:201
 msgid "Copied"
 msgstr "已复制"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:351
+#: bookmarks/frontend/reader/reader-sidebar.js:345
+#: bookmarks/frontend/reader/reader.js:1804
 msgid "Click to add note"
 msgstr "点击添加笔记"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:374
+#: bookmarks/frontend/reader/reader-sidebar.js:368
 msgid "Change color"
 msgstr "更改颜色"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:385
+#: bookmarks/frontend/reader/reader-sidebar.js:379
 msgid "Copy"
 msgstr "复制"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:393
+#: bookmarks/frontend/reader/reader-sidebar.js:387
 msgid "No highlights yet"
 msgstr "暂无高亮"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:393
+#: bookmarks/frontend/reader/reader-sidebar.js:387
 msgid "Select text in the article to add highlights"
 msgstr "选中文章文本即可添加高亮"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:398
+#: bookmarks/frontend/reader/reader-sidebar.js:392
 msgid "%(count)s highlight"
 msgid_plural "%(count)s highlights"
 msgstr[0] "%(count)s 条高亮"
 msgstr[1] "%(count)s 条高亮"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:402
+#: bookmarks/frontend/reader/reader-sidebar.js:396
 msgid "%(count)s note"
 msgid_plural "%(count)s notes"
 msgstr[0] "%(count)s 条笔记"
 msgstr[1] "%(count)s 条笔记"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:408
+#: bookmarks/frontend/reader/reader-sidebar.js:402
 msgid "Hide action buttons"
 msgstr "隐藏功能按钮"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:408
+#: bookmarks/frontend/reader/reader-sidebar.js:402
 msgid "Show action buttons"
 msgstr "显示功能按钮"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:415
+#: bookmarks/frontend/reader/reader-sidebar.js:409
 msgid "The following highlights and notes could not be located"
 msgstr "以下高亮批注无法定位"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:432
-#: bookmarks/frontend/reader/reader-sidebar.js:571
+#: bookmarks/frontend/reader/reader-sidebar.js:426
+#: bookmarks/frontend/reader/reader-sidebar.js:565
 msgid "Preview"
 msgstr "预览"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:436
+#: bookmarks/frontend/reader/reader-sidebar.js:430
 msgid "Click to edit title"
 msgstr "点击编辑标题"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:449
-#: bookmarks/frontend/reader/reader-sidebar.js:585
+#: bookmarks/frontend/reader/reader-sidebar.js:443
+#: bookmarks/frontend/reader/reader-sidebar.js:579
 msgid "Added"
 msgstr "添加于"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:450
-#: bookmarks/frontend/reader/reader-sidebar.js:586
+#: bookmarks/frontend/reader/reader-sidebar.js:444
+#: bookmarks/frontend/reader/reader-sidebar.js:580
 msgid "Modified"
 msgstr "修改于"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:451
-#: bookmarks/frontend/reader/reader-sidebar.js:587
+#: bookmarks/frontend/reader/reader-sidebar.js:445
+#: bookmarks/frontend/reader/reader-sidebar.js:581
+#: site_adapters/frontend/adapters.js:196
 msgid "Deleted"
 msgstr "已删除"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:469
-#: bookmarks/frontend/reader/reader-sidebar.js:596
+#: bookmarks/frontend/reader/reader-sidebar.js:463
+#: bookmarks/frontend/reader/reader-sidebar.js:590
 #: site_adapters/frontend/site-adapters.js:480
 msgid "Description"
 msgstr "描述"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:471
+#: bookmarks/frontend/reader/reader-sidebar.js:465
 msgid "Click to edit description"
 msgstr "点击编辑描述"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:478
-#: bookmarks/frontend/reader/reader-sidebar.js:602
+#: bookmarks/frontend/reader/reader-sidebar.js:472
+#: bookmarks/frontend/reader/reader-sidebar.js:596
 msgid "Notes"
 msgstr "笔记"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:480
+#: bookmarks/frontend/reader/reader-sidebar.js:474
 msgid "Click to edit notes"
 msgstr "点击编辑笔记"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:487
+#: bookmarks/frontend/reader/reader-sidebar.js:481
 msgid "Files"
 msgstr "文件"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:491
+#: bookmarks/frontend/reader/reader-sidebar.js:485
 msgid "File"
 msgstr "文件"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:496
+#: bookmarks/frontend/reader/reader-sidebar.js:490
 msgid "queued"
 msgstr "排队中"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:496
+#: bookmarks/frontend/reader/reader-sidebar.js:490
 msgid "failed"
 msgstr "失败"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:500
+#: bookmarks/frontend/reader/reader-sidebar.js:494
 msgid "Rename"
 msgstr "重命名"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:503
+#: bookmarks/frontend/reader/reader-sidebar.js:497
 msgid "Remove this file?"
 msgstr "移除此文件？"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:505
+#: bookmarks/frontend/reader/reader-sidebar.js:499
 msgid "Cannot delete article asset"
 msgstr "无法删除文章资产"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:505
+#: bookmarks/frontend/reader/reader-sidebar.js:499
 msgid "Remove"
 msgstr "移除"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:512
+#: bookmarks/frontend/reader/reader-sidebar.js:506
 msgid "No files"
 msgstr "暂无文件"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:519
+#: bookmarks/frontend/reader/reader-sidebar.js:513
 msgid "Unarchive?"
 msgstr "取消归档？"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:519
+#: bookmarks/frontend/reader/reader-sidebar.js:513
 msgid "Archive?"
 msgstr "归档？"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:520
+#: bookmarks/frontend/reader/reader-sidebar.js:514
 msgid "Unarchive"
 msgstr "取消归档"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:520
+#: bookmarks/frontend/reader/reader-sidebar.js:514
 msgid "Archive"
 msgstr "归档"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:526
+#: bookmarks/frontend/reader/reader-sidebar.js:520
 msgid "Unshare?"
 msgstr "取消分享？"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:526
+#: bookmarks/frontend/reader/reader-sidebar.js:520
 msgid "Share?"
 msgstr "分享？"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:527
+#: bookmarks/frontend/reader/reader-sidebar.js:521
 msgid "Unshare"
 msgstr "取消分享"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:541
+#: bookmarks/frontend/reader/reader-sidebar.js:535
 msgid "Restore bookmark?"
 msgstr "恢复书签？"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:542
+#: bookmarks/frontend/reader/reader-sidebar.js:536
 msgid "Restore"
 msgstr "恢复"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:548
+#: bookmarks/frontend/reader/reader-sidebar.js:542
 msgid "Permanently delete? This cannot be undone."
 msgstr "彻底删除？此操作不可撤销。"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:550
+#: bookmarks/frontend/reader/reader-sidebar.js:544
 msgid "Permanently delete"
 msgstr "彻底删除"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:557
+#: bookmarks/frontend/reader/reader-sidebar.js:551
 msgid "Move to trash?"
 msgstr "移到回收站？"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:559
+#: bookmarks/frontend/reader/reader-sidebar.js:553
 msgid "Move to trash"
 msgstr "移到回收站"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:591
+#: bookmarks/frontend/reader/reader-sidebar.js:585
 msgid "No tags"
 msgstr "无标签"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:641
+#: bookmarks/frontend/reader/reader-sidebar.js:635
 msgid "Failed, please try again"
 msgstr "失败，请重试"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:650
+#: bookmarks/frontend/reader/reader-sidebar.js:644
 msgid "Highlights"
 msgstr "高亮"
 
-#: bookmarks/frontend/reader/reader-sidebar.js:653
+#: bookmarks/frontend/reader/reader-sidebar.js:647
+#: site_adapters/frontend/site-adapters.js:474
 msgid "Details"
 msgstr "详情"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:48
-#: bookmarks/frontend/reader/reader-toolbar.js:586
+#: bookmarks/frontend/reader/reader-toolbar.js:42
+#: bookmarks/frontend/reader/reader-toolbar.js:580
 msgid "System Default"
 msgstr "系统默认"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:49
+#: bookmarks/frontend/reader/reader-toolbar.js:43
 msgid "Sans Serif"
 msgstr "无衬线"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:50
+#: bookmarks/frontend/reader/reader-toolbar.js:44
 msgid "Serif"
 msgstr "衬线"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:51
+#: bookmarks/frontend/reader/reader-toolbar.js:45
 msgid "Monospace"
 msgstr "等宽"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:577
+#: bookmarks/frontend/reader/reader-toolbar.js:571
 msgid "Reset"
 msgstr "重置"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:601
+#: bookmarks/frontend/reader/reader-toolbar.js:595
 msgid "Follow Global"
 msgstr "跟随全局"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:602
+#: bookmarks/frontend/reader/reader-toolbar.js:596
 msgid "Light"
 msgstr "浅色"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:603
+#: bookmarks/frontend/reader/reader-toolbar.js:597
 msgid "Dark"
 msgstr "深色"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:608
+#: bookmarks/frontend/reader/reader-toolbar.js:602
 msgid "Reload to apply"
 msgstr "刷新页面生效"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:609
+#: bookmarks/frontend/reader/reader-toolbar.js:603
 msgid "Reload"
 msgstr "刷新"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:614
+#: bookmarks/frontend/reader/reader-toolbar.js:608
 msgid "Font"
 msgstr "字体"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:636
+#: bookmarks/frontend/reader/reader-toolbar.js:630
 msgid "Font family"
 msgstr "字体族"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:658
+#: bookmarks/frontend/reader/reader-toolbar.js:652
 msgid "Font Size"
 msgstr "字号"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:659
+#: bookmarks/frontend/reader/reader-toolbar.js:653
 msgid "Page Width"
 msgstr "页面宽度"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:660
+#: bookmarks/frontend/reader/reader-toolbar.js:654
 msgid "Line Height"
 msgstr "行高"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:661
+#: bookmarks/frontend/reader/reader-toolbar.js:655
 msgid "Reading Speed"
 msgstr "阅读速度"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:661
+#: bookmarks/frontend/reader/reader-toolbar.js:655
 msgid "wpm"
 msgstr "字/分钟"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:672
+#: bookmarks/frontend/reader/reader-toolbar.js:666
 #: bookmarks/frontend/reader/reader.js:105
-#: site_adapters/frontend/site-adapters.js:1471
+#: bookmarks/frontend/reader/reader.js:1936
+#: site_adapters/frontend/site-adapters.js:1493
 msgid "Reader"
 msgstr "阅读模式"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:674
+#: bookmarks/frontend/reader/reader-toolbar.js:668
 msgid "Open original"
 msgstr "打开原文"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:675
+#: bookmarks/frontend/reader/reader-toolbar.js:669
 msgid "View snapshot"
 msgstr "查看快照"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:676
+#: bookmarks/frontend/reader/reader-toolbar.js:670
 msgid "Add to my bookmarks"
 msgstr "添加到我的书签列表"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:677
+#: bookmarks/frontend/reader/reader-toolbar.js:671
 msgid "Reading settings"
 msgstr "阅读设置"
 
-#: bookmarks/frontend/reader/reader-toolbar.js:678
+#: bookmarks/frontend/reader/reader-toolbar.js:672
 msgid "Toggle sidebar"
 msgstr "切换侧边栏"
 
+#: bookmarks/frontend/reader/reader.js:136
 msgid "Failed to load article."
 msgstr "加载文章失败。"
 
+#: bookmarks/frontend/reader/reader.js:172
 msgid "%(fast)s minute"
 msgid_plural "%(fast)s minutes"
 msgstr[0] "%(fast)s 分钟"
 msgstr[1] "%(fast)s 分钟"
 
+#: bookmarks/frontend/reader/reader.js:177
 msgid "%(fast)s~%(slow)s minute"
 msgid_plural "%(fast)s~%(slow)s minutes"
 msgstr[0] "%(fast)s-%(slow)s 分钟"
 msgstr[1] "%(fast)s-%(slow)s 分钟"
 
+#: bookmarks/frontend/reader/reader.js:182
 msgid "%(wordCount)s words · %(min)s"
 msgstr "%(wordCount)s 字 · %(min)s"
 
+#: bookmarks/frontend/reader/reader.js:296
 msgid "Add bookmark to highlight"
 msgstr "添加书签以高亮批注"
 
+#: bookmarks/frontend/reader/reader.js:299
 msgid "Add"
 msgstr "添加"
 
+#: bookmarks/frontend/reader/reader.js:379
 msgid "Reading progress sync is paused"
 msgstr "阅读进度同步已暂停"
 
+#: bookmarks/frontend/reader/reader.js:381
 msgid "Resume sync"
 msgstr "恢复同步"
 
 #: bookmarks/frontend/reader/reader.js:1140
+#: bookmarks/frontend/reader/reader.js:1165
 msgid "Saving..."
 msgstr "保存中..."
 
 #: bookmarks/frontend/reader/reader.js:1151
 #: bookmarks/frontend/reader/reader.js:1154
 #: bookmarks/frontend/reader/reader.js:1187
+#: bookmarks/frontend/reader/reader.js:1190
+#: site_adapters/frontend/adapters.js:300
 #: site_adapters/frontend/site-adapters.js:645
 msgid "Save failed"
 msgstr "保存失败"
 
+#: bookmarks/frontend/reader/reader.js:1721
 msgid "Highlight actions"
 msgstr "高亮操作"
 
+#: bookmarks/frontend/reader/reader.js:1739
 msgid "Highlight: %(color)s"
 msgstr "高亮：%(color)s"
 
+#: bookmarks/frontend/reader/reader.js:1744
 msgid "Highlight with %(color)s"
 msgstr "使用 %(color)s 高亮"
 
 #: bookmarks/frontend/reader/reader.js:1761
+#: bookmarks/frontend/reader/reader.js:1762
 msgid "Remove highlight"
 msgstr "移除高亮"
 
+#: bookmarks/frontend/reader/reader.js:1806
 msgid "Annotation note"
 msgstr "批注笔记"
 
@@ -632,10 +661,11 @@ msgstr "帮助"
 msgid "Detected latest progress %(progress)s%"
 msgstr "检测到最新进度 %(progress)s%"
 
-#: site_adapters/frontend/adapters.js:63 site_adapters/frontend/adapters.js:292
+#: site_adapters/frontend/adapters.js:63 site_adapters/frontend/adapters.js:293
 msgid "Saved successfully"
 msgstr "保存成功"
 
+#: site_adapters/frontend/adapters.js:160
 msgid "Add credentials"
 msgstr "添加凭据"
 
@@ -644,18 +674,23 @@ msgid "Edit: "
 msgstr "编辑："
 
 #: site_adapters/frontend/adapters.js:199
+#: site_adapters/frontend/adapters.js:297
 msgid "Error: "
 msgstr "错误："
 
+#: site_adapters/frontend/adapters.js:202
 msgid "Delete failed"
 msgstr "删除失败"
 
+#: site_adapters/frontend/adapters.js:219
 msgid "Delete this credential?"
 msgstr "确认删除此凭据？"
 
+#: site_adapters/frontend/adapters.js:238
 msgid "Failed to reload credentials"
 msgstr "重新加载凭据失败"
 
+#: site_adapters/frontend/adapters.js:248
 msgid "No matching results."
 msgstr "没有匹配的结果。"
 
@@ -676,12 +711,12 @@ msgid "OAuth2"
 msgstr "OAuth2"
 
 #: site_adapters/frontend/adapters.js:260
-#: site_adapters/frontend/adapters.js:593
+#: site_adapters/frontend/adapters.js:594
 msgid "Basic Auth"
 msgstr "基本认证"
 
 #: site_adapters/frontend/adapters.js:260
-#: site_adapters/frontend/adapters.js:591
+#: site_adapters/frontend/adapters.js:592
 msgid "Header"
 msgstr "请求头"
 
@@ -689,50 +724,65 @@ msgstr "请求头"
 msgid "key changed"
 msgstr "密钥已更改"
 
-#: site_adapters/frontend/adapters.js:269
+#: site_adapters/frontend/adapters.js:268
+msgid "Expired: "
+msgstr ""
+
+#: site_adapters/frontend/adapters.js:268
+msgid "expired"
+msgstr ""
+
+#: site_adapters/frontend/adapters.js:270
 #: site_adapters/frontend/site-adapters.js:472
 msgid "Edit"
 msgstr "编辑"
 
+#: site_adapters/frontend/adapters.js:404
 msgid "How to get it: "
 msgstr "获取方式："
 
-#: site_adapters/frontend/adapters.js:590
+#: site_adapters/frontend/adapters.js:591
 msgid "Cookie (login)"
 msgstr "Cookie（登录）"
 
-#: site_adapters/frontend/adapters.js:590
+#: site_adapters/frontend/adapters.js:591
 msgid "Cookie (auto)"
 msgstr "Cookie（自动）"
 
-#: site_adapters/frontend/adapters.js:592
+#: site_adapters/frontend/adapters.js:593
 msgid "Token"
 msgstr "Token"
 
+#: site_adapters/frontend/adapters.js:679
 msgid "Please enter a domain"
 msgstr "请输入域名"
 
+#: site_adapters/frontend/adapters.js:688
 msgid "Please enter cookie value"
 msgstr "请输入 Cookie 值"
 
+#: site_adapters/frontend/adapters.js:690
 msgid ""
 "Invalid cookie format. Expected name=value pairs separated by semicolons."
 msgstr "Cookie 格式无效。应为以分号分隔的 name=value 键值对。"
 
+#: site_adapters/frontend/adapters.js:698
 msgid "Please enter refresh token"
 msgstr "请输入刷新令牌"
 
+#: site_adapters/frontend/adapters.js:703
 msgid "Please enter username and password"
 msgstr "请输入用户名和密码"
 
+#: site_adapters/frontend/adapters.js:719
 msgid "Please enter at least one header value"
 msgstr "请至少输入一个请求头值"
 
-#: site_adapters/frontend/adapters.js:755
+#: site_adapters/frontend/adapters.js:756
 msgid "Header-Name"
 msgstr "Header-Name"
 
-#: site_adapters/frontend/adapters.js:762
+#: site_adapters/frontend/adapters.js:763
 msgid "value"
 msgstr "值"
 
@@ -812,7 +862,7 @@ msgid "Version"
 msgstr "版本"
 
 #: site_adapters/frontend/site-adapters.js:513
-#: site_adapters/frontend/site-adapters.js:710
+#: site_adapters/frontend/site-adapters.js:715
 msgid "Updated"
 msgstr "已更新"
 
@@ -828,158 +878,157 @@ msgstr "编辑订阅"
 msgid "Add Subscription"
 msgstr "添加订阅"
 
-#: site_adapters/frontend/site-adapters.js:697
+#: site_adapters/frontend/site-adapters.js:702
 msgid "No remote adapters to update"
 msgstr "没有可更新的远程适配器"
 
-#: site_adapters/frontend/site-adapters.js:710
+#: site_adapters/frontend/site-adapters.js:715
 msgid "errors"
 msgstr "个错误"
 
-#: site_adapters/frontend/site-adapters.js:740
+#: site_adapters/frontend/site-adapters.js:745
 msgid "Request failed"
 msgstr "请求失败"
 
-#: site_adapters/frontend/site-adapters.js:744
-#: site_adapters/frontend/site-adapters.js:1010
+#: site_adapters/frontend/site-adapters.js:749
+#: site_adapters/frontend/site-adapters.js:1015
 msgid "Error"
 msgstr "错误"
 
-#: site_adapters/frontend/site-adapters.js:776
+#: site_adapters/frontend/site-adapters.js:781
 msgid "Clear all history"
 msgstr "清除所有历史记录"
 
-#: site_adapters/frontend/site-adapters.js:802
+#: site_adapters/frontend/site-adapters.js:807
 msgid "Running…"
 msgstr "运行中…"
 
-#: site_adapters/frontend/site-adapters.js:821
+#: site_adapters/frontend/site-adapters.js:826
 msgid "Show output"
 msgstr "显示输出"
 
-#: site_adapters/frontend/site-adapters.js:822
+#: site_adapters/frontend/site-adapters.js:827
 msgid "Raw JSON"
 msgstr "原始 JSON"
 
-#: site_adapters/frontend/site-adapters.js:830
+#: site_adapters/frontend/site-adapters.js:835
 msgid "Test files cleaned"
 msgstr "测试文件已清理"
 
-#: site_adapters/frontend/site-adapters.js:867
-#: site_adapters/frontend/site-adapters.js:868
+#: site_adapters/frontend/site-adapters.js:872
+#: site_adapters/frontend/site-adapters.js:873
 msgid "Yes"
 msgstr "是"
 
-#: site_adapters/frontend/site-adapters.js:867
-#: site_adapters/frontend/site-adapters.js:868
+#: site_adapters/frontend/site-adapters.js:872
+#: site_adapters/frontend/site-adapters.js:873
 msgid "No"
 msgstr "否"
 
-#: site_adapters/frontend/site-adapters.js:960
+#: site_adapters/frontend/site-adapters.js:965
 msgid "command"
 msgstr "命令"
 
-#: site_adapters/frontend/site-adapters.js:973
+#: site_adapters/frontend/site-adapters.js:978
 msgid "stdin"
 msgstr "标准输入"
 
-#: site_adapters/frontend/site-adapters.js:991
+#: site_adapters/frontend/site-adapters.js:996
 msgid "Step"
 msgstr "步骤"
 
-#: site_adapters/frontend/site-adapters.js:992
+#: site_adapters/frontend/site-adapters.js:997
 msgid "Domain"
 msgstr "域名"
 
-#: site_adapters/frontend/site-adapters.js:993
+#: site_adapters/frontend/site-adapters.js:998
 msgid "Return"
 msgstr "返回值"
 
-#: site_adapters/frontend/site-adapters.js:994
+#: site_adapters/frontend/site-adapters.js:999
 msgid "Duration"
 msgstr "耗时"
 
-#: site_adapters/frontend/site-adapters.js:1010
+#: site_adapters/frontend/site-adapters.js:1015
 msgid "Completed"
 msgstr "已完成"
 
-#: site_adapters/frontend/site-adapters.js:1059
+#: site_adapters/frontend/site-adapters.js:1068
 msgid "Not matched"
 msgstr "未匹配"
 
-#: site_adapters/frontend/site-adapters.js:1073
+#: site_adapters/frontend/site-adapters.js:1082
 msgid "matched_config"
 msgstr "matched_config"
 
-#: site_adapters/frontend/site-adapters.js:1089
+#: site_adapters/frontend/site-adapters.js:1098
 msgid "Adapter Info"
 msgstr "适配器信息"
 
-#: site_adapters/frontend/site-adapters.js:1110
+#: site_adapters/frontend/site-adapters.js:1119
 msgid "Config Content"
 msgstr "配置内容"
 
-#: site_adapters/frontend/site-adapters.js:1156
-#: site_adapters/frontend/site-adapters.js:1192
-#: site_adapters/frontend/site-adapters.js:1239
-#: site_adapters/frontend/site-adapters.js:1279
-#: site_adapters/frontend/site-adapters.js:1334
+#: site_adapters/frontend/site-adapters.js:1165
+#: site_adapters/frontend/site-adapters.js:1202
+#: site_adapters/frontend/site-adapters.js:1249
+#: site_adapters/frontend/site-adapters.js:1293
+#: site_adapters/frontend/site-adapters.js:1348
 msgid "Summary"
 msgstr "摘要"
 
-#: site_adapters/frontend/site-adapters.js:1172
-#: site_adapters/frontend/site-adapters.js:1224
-#: site_adapters/frontend/site-adapters.js:1264
-#: site_adapters/frontend/site-adapters.js:1310
-#: site_adapters/frontend/site-adapters.js:1498
+#: site_adapters/frontend/site-adapters.js:1182
+#: site_adapters/frontend/site-adapters.js:1234
+#: site_adapters/frontend/site-adapters.js:1278
+#: site_adapters/frontend/site-adapters.js:1324
+#: site_adapters/frontend/site-adapters.js:1520
 msgid "Merged Config"
 msgstr "合并配置"
 
-#: site_adapters/frontend/site-adapters.js:1178
+#: site_adapters/frontend/site-adapters.js:1188
 msgid "Issues"
 msgstr "问题"
 
-#: site_adapters/frontend/site-adapters.js:1183
-#: site_adapters/frontend/site-adapters.js:1230
-#: site_adapters/frontend/site-adapters.js:1270
-#: site_adapters/frontend/site-adapters.js:1316
-#: site_adapters/frontend/site-adapters.js:1387
-#: site_adapters/frontend/site-adapters.js:1501
+#: site_adapters/frontend/site-adapters.js:1193
+#: site_adapters/frontend/site-adapters.js:1240
+#: site_adapters/frontend/site-adapters.js:1284
+#: site_adapters/frontend/site-adapters.js:1330
+#: site_adapters/frontend/site-adapters.js:1406
+#: site_adapters/frontend/site-adapters.js:1523
 msgid "Execution Log"
 msgstr "执行日志"
 
-#: site_adapters/frontend/site-adapters.js:1206
-#: site_adapters/frontend/site-adapters.js:1253
-#: site_adapters/frontend/site-adapters.js:1293
+#: site_adapters/frontend/site-adapters.js:1216
+#: site_adapters/frontend/site-adapters.js:1262
+#: site_adapters/frontend/site-adapters.js:1267
+#: site_adapters/frontend/site-adapters.js:1307
 msgid "Result"
 msgstr "结果"
 
-#: site_adapters/frontend/site-adapters.js:1219
-#: site_adapters/frontend/site-adapters.js:1438
+#: site_adapters/frontend/site-adapters.js:1229
+#: site_adapters/frontend/site-adapters.js:1458
 msgid "No metadata extracted"
 msgstr "未提取到元数据"
 
-#: site_adapters/frontend/site-adapters.js:1227
-#: site_adapters/frontend/site-adapters.js:1267
-#: site_adapters/frontend/site-adapters.js:1313
+#: site_adapters/frontend/site-adapters.js:1237
+#: site_adapters/frontend/site-adapters.js:1281
+#: site_adapters/frontend/site-adapters.js:1327
 msgid "Built-in Default Engine Config"
 msgstr "内置默认引擎配置"
 
-#: site_adapters/frontend/site-adapters.js:1398
+#: site_adapters/frontend/site-adapters.js:1262
+#: site_adapters/frontend/site-adapters.js:1477
+msgid "Snapshots are disabled (snapshot.enabled is false)"
+msgstr "快照已禁用（snapshot.enabled 为 false）"
+
+#: site_adapters/frontend/site-adapters.js:1417
 msgid "Config"
 msgstr "配置"
 
-#: site_adapters/frontend/site-adapters.js:1416
+#: site_adapters/frontend/site-adapters.js:1436
 msgid "Metadata"
 msgstr "元数据"
 
-#: site_adapters/frontend/site-adapters.js:1447
+#: site_adapters/frontend/site-adapters.js:1467
 msgid "Snapshot"
 msgstr "快照"
-
-
-
-
-
-
-

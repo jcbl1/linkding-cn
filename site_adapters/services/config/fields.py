@@ -173,6 +173,12 @@ METADATA_FIELDS = {
 # ── snapshot section ─────────────────────────────────────────────────────
 
 SNAPSHOT_FIELDS = {
+    "enabled": {
+        "type": "bool",
+        "en": "Whether snapshot creation is allowed for this domain/route. Defaults to true. When false, no snapshot asset is created. This is a subtractive control: it can only disable snapshots, never force-enable them against the global or user-level toggle.",
+        "zh": "是否允许为该域名/路由创建快照。默认 true。设为 false 时不创建快照资产。这是纯减法控制：只能禁用快照，无法绕过全局或用户级开关强制开启。",
+        "example": True,
+    },
     "content_type": {
         "type": '"html"|"xml"|"json"',
         "en": 'Snapshot format. "html" uses SingleFile; "xml" and "json" save the raw response.',

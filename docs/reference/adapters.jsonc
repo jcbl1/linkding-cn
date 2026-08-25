@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — Complete Field Reference
-//  Auto-generated from fields.py (single source of truth)  |  2026-08-25 01:34:36
+//  Auto-generated from fields.py (single source of truth)  |  2026-08-25 17:19:34
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -176,6 +176,7 @@
       // snapshot — HTML snapshot via SingleFile, or raw XML/JSON capture
       // A snapshot script with hook "replace" bypasses SingleFile and the declarative fields keep_elements / remove_elements / remove_classes / set_styles / singlefile_args. HTML cleanup fields only apply to html snapshots. before/after hooks can coexist with those fields.
       "snapshot": {
+        "enabled": true,                                   // Whether snapshot creation is allowed for this domain/route. Defaults to true. When false, no snapshot asset is created. This is a subtractive control: it can only disable snapshots, never force-enable them against the global or user-level toggle.
         "content_type": "html",                            // Snapshot format. "html" uses SingleFile; "xml" and "json" save the raw response.
         "auth": null,                                      // Authentication config.
         "http": {},                                        // Custom HTTP request headers. Every key-value pair is passed as a header.

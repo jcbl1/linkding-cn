@@ -411,6 +411,10 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
             result['use_browser'] = section_data['use_browser']
 
     elif section == 'snapshot':
+        # 'enabled' only reads from the snapshot section (not defaults),
+        # so a domain/route can opt-out of snapshots without affecting
+        # metadata or reader. Defaults to True when absent.
+        result['enabled'] = section_data.get('enabled', True)
         if 'content_type' in section_data:
             result['content_type'] = section_data['content_type']
         if 'process_lazy_images' in section_data:

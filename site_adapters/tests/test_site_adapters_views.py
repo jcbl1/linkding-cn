@@ -400,6 +400,65 @@ class SiteAdaptersViewsTestCase(TestCase):
         self.assertContains(response, "reader.js")
         self.assertContains(response, "snapshot_test.html")
 
+    def test_snapshot_test_returns_disabled_when_adapter_disables_snapshot(self):
+        """When adapter config has snapshot.enabled=false, the test panel
+        should return disabled=True without creating a snapshot."""
+        snap_config = {"enabled": False, "content_type": "html", "_domain_key": "example.com"}
+
+        with (
+            mock.patch(
+                "site_adapters.views.testing.get_snapshot_config",
+                return_value=snap_config,
+            ),
+            mock.patch("site_adapters.views.testing.show_config", return_value={}),
+            mock.patch(
+                "bookmarks.services.snapshot_processor.create_snapshot"
+            ) as mock_create,
+        ):
+            response = self.client.post(
+                reverse("linkding:settings.site_adapters.action"),
+                {"action": "test", "test_type": "snapshot", "url": "https://example.com/video/123"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["disabled"])
+        self.assertNotIn("result", data)
+        mock_create.assert_not_called()
+
+    def test_snapshot_test_creates_snapshot_when_enabled(self):
+        """When adapter config has snapshot.enabled=true (or absent),
+        the test panel should create a snapshot normally."""
+        snap_config = {"enabled": True, "content_type": "html", "_domain_key": "example.com"}
+
+        def fake_create_snapshot(url, out_path, username=""):
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write("<html><body>Snapshot</body></html>")
+
+        with (
+            mock.patch(
+                "site_adapters.views.testing.get_snapshot_config",
+                return_value=snap_config,
+            ),
+            mock.patch("site_adapters.views.testing.show_config", return_value={}),
+            mock.patch("site_adapters.views.testing.TEST_ASSETS_DIR", self.base_dir),
+            mock.patch(
+                "bookmarks.services.snapshot_processor.create_snapshot",
+                side_effect=fake_create_snapshot,
+            ),
+        ):
+            response = self.client.post(
+                reverse("linkding:settings.site_adapters.action"),
+                {"action": "test", "test_type": "snapshot", "url": "https://example.com/page"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertFalse(data.get("disabled", False))
+        self.assertIn("result", data)
+        self.assertTrue(data["result"]["view_url"].endswith(".html"))
+
     def test_subscription_list_preserves_order_and_initializes_defaults(self):
         self._setup_two_adapters(defaults_first=False)
 

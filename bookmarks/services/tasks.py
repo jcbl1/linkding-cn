@@ -947,6 +947,29 @@ def _trigger_html_snapshot_dispatcher(priority: int | None = None):
     _html_snapshot_dispatcher_task(priority=priority)
 
 
+def _is_snapshot_disabled_by_adapter(url: str, username: str = '') -> bool:
+    """Check whether the site-adapter config disables snapshots for this URL.
+
+    Reads the 'enabled' field from the resolved snapshot section. The field
+    defaults to True when absent, so this only returns True when an adapter
+    explicitly sets ``snapshot.enabled: false`` for the matched domain/route.
+    System-level and user-level toggles are checked separately by the callers.
+    """
+    try:
+        from site_adapters.services.config.resolver import get_snapshot_config
+        config = get_snapshot_config(url, username=username)
+        if config is None:
+            return False
+        return config.get('enabled', True) is False
+    except Exception:
+        logger.debug("Failed to read snapshot enabled flag for %s", url, exc_info=True)
+        return False
+
+
+def _get_bookmark_username(bookmark: Bookmark) -> str:
+    return bookmark.owner.username if bookmark and bookmark.owner else ""
+
+
 def _get_html_snapshot_cooldown_seconds(
     randint_func: Callable[[int, int], int] | None = None,
 ) -> int:
@@ -1064,6 +1087,10 @@ def create_html_snapshot(bookmark: Bookmark, priority: int | None = None):
     if not is_html_snapshot_feature_active():
         return
 
+    if _is_snapshot_disabled_by_adapter(bookmark.url, username=_get_bookmark_username(bookmark)):
+        logger.debug("Snapshot disabled by adapter config for url=%s", bookmark.url)
+        return
+
     asset = assets.create_snapshot_asset(bookmark)
     asset.scheduling_priority = priority or 0
     asset.save()
@@ -1076,6 +1103,9 @@ def create_html_snapshots(bookmark_list: list[Bookmark], priority: int | None = 
 
     assets_to_create = []
     for bookmark in bookmark_list:
+        if _is_snapshot_disabled_by_adapter(bookmark.url, username=_get_bookmark_username(bookmark)):
+            logger.debug("Snapshot disabled by adapter config for url=%s", bookmark.url)
+            continue
         asset = assets.create_snapshot_asset(bookmark)
         asset.scheduling_priority = priority or 0
         assets_to_create.append(asset)
@@ -1155,9 +1185,16 @@ def create_missing_html_snapshots(user: User) -> int:
         bookmarkasset__asset_type=BookmarkAsset.TYPE_SNAPSHOT
     )
 
-    create_html_snapshots(list(bookmarks_without_snapshots))
+    # Filter out bookmarks whose adapter config disables snapshots, so the
+    # returned count reflects only the bookmarks actually queued.
+    eligible_bookmarks = [
+        bm for bm in bookmarks_without_snapshots
+        if not _is_snapshot_disabled_by_adapter(bm.url, username=bm.owner.username if bm.owner else "")
+    ]
 
-    return bookmarks_without_snapshots.count()
+    create_html_snapshots(eligible_bookmarks)
+
+    return len(eligible_bookmarks)
 
 
 # ---------------------------------------------------------------------------

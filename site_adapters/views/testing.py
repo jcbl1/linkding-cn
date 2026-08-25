@@ -371,6 +371,29 @@ def _test_snapshot(url, base_dir, username, entries):
     no_match = False
     if not config:
         no_match = True
+    match_info = _extract_match_info(config)
+
+    # Check if snapshots are disabled by adapter config (snapshot.enabled: false)
+    snapshot_disabled = config is not None and config.get('enabled', True) is False
+
+    if snapshot_disabled:
+        result = {
+            'type': 'snapshot',
+            'no_match': no_match,
+            'matched': match_info['matched'],
+            'domain_key': match_info['domain_key'],
+            'adapter': match_info['adapter'],
+            'route_key': match_info['route_key'],
+            'config': config,
+            'raw_config': show_cfg.get('raw_config'),
+            'merged_config': show_cfg.get('merged'),
+            'original_url': url,
+            'request_url': config.get('_request_url', url) if config else url,
+            'credential_sources': _compute_credential_sources(config, username, hostname, before),
+            'disabled': True,
+        }
+        return _test_response(result, entries=entries)
+
     from bookmarks.services.snapshot_processor import create_snapshot
     os.makedirs(TEST_ASSETS_DIR, exist_ok=True)
     snapshot_extension = normalize_content_type((config or {}).get('content_type')) or 'html'
@@ -387,7 +410,6 @@ def _test_snapshot(url, base_dir, username, entries):
 
     credential_sources = _compute_credential_sources(config, username, hostname, before)
 
-    match_info = _extract_match_info(config)
     result = {
         'type': 'snapshot',
         'no_match': no_match,
@@ -693,6 +715,9 @@ def _test_pipeline(url, base_dir, username, entries):
 
     credential_sources_meta = _compute_credential_sources(meta_config, username, hostname, before_meta)
 
+    # Check if snapshots are disabled by adapter config (snapshot.enabled: false)
+    snapshot_disabled = snap_config is not None and snap_config.get('enabled', True) is False
+
     os.makedirs(TEST_ASSETS_DIR, exist_ok=True)
     snapshot_extension = (
         normalize_content_type((snap_config or {}).get('content_type')) or 'html'
@@ -706,22 +731,31 @@ def _test_pipeline(url, base_dir, username, entries):
         + snapshot_extension
     )
     snap_path = os.path.join(TEST_ASSETS_DIR, snap_filename)
-    create_snapshot(url, snap_path, username=username)
-    with open(snap_path, encoding='utf-8') as f:
-        raw_content = f.read()
-    if snapshot_extension in ('json', 'xml'):
-        article = reader_processor.parse_content(
-            raw_content, snapshot_extension, url=url, username=username
+
+    if snapshot_disabled:
+        # Snapshot disabled: skip snapshot + reader, report disabled state
+        article = {'title': '', 'content': '', 'wordCount': 0}
+        snapshot_view_url = ''
+        reader_filename, reader_path = _write_reader_test_asset(
+            '', url, article, url, ''
         )
     else:
-        article = reader_processor.parse_html(
-            raw_content, url=url, username=username
+        create_snapshot(url, snap_path, username=username)
+        with open(snap_path, encoding='utf-8') as f:
+            raw_content = f.read()
+        if snapshot_extension in ('json', 'xml'):
+            article = reader_processor.parse_content(
+                raw_content, snapshot_extension, url=url, username=username
+            )
+        else:
+            article = reader_processor.parse_html(
+                raw_content, url=url, username=username
+            )
+        reader_html = article.get('content', '')
+        snapshot_view_url = f'/admin/site-adapters/view-snapshot?file={snap_filename}'
+        reader_filename, reader_path = _write_reader_test_asset(
+            reader_html, url, article, url, snapshot_view_url
         )
-    reader_html = article.get('content', '')
-    snapshot_view_url = f'/admin/site-adapters/view-snapshot?file={snap_filename}'
-    reader_filename, reader_path = _write_reader_test_asset(
-        reader_html, url, article, url, snapshot_view_url
-    )
     metadata_no_match = not meta_config
     snapshot_no_match = not snap_config
     reader_no_match = not reader_config
@@ -761,12 +795,13 @@ def _test_pipeline(url, base_dir, username, entries):
             'adapter': snap_match['adapter'],
             'route_key': snap_match['route_key'],
             'no_match': snapshot_no_match,
+            'disabled': snapshot_disabled,
             'original_url': url,
             'request_url': snap_config.get('_request_url', url) if snap_config else url,
             'result': {
-                'file': snap_filename,
-                'size': os.path.getsize(snap_path),
-                'view_url': f'/admin/site-adapters/view-snapshot?file={snap_filename}',
+                'file': snap_filename if not snapshot_disabled else '',
+                'size': os.path.getsize(snap_path) if os.path.exists(snap_path) else 0,
+                'view_url': f'/admin/site-adapters/view-snapshot?file={snap_filename}' if not snapshot_disabled else '',
             },
         },
         'reader': {
@@ -787,7 +822,7 @@ def _test_pipeline(url, base_dir, username, entries):
                 'reader_view': f'/admin/site-adapters/view-reader?file={reader_filename}',
                 'html_size': os.path.getsize(reader_path),
                 'view_url': f'/admin/site-adapters/view-snapshot?file={reader_filename}',
-                'snapshot_size': os.path.getsize(snap_path),
+                'snapshot_size': os.path.getsize(snap_path) if os.path.exists(snap_path) else 0,
                 'snapshot_view_url': snapshot_view_url,
             },
             'defuddle_args': reader_config.get('defuddle_args') if reader_config else None,

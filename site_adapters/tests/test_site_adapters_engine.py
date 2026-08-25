@@ -215,6 +215,108 @@ class SiteAdaptersEngineTestCase(TestCase):
 
         self.assertEqual(config["content_type"], "json")
 
+    def test_snapshot_resolver_defaults_enabled_true(self):
+        """When 'enabled' is not declared, it defaults to True."""
+        self.setup_adapter("example.com", {
+            "snapshot": {"content_type": "html"}
+        })
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            config = get_snapshot_config("https://example.com/post")
+
+        self.assertTrue(config["enabled"])
+
+    def test_snapshot_resolver_reads_enabled_false(self):
+        """Domain-level snapshot.enabled=false is reflected in the resolved config."""
+        self.setup_adapter("example.com", {
+            "snapshot": {"enabled": False, "content_type": "html"}
+        })
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            config = get_snapshot_config("https://example.com/post")
+
+        self.assertFalse(config["enabled"])
+
+    def test_snapshot_resolver_route_overrides_enabled(self):
+        """Route-level snapshot.enabled=true overrides domain-level enabled=false."""
+        self.setup_adapter("example.com", {
+            "snapshot": {"enabled": False, "content_type": "html"},
+            "routes": {
+                "/article/.*": {
+                    "snapshot": {"enabled": True}
+                }
+            }
+        })
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            # Route matches → enabled should be True
+            config_article = get_snapshot_config("https://example.com/article/123")
+            self.assertTrue(config_article["enabled"])
+
+            # No route match → inherits domain-level False
+            config_other = get_snapshot_config("https://example.com/about")
+            self.assertFalse(config_other["enabled"])
+
+    def test_snapshot_resolver_route_inherits_enabled_false(self):
+        """Route without 'enabled' inherits domain-level enabled=false."""
+        self.setup_adapter("example.com", {
+            "snapshot": {"enabled": False, "content_type": "html"},
+            "routes": {
+                "/search/.*": {
+                    "snapshot": {"keep_elements": [".results"]}
+                }
+            }
+        })
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            config = get_snapshot_config("https://example.com/search/test")
+            self.assertFalse(config["enabled"])
+            self.assertEqual(config["keep_elements"], [".results"])
+
+    def test_snapshot_enabled_not_inherited_from_defaults(self):
+        """The 'enabled' field is read from the snapshot section only,
+        not from the defaults section."""
+        self.setup_adapter("example.com", {
+            "defaults": {"timeout": 10},
+            "snapshot": {"content_type": "html"}
+        })
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            config = get_snapshot_config("https://example.com/post")
+
+        # Even though defaults has no 'enabled', snapshot defaults to True
+        self.assertTrue(config["enabled"])
+
+    def test_snapshot_builtin_overrides_disables_all_domains(self):
+        """_builtin_overrides with snapshot.enabled=false propagates to all
+        domains that don't explicitly set enabled=true."""
+        import json
+        adapter = {
+            "_builtin": {"snapshot": {}},
+            "_builtin_overrides": {"snapshot": {"enabled": False}},
+            "domains": {
+                "example.com": {
+                    "snapshot": {"content_type": "html"}
+                },
+                "other.com": {
+                    "snapshot": {"enabled": True, "content_type": "html"}
+                },
+            }
+        }
+        self.write("adapters/config.jsonc", json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults", "source": "./defaults/adapters.jsonc"}]
+        }))
+        self.write("adapters/defaults/adapters.jsonc", json.dumps(adapter))
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            # example.com doesn't set enabled → inherits builtin false
+            config1 = get_snapshot_config("https://example.com/post")
+            self.assertFalse(config1["enabled"])
+
+            # other.com explicitly sets enabled=true → overrides builtin false
+            config2 = get_snapshot_config("https://other.com/page")
+            self.assertTrue(config2["enabled"])
+
 
 class ExecutionLogTestCase(TestCase):
     def test_redact_cmd_args_masks_cookie_file(self):

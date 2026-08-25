@@ -655,6 +655,85 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
         self.assertEqual(mock_trigger_html_snapshot_dispatcher.call_count, 1)
 
     @override_settings(LD_ENABLE_SNAPSHOTS=True)
+    def test_create_html_snapshot_should_skip_when_adapter_disables_snapshot(self):
+        bookmark = self.setup_bookmark(url="https://example.com/page")
+
+        with mock.patch(
+            "bookmarks.services.tasks._is_snapshot_disabled_by_adapter",
+            return_value=True,
+        ) as mock_disabled:
+            with mock.patch(
+                "bookmarks.services.tasks._trigger_html_snapshot_dispatcher"
+            ) as mock_trigger:
+                tasks.create_html_snapshot(bookmark)
+
+        mock_disabled.assert_called_once()
+        self.assertEqual(BookmarkAsset.objects.count(), 0)
+        mock_trigger.assert_not_called()
+
+    @override_settings(LD_ENABLE_SNAPSHOTS=True)
+    def test_create_html_snapshot_should_proceed_when_adapter_enables_snapshot(self):
+        bookmark = self.setup_bookmark(url="https://example.com/page")
+
+        with mock.patch(
+            "bookmarks.services.tasks._is_snapshot_disabled_by_adapter",
+            return_value=False,
+        ):
+            with mock.patch(
+                "bookmarks.services.tasks._trigger_html_snapshot_dispatcher"
+            ) as mock_trigger:
+                tasks.create_html_snapshot(bookmark)
+
+        self.assertEqual(BookmarkAsset.objects.count(), 1)
+        mock_trigger.assert_called_once()
+
+    @override_settings(LD_ENABLE_SNAPSHOTS=True)
+    def test_create_html_snapshots_should_skip_disabled_bookmarks(self):
+        bookmarks = [
+            self.setup_bookmark(url="https://example.com/1"),
+            self.setup_bookmark(url="https://example.com/2"),
+            self.setup_bookmark(url="https://example.com/3"),
+        ]
+
+        # Simulate adapter disabling snapshots for the 2nd bookmark only
+        def fake_disabled(url, username=""):
+            return url == "https://example.com/2"
+
+        with mock.patch(
+            "bookmarks.services.tasks._is_snapshot_disabled_by_adapter",
+            side_effect=fake_disabled,
+        ):
+            with mock.patch(
+                "bookmarks.services.tasks._trigger_html_snapshot_dispatcher"
+            ) as mock_trigger:
+                tasks.create_html_snapshots(bookmarks)
+
+        self.assertEqual(BookmarkAsset.objects.count(), 2)
+        mock_trigger.assert_called_once()
+
+    @override_settings(LD_ENABLE_SNAPSHOTS=True)
+    def test_create_missing_html_snapshots_should_exclude_adapter_disabled(self):
+        self.setup_bookmark(url="https://example.com/1")
+        self.setup_bookmark(url="https://example.com/2")
+
+        def fake_disabled(url, username=""):
+            return url == "https://example.com/2"
+
+        with mock.patch(
+            "bookmarks.services.tasks._is_snapshot_disabled_by_adapter",
+            side_effect=fake_disabled,
+        ):
+            with mock.patch(
+                "bookmarks.services.tasks._trigger_html_snapshot_dispatcher"
+            ):
+                count = tasks.create_missing_html_snapshots(
+                    self.get_or_create_test_user()
+                )
+
+        self.assertEqual(count, 1)
+        self.assertEqual(BookmarkAsset.objects.count(), 1)
+
+    @override_settings(LD_ENABLE_SNAPSHOTS=True)
     def test_schedule_html_snapshots_should_kick_dispatcher_for_pending_assets(self):
         bookmark = self.setup_bookmark(url="https://example.com")
         self.setup_asset(

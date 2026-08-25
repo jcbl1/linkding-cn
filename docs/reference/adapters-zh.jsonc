@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — 完整字段参考
-//  由 fields.py 自动生成（单一信源）  |  2026-08-25 01:34:36
+//  由 fields.py 自动生成（单一信源）  |  2026-08-25 17:19:34
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -176,6 +176,7 @@
       // snapshot — HTML 快照生成（SingleFile + DOM 清理），或原始 XML/JSON 捕获
       // hook 为 "replace" 的快照脚本会绕过 SingleFile 和声明式字段 keep_elements / remove_elements / remove_classes / set_styles / singlefile_args。HTML 清理字段仅对 html 快照生效。before/after hook 可与这些字段并存。
       "snapshot": {
+        "enabled": true,                                   // 是否允许为该域名/路由创建快照。默认 true。设为 false 时不创建快照资产。这是纯减法控制：只能禁用快照，无法绕过全局或用户级开关强制开启。
         "content_type": "html",                            // 快照格式。"html" 使用 SingleFile；"xml" 和 "json" 保存原始响应。
         "auth": null,                                      // 认证配置。
         "http": {},                                        // 自定义 HTTP 请求头。所有键值对都会作为 header 透传。
