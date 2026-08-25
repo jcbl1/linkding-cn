@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -515,6 +516,97 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
     return metadata
 
 
+_JSON_SELECTOR_RE = re.compile(r'^(.*?)(?:::json\((.*)\))$', re.DOTALL)
+
+
+def _split_json_selector(selector: str) -> tuple[str | None, str | None]:
+    """Split a CSS selector with a trailing ``::json(path)`` pseudo-element.
+
+    Returns ``(css_selector, json_path)``. ``json_path`` is ``None`` when the
+    selector does not contain the ``::json()`` pseudo-element.
+    """
+    m = _JSON_SELECTOR_RE.match(selector.strip())
+    if not m:
+        return None, None
+    css = m.group(1).strip()
+    path = m.group(2).strip()
+    return css, path
+
+
+def _traverse_json_path(data, path: str):
+    """Walk a dotted path like ``author.name`` or ``items[0].url`` inside JSON.
+
+    Supports nested keys, array indices, and ``@``-prefixed JSON-LD keys.
+    A ``*`` wildcard matches all elements of a dict or list, returning the
+    first non-None descendant. Returns ``None`` when the path cannot resolve.
+    """
+    tokens = re.findall(r'[^.\[\]]+|\[\d+\]', path)
+    current = data
+    for i, token in enumerate(tokens):
+        if current is None:
+            return None
+        if token.startswith('[') and token.endswith(']'):
+            try:
+                idx = int(token[1:-1])
+            except ValueError:
+                return None
+            if isinstance(current, list) and 0 <= idx < len(current):
+                current = current[idx]
+            else:
+                return None
+        elif token == '*':
+            rest = '.'.join(tokens[i + 1:])
+            if isinstance(current, list):
+                for item in current:
+                    result = _traverse_json_path(item, rest)
+                    if result is not None:
+                        return result
+            elif isinstance(current, dict):
+                for item in current.values():
+                    result = _traverse_json_path(item, rest)
+                    if result is not None:
+                        return result
+            return None
+        else:
+            if isinstance(current, dict):
+                current = current.get(token)
+            else:
+                return None
+    return current
+
+
+def _extract_json_value_from_script(el, json_path: str) -> str | None:
+    """Parse a <script> tag's JSON body and resolve ``json_path``.
+
+    Handles both single objects and arrays of objects, and expands ``@graph``
+    arrays, returning the first non-empty result. Complex return values
+    (dict/list) are flattened via ``_json_value_to_string``.
+    """
+    raw = el.string
+    if not raw or not raw.strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    items = data if isinstance(data, list) else [data]
+    expanded = []
+    for item in items:
+        if isinstance(item, dict) and isinstance(item.get('@graph'), list):
+            expanded.extend(item['@graph'])
+        else:
+            expanded.append(item)
+    items = expanded
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        value = _traverse_json_path(item, json_path)
+        result = _json_value_to_string(value)
+        if result:
+            return result
+    return None
+
+
 def _extract_json_ld(soup) -> dict:
     """Extract metadata from the first application/ld+json script tag.
     Returns dict with optional keys: title, description, image.
@@ -806,13 +898,24 @@ def _extract_with_selector_source(soup, selectors, url: str = "", field: str = "
     for selector in selectors or []:
         if not selector or not selector.strip():
             continue
-        try:
-            el = soup.select_one(selector)
-        except Exception:
-            continue
-        if not el:
-            continue
-        value = _extract_element_value(el, field)
+        # Check for ::json(path) pseudo-element extension
+        css_selector, json_path = _split_json_selector(selector)
+        if json_path is not None:
+            try:
+                el = soup.select_one(css_selector)
+            except Exception:
+                continue
+            if not el:
+                continue
+            value = _extract_json_value_from_script(el, json_path)
+        else:
+            try:
+                el = soup.select_one(selector)
+            except Exception:
+                continue
+            if not el:
+                continue
+            value = _extract_element_value(el, field)
         if value:
             value = urljoin(url, value.strip()) if field == "image" else value.strip()
             return value, selector

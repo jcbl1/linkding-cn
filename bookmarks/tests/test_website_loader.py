@@ -1135,6 +1135,162 @@ class MetadataFallbacksTestCase(TestCase):
             metadata = website_loader.load_website_metadata("https://example.com")
         self.assertEqual(metadata.title, "Page")
 
+    def test_json_pseudo_selector_description(self):
+        """::json() pseudo-element should extract a field from JSON-LD."""
+        html = '''<html><head>
+        <meta property="og:description" content="dirty og desc">
+        <script type="application/ld+json">
+        {"@type": "Article", "description": "clean json-ld desc"}
+        </script></head><body></body></html>'''
+        config = {
+            "select_description": [
+                'script[type="application/ld+json"]::json(description)',
+                'meta[property="og:description"]',
+            ],
+            "headers": {},
+        }
+        with (
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.description, "clean json-ld desc")
+
+    def test_json_pseudo_selector_nested_path(self):
+        """::json() should support dotted paths like author.name."""
+        html = '''<html><head>
+        <script type="application/ld+json">
+        {"@type": "Article", "author": {"name": "Author Name"}}
+        </script></head><body></body></html>'''
+        config = {
+            "select_title": [
+                'script[type="application/ld+json"]::json(author.name)',
+            ],
+            "headers": {},
+        }
+        with (
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.title, "Author Name")
+
+    def test_json_pseudo_selector_array_index(self):
+        """::json() should support array indices like itemListElement[0].name."""
+        html = '''<html><head>
+        <script type="application/ld+json">
+        {"@type": "BreadcrumbList", "itemListElement": [{"name": "First"}, {"name": "Second"}]}
+        </script></head><body></body></html>'''
+        config = {
+            "select_title": [
+                'script[type="application/ld+json"]::json(itemListElement[0].name)',
+            ],
+            "headers": {},
+        }
+        with (
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.title, "First")
+
+    def test_json_pseudo_selector_at_key(self):
+        """::json() should support @-prefixed JSON-LD keys like @type."""
+        html = '''<html><head>
+        <script type="application/ld+json">
+        {"@type": "Article", "mainEntity": {"@type": "VideoObject"}}
+        </script></head><body></body></html>'''
+        config = {
+            "select_title": [
+                'script[type="application/ld+json"]::json(mainEntity.@type)',
+            ],
+            "headers": {},
+        }
+        with (
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.title, "VideoObject")
+
+    def test_json_pseudo_selector_specific_script(self):
+        """::json() should work with attribute filters to target a specific script."""
+        html = '''<html><head>
+        <script type="application/ld+json">{"@type":"WebSite","description":"skip me"}</script>
+        <script data-vmid="webpage-jsonld" type="application/ld+json">
+        {"@type":"WebPage","description":"targeted desc"}
+        </script></head><body></body></html>'''
+        config = {
+            "select_description": [
+                'script[data-vmid="webpage-jsonld"][type="application/ld+json"]::json(description)',
+            ],
+            "headers": {},
+        }
+        with (
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.description, "targeted desc")
+
+    def test_json_pseudo_selector_fallback_to_next_selector(self):
+        """When ::json() finds no match, should fall through to the next selector."""
+        html = '''<html><head>
+        <meta property="og:description" content="og fallback desc">
+        <script type="application/ld+json">{"@type":"Article"}</script>
+        </head><body></body></html>'''
+        config = {
+            "select_description": [
+                'script[type="application/ld+json"]::json(description)',
+                'meta[property="og:description"]',
+            ],
+            "headers": {},
+        }
+        with (
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.description, "og fallback desc")
+
+    def test_json_pseudo_selector_graph_expansion(self):
+        """::json() should expand @graph arrays and search inside each item."""
+        html = '''<html><head>
+        <script type="application/ld+json">
+        {"@graph": [{"@type": "NewsArticle", "description": "graph desc"}]}
+        </script></head><body></body></html>'''
+        config = {
+            "select_description": [
+                'script[type="application/ld+json"]::json(description)',
+            ],
+            "headers": {},
+        }
+        with (
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.description, "graph desc")
+
+    def test_json_pseudo_selector_image_url(self):
+        """::json() should resolve image.url from nested objects."""
+        html = '''<html><head>
+        <script type="application/ld+json">
+        {"@type": "Article", "image": {"url": "https://example.com/img.png"}}
+        </script></head><body></body></html>'''
+        config = {
+            "select_image": [
+                'script[type="application/ld+json"]::json(image.url)',
+            ],
+            "headers": {},
+        }
+        with (
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com")
+        self.assertEqual(metadata.preview_image, "https://example.com/img.png")
+
 
 class MetadataRetryTestCase(TestCase):
     """Test exponential backoff retry on RetryableMetadataError."""

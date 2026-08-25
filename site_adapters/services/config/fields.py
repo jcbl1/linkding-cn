@@ -96,18 +96,18 @@ METADATA_FIELDS = {
     },
     "select_title": {
         "type": "str|array<str>",
-        "en": "Selectors for the title, tried in order. HTML uses standard CSS; XML uses standard XPath; JSON uses standard JSONPath.",
-        "zh": "标题选择器，按顺序尝试，取第一个非空结果。HTML 使用标准 CSS；XML 使用标准 XPath；JSON 使用标准 JSONPath。",
+        "en": "Selectors for the title, tried in order. HTML uses standard CSS, including the ::json(path) pseudo-element extension to extract fields from JSON-LD script tags (e.g. 'script[type=\"application/ld+json\"]::json(description)'); XML uses standard XPath; JSON uses standard JSONPath.",
+        "zh": "标题选择器，按顺序尝试，取第一个非空结果。HTML 使用标准 CSS，支持 ::json(path) 伪元素扩展以从 JSON-LD script 标签提取字段（如 'script[type=\"application/ld+json\"]::json(description)'）；XML 使用标准 XPath；JSON 使用标准 JSONPath。",
     },
     "select_description": {
         "type": "str|array<str>",
-        "en": "Selectors for the description, tried in order. HTML uses standard CSS; XML uses standard XPath; JSON uses standard JSONPath.",
-        "zh": "描述选择器，按顺序尝试。HTML 使用标准 CSS；XML 使用标准 XPath；JSON 使用标准 JSONPath。",
+        "en": "Selectors for the description, tried in order. HTML uses standard CSS, including the ::json(path) pseudo-element extension to extract fields from JSON-LD script tags (e.g. 'script[type=\"application/ld+json\"]::json(description)'); XML uses standard XPath; JSON uses standard JSONPath.",
+        "zh": "描述选择器，按顺序尝试。HTML 使用标准 CSS，支持 ::json(path) 伪元素扩展以从 JSON-LD script 标签提取字段（如 'script[type=\"application/ld+json\"]::json(description)'）；XML 使用标准 XPath；JSON 使用标准 JSONPath。",
     },
     "select_image": {
         "type": "str|array<str>",
-        "en": "Selectors for the preview image, tried in order. HTML uses standard CSS; XML uses standard XPath; JSON uses standard JSONPath.",
-        "zh": "预览图选择器，按顺序尝试。HTML 使用标准 CSS；XML 使用标准 XPath；JSON 使用标准 JSONPath。",
+        "en": "Selectors for the preview image, tried in order. HTML uses standard CSS, including the ::json(path) pseudo-element extension to extract fields from JSON-LD script tags (e.g. 'script[type=\"application/ld+json\"]::json(image.url)'); XML uses standard XPath; JSON uses standard JSONPath.",
+        "zh": "预览图选择器，按顺序尝试。HTML 使用标准 CSS，支持 ::json(path) 伪元素扩展以从 JSON-LD script 标签提取字段（如 'script[type=\"application/ld+json\"]::json(image.url)'）；XML 使用标准 XPath；JSON 使用标准 JSONPath。",
     },
     "rewrite_title": {
         "type": "rewrite",
