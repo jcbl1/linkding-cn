@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-25 17:43+0800\n"
+"POT-Creation-Date: 2026-08-25 18:11+0800\n"
 "PO-Revision-Date: 2026-04-22 20:55+0800\n"
 "Last-Translator: Codex\n"
 "Language-Team: Simplified Chinese\n"
@@ -523,7 +523,7 @@ msgstr "字/分钟"
 #: bookmarks/frontend/reader/reader-toolbar.js:666
 #: bookmarks/frontend/reader/reader.js:105
 #: bookmarks/frontend/reader/reader.js:1936
-#: site_adapters/frontend/site-adapters.js:1493
+#: site_adapters/frontend/site-adapters.js:1527
 msgid "Reader"
 msgstr "阅读模式"
 
@@ -803,6 +803,7 @@ msgstr "需要 Cookie"
 
 #: site_adapters/frontend/site-adapters.js:273
 #: site_adapters/frontend/site-adapters.js:477
+#: site_adapters/frontend/site-adapters.js:1166
 msgid "Source"
 msgstr "来源"
 
@@ -892,6 +893,7 @@ msgstr "请求失败"
 
 #: site_adapters/frontend/site-adapters.js:749
 #: site_adapters/frontend/site-adapters.js:1015
+#: site_adapters/frontend/site-adapters.js:1153
 msgid "Error"
 msgstr "错误"
 
@@ -969,66 +971,86 @@ msgstr "适配器信息"
 msgid "Config Content"
 msgstr "配置内容"
 
-#: site_adapters/frontend/site-adapters.js:1165
-#: site_adapters/frontend/site-adapters.js:1202
-#: site_adapters/frontend/site-adapters.js:1249
-#: site_adapters/frontend/site-adapters.js:1293
-#: site_adapters/frontend/site-adapters.js:1348
+#: site_adapters/frontend/site-adapters.js:1154
+msgid "Warning"
+msgstr "警告"
+
+#: site_adapters/frontend/site-adapters.js:1155
+msgid "Info"
+msgstr "提示"
+
+#: site_adapters/frontend/site-adapters.js:1172
+msgid "Type"
+msgstr "类型"
+
+#: site_adapters/frontend/site-adapters.js:1180
+msgid "Field"
+msgstr "字段"
+
+#: site_adapters/frontend/site-adapters.js:1186
+msgid "Detail"
+msgstr "详情"
+
+#: site_adapters/frontend/site-adapters.js:1198
+#: site_adapters/frontend/site-adapters.js:1235
+#: site_adapters/frontend/site-adapters.js:1282
+#: site_adapters/frontend/site-adapters.js:1327
+#: site_adapters/frontend/site-adapters.js:1382
 msgid "Summary"
 msgstr "摘要"
 
-#: site_adapters/frontend/site-adapters.js:1182
-#: site_adapters/frontend/site-adapters.js:1234
-#: site_adapters/frontend/site-adapters.js:1278
-#: site_adapters/frontend/site-adapters.js:1324
-#: site_adapters/frontend/site-adapters.js:1520
+#: site_adapters/frontend/site-adapters.js:1215
+#: site_adapters/frontend/site-adapters.js:1267
+#: site_adapters/frontend/site-adapters.js:1312
+#: site_adapters/frontend/site-adapters.js:1358
+#: site_adapters/frontend/site-adapters.js:1554
 msgid "Merged Config"
 msgstr "合并配置"
 
-#: site_adapters/frontend/site-adapters.js:1188
+#: site_adapters/frontend/site-adapters.js:1221
 msgid "Issues"
 msgstr "问题"
 
-#: site_adapters/frontend/site-adapters.js:1193
-#: site_adapters/frontend/site-adapters.js:1240
-#: site_adapters/frontend/site-adapters.js:1284
-#: site_adapters/frontend/site-adapters.js:1330
-#: site_adapters/frontend/site-adapters.js:1406
-#: site_adapters/frontend/site-adapters.js:1523
+#: site_adapters/frontend/site-adapters.js:1226
+#: site_adapters/frontend/site-adapters.js:1273
+#: site_adapters/frontend/site-adapters.js:1318
+#: site_adapters/frontend/site-adapters.js:1364
+#: site_adapters/frontend/site-adapters.js:1440
+#: site_adapters/frontend/site-adapters.js:1557
 msgid "Execution Log"
 msgstr "执行日志"
 
-#: site_adapters/frontend/site-adapters.js:1216
-#: site_adapters/frontend/site-adapters.js:1262
-#: site_adapters/frontend/site-adapters.js:1267
-#: site_adapters/frontend/site-adapters.js:1307
+#: site_adapters/frontend/site-adapters.js:1249
+#: site_adapters/frontend/site-adapters.js:1295
+#: site_adapters/frontend/site-adapters.js:1301
+#: site_adapters/frontend/site-adapters.js:1341
 msgid "Result"
 msgstr "结果"
 
-#: site_adapters/frontend/site-adapters.js:1229
-#: site_adapters/frontend/site-adapters.js:1458
+#: site_adapters/frontend/site-adapters.js:1262
+#: site_adapters/frontend/site-adapters.js:1492
 msgid "No metadata extracted"
 msgstr "未提取到元数据"
 
-#: site_adapters/frontend/site-adapters.js:1237
-#: site_adapters/frontend/site-adapters.js:1281
-#: site_adapters/frontend/site-adapters.js:1327
+#: site_adapters/frontend/site-adapters.js:1270
+#: site_adapters/frontend/site-adapters.js:1315
+#: site_adapters/frontend/site-adapters.js:1361
 msgid "Built-in Default Engine Config"
 msgstr "内置默认引擎配置"
 
-#: site_adapters/frontend/site-adapters.js:1262
-#: site_adapters/frontend/site-adapters.js:1477
+#: site_adapters/frontend/site-adapters.js:1296
+#: site_adapters/frontend/site-adapters.js:1511
 msgid "Snapshots are disabled (snapshot.enabled is false)"
 msgstr "快照已禁用（snapshot.enabled 为 false）"
 
-#: site_adapters/frontend/site-adapters.js:1417
+#: site_adapters/frontend/site-adapters.js:1451
 msgid "Config"
 msgstr "配置"
 
-#: site_adapters/frontend/site-adapters.js:1436
+#: site_adapters/frontend/site-adapters.js:1470
 msgid "Metadata"
 msgstr "元数据"
 
-#: site_adapters/frontend/site-adapters.js:1467
+#: site_adapters/frontend/site-adapters.js:1501
 msgid "Snapshot"
 msgstr "快照"

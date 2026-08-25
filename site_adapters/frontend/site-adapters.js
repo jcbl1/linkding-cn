@@ -1135,10 +1135,11 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     var warnings = issues.filter(function(i) { return i.level === 'warning'; });
     var infos = issues.filter(function(i) { return i.level === 'info'; });
     var h = '';
+    var seq = 0;
     function renderGroup(items, cls) {
       if (!items.length) return '';
       var g = '<div class="wa-issues-group ' + cls + '">';
-      items.forEach(function(i) { g += renderIssueItem(i); });
+      items.forEach(function(i) { g += renderIssueItem(i, ++seq); });
       g += '</div>';
       return g;
     }
@@ -1148,12 +1149,44 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
     return h;
   }
 
-  function renderIssueItem(i) {
+  var ISSUE_LEVEL_LABEL = {
+    error: gettext('Error'),
+    warning: gettext('Warning'),
+    info: gettext('Info'),
+  };
+
+  function renderIssueItem(i, num) {
     var h = '<div class="wa-issue-item">';
-    h += '<span class="wa-issue-code">' + esc(i.code) + '</span>';
-    if (i.path) h += ' <code class="wa-issue-path">' + esc(i.path) + '</code>';
-    h += '<span class="wa-issue-message">' + esc(i.message) + '</span>';
-    if (i.adapter) h += ' <span class="wa-issue-adapter">(' + esc(i.adapter) + ')</span>';
+    h += '<span class="wa-issue-index" data-level="' + esc(i.level || 'error') + '">' + num + '</span>';
+    h += '<div class="wa-issue-body">';
+    // Row 1: Source (file / adapter)
+    var source = i.file || i.adapter;
+    if (source) {
+      h += '<div class="wa-issue-line wa-issue-line-source">';
+      h += '<span class="wa-issue-label">' + esc(gettext('Source')) + '</span>';
+      h += '<code class="wa-issue-value">' + esc(source) + '</code>';
+      h += '</div>';
+    }
+    // Row 2: Type (level + code)
+    h += '<div class="wa-issue-line wa-issue-line-type">';
+    h += '<span class="wa-issue-label">' + esc(gettext('Type')) + '</span>';
+    var lvlKey = i.level || 'error';
+    h += '<span class="wa-issue-level wa-issue-level-' + esc(lvlKey) + '">' + esc(ISSUE_LEVEL_LABEL[lvlKey] || lvlKey) + '</span>';
+    h += '<code class="wa-issue-value wa-issue-code">' + esc(i.code || '') + '</code>';
+    h += '</div>';
+    // Row 3: Field (path) — only if present
+    if (i.path) {
+      h += '<div class="wa-issue-line wa-issue-line-field">';
+      h += '<span class="wa-issue-label">' + esc(gettext('Field')) + '</span>';
+      h += '<code class="wa-issue-value">' + esc(i.path) + '</code>';
+      h += '</div>';
+    }
+    // Row 4: Detail (message)
+    h += '<div class="wa-issue-line wa-issue-line-detail">';
+    h += '<span class="wa-issue-label">' + esc(gettext('Detail')) + '</span>';
+    h += '<span class="wa-issue-value wa-issue-message">' + esc(i.message || '') + '</span>';
+    h += '</div>';
+    h += '</div>';
     h += '</div>';
     return h;
   }
