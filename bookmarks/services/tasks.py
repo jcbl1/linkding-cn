@@ -1300,11 +1300,46 @@ def _requires_snapshot_before_article(url: str) -> bool:
     )
 
 
+def _is_reader_use_async(url: str, username: str = "") -> bool:
+    """Check whether the reader config enables defuddle async extractors.
+
+    Reads the ``useAsync`` field from the resolved reader section's
+    ``defuddle_args``. Defaults to False (set in ``_builtin``),
+    so this returns True only when an adapter explicitly sets
+    ``reader.defuddle_args.useAsync: true`` for the matched domain/route.
+    """
+    try:
+        from site_adapters.services.config.resolver import get_reader_config
+        config = get_reader_config(url, username=username)
+        if not config:
+            return False
+        defuddle_args = config.get('defuddle_args', {})
+        return defuddle_args.get('useAsync', False) is True
+    except Exception:
+        logger.debug("Failed to read reader useAsync flag for %s", url, exc_info=True)
+        return False
+
+
 def _create_snapshot_for_article(
     bookmark: Bookmark,
     priority: int = PRIORITY_CORE,
 ) -> tuple[BookmarkAsset | None, str | None, str | None]:
-    """通过快照 dispatcher 为文章解析生成快照，等待完成后返回内容。"""
+    """为文章解析生成快照，等待完成后返回内容。
+
+    根据 ``snapshot.enabled`` 配置决定生成方式：
+    - ``snapshot.enabled: true``（默认）→ 永久快照（走 dispatcher，创建 BookmarkAsset）
+    - ``snapshot.enabled: false`` → 临时快照（直接调用 create_snapshot，不创建 BookmarkAsset）
+
+    返回 (asset, content, content_type)；临时快照时 asset 为 None。
+    """
+    url = bookmark.url
+    username = _bookmark_username(bookmark)
+
+    if _is_snapshot_disabled_by_adapter(url, username=username):
+        # snapshot.enabled=false → 临时快照，不创建 BookmarkAsset
+        return _create_temporary_snapshot(bookmark, url, username)
+
+    # snapshot.enabled=true → 永久快照，走 dispatcher
     asset = assets.create_snapshot_asset(bookmark)
     asset.scheduling_priority = priority
     asset.save()
@@ -1329,6 +1364,52 @@ def _create_snapshot_for_article(
         bookmark.url,
     )
     return asset, None, None
+
+
+def _create_temporary_snapshot(
+    bookmark: Bookmark,
+    url: str,
+    username: str,
+) -> tuple[None, str | None, str | None]:
+    """生成临时快照 HTML，不创建 BookmarkAsset，用完即删。"""
+    import tempfile
+    from bookmarks.services.snapshot_processor import create_snapshot
+    from site_adapters.services.config.resolver import get_snapshot_config
+
+    config = get_snapshot_config(url, username=username)
+    snapshot_extension = 'html'
+    if config:
+        ct = config.get('content_type', '')
+        if ct in ('json', 'xml'):
+            snapshot_extension = ct
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix=f'.{snapshot_extension}', delete=False
+        ) as tmp:
+            tmp_path = tmp.name
+
+        create_snapshot(url, tmp_path, username=username)
+        with open(tmp_path, encoding='utf-8') as f:
+            raw_content = f.read()
+        content_type = (
+            BookmarkAsset.CONTENT_TYPE_HTML
+            if snapshot_extension == 'html'
+            else snapshot_extension
+        )
+        return None, raw_content, content_type
+    except Exception:
+        logger.warning(
+            "Failed to create temporary snapshot for article. url=%s",
+            url,
+            exc_info=True,
+        )
+        return None, None, None
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 
 def _parse_snapshot_for_reader(
@@ -1379,48 +1460,35 @@ def _create_article_task(asset_id: int, reader_priority: int | None = None):
     try:
         from bookmarks.services import reader_processor
 
-        # 1. Try existing snapshot
-        raw_content, snapshot_content_type = _load_snapshot_content(bookmark)
-        if raw_content:
-            logger.info("Using existing snapshot. url=%s", bookmark.url)
-            result = _parse_snapshot_for_reader(
-                raw_content, snapshot_content_type, bookmark
-            )
-        elif _requires_snapshot_before_article(bookmark.url):
-            # 2. Site-specific snapshot config → create snapshot first, then parse
-            logger.info("Creating snapshot via site adapters. url=%s", bookmark.url)
-            _snapshot, raw_content, snapshot_content_type = (
-                _create_snapshot_for_article(
-                    bookmark, priority=reader_priority or PRIORITY_CORE
-                )
-            )
-            if not raw_content:
-                raise Exception("Failed to create snapshot via custom processor")
-            result = _parse_snapshot_for_reader(
-                raw_content, snapshot_content_type, bookmark
-            )
+        url = bookmark.url
+        username = _bookmark_username(bookmark)
+        use_async = _is_reader_use_async(url, username=username)
+
+        # 1. useAsync=true → defuddle 直接抓取/调 API，无需快照
+        if use_async:
+            logger.info("Parsing URL directly with defuddle (useAsync=true). url=%s", url)
+            result = reader_processor.parse_url(url, username=username)
         else:
-            # 3. No snapshot, no custom processor → let defuddle fetch URL directly.
-            # If that fails, retry once from a freshly generated snapshot.
-            logger.info("Parsing URL directly with defuddle. url=%s", bookmark.url)
-            try:
-                result = reader_processor.parse_url(
-                    bookmark.url, username=_bookmark_username(bookmark)
+            # 2. useAsync=false → 需要快照 HTML 作为 defuddle 输入
+            raw_content, snapshot_content_type = _load_snapshot_content(bookmark)
+            if raw_content:
+                # 2a. 已有快照 → 直接用
+                logger.info("Using existing snapshot. url=%s", url)
+                result = _parse_snapshot_for_reader(
+                    raw_content, snapshot_content_type, bookmark
                 )
-            except Exception as direct_error:
-                logger.info(
-                    f"Direct article parsing failed; retrying via generated snapshot. url={bookmark.url}",
-                    exc_info=True,
-                )
+            else:
+                # 2b. 无快照 → 生成快照再解析
+                # _create_snapshot_for_article 内部判断 snapshot.enabled
+                # 来决定生成永久快照（走 dispatcher）还是临时快照
+                logger.info("Creating snapshot for article. url=%s", url)
                 fallback_snapshot, raw_content, snapshot_content_type = (
                     _create_snapshot_for_article(
                         bookmark, priority=reader_priority or PRIORITY_CORE
                     )
                 )
                 if not raw_content:
-                    raise Exception(
-                        "Failed to create fallback snapshot for article"
-                    ) from direct_error
+                    raise Exception("Failed to create snapshot for article")
                 result = _parse_snapshot_for_reader(
                     raw_content, snapshot_content_type, bookmark
                 )

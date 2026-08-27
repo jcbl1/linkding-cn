@@ -53,7 +53,9 @@
       }
     },
     "reader": {
-      "defuddle_args": {}
+      "defuddle_args": {
+        "useAsync": false
+      }
     }
   },
   "_builtin_overrides": {},

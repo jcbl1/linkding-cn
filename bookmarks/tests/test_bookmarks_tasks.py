@@ -1543,7 +1543,8 @@ class ArticleTasksTestCase(TestCase, BookmarkFactoryMixin):
                 tasks._requires_snapshot_before_article("https://example.com/article")
             )
 
-    def test_create_article_task_retries_direct_parse_with_generated_snapshot(self):
+    def test_create_article_task_generates_snapshot_when_none_exists(self):
+        """useAsync=false (default) + no existing snapshot → generate snapshot, parse with defuddle."""
         bookmark = self.setup_bookmark(url="https://example.com/article")
         article_asset = create_article_asset_pending(bookmark)
         BookmarkAsset.objects.filter(id=article_asset.id).update(
@@ -1552,15 +1553,15 @@ class ArticleTasksTestCase(TestCase, BookmarkFactoryMixin):
 
         with (
             mock.patch(
-                "bookmarks.services.reader_processor.parse_url",
-                side_effect=RuntimeError("direct parse failed"),
-            ) as mock_parse_url,
-            mock.patch(
                 "bookmarks.services.reader_processor.parse_html",
                 return_value=self.parsed_article,
             ) as mock_parse_html,
             mock.patch(
                 "bookmarks.services.tasks._requires_snapshot_before_article",
+                return_value=False,
+            ),
+            mock.patch(
+                "bookmarks.services.tasks._is_snapshot_disabled_by_adapter",
                 return_value=False,
             ),
             mock.patch(
@@ -1584,26 +1585,26 @@ class ArticleTasksTestCase(TestCase, BookmarkFactoryMixin):
         snapshot = BookmarkAsset.objects.get(asset_type=BookmarkAsset.TYPE_SNAPSHOT)
         self.assertEqual(snapshot.status, BookmarkAsset.STATUS_COMPLETE)
         self.assertTrue(self.has_asset_file(snapshot))
-        mock_parse_url.assert_called_once_with(bookmark.url, username="testuser")
         mock_parse_html.assert_called_once_with(
             self.snapshot_html, url=bookmark.url, username="testuser"
         )
 
-    def test_create_article_task_cleans_generated_snapshot_when_fallback_fails(self):
+    def test_create_article_task_cleans_generated_snapshot_when_parse_fails(self):
+        """useAsync=false + snapshot generated but parse_html fails → clean up snapshot asset."""
         bookmark = self.setup_bookmark(url="https://example.com/article")
         article_asset = create_article_asset_pending(bookmark)
 
         with (
-            mock.patch(
-                "bookmarks.services.reader_processor.parse_url",
-                side_effect=RuntimeError("direct parse failed"),
-            ),
             mock.patch(
                 "bookmarks.services.reader_processor.parse_html",
                 side_effect=RuntimeError("snapshot parse failed"),
             ) as mock_parse_html,
             mock.patch(
                 "bookmarks.services.tasks._requires_snapshot_before_article",
+                return_value=False,
+            ),
+            mock.patch(
+                "bookmarks.services.tasks._is_snapshot_disabled_by_adapter",
                 return_value=False,
             ),
             mock.patch(

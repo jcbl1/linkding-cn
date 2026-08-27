@@ -485,19 +485,41 @@ def _test_reader(url, base_dir, username, entries):
         + snapshot_extension
     )
     snap_path = os.path.join(TEST_ASSETS_DIR, snap_filename)
-    create_snapshot(url, snap_path, username=username)
-    with open(snap_path, encoding='utf-8') as f:
-        raw_content = f.read()
-    if snapshot_extension in ('json', 'xml'):
-        result = reader_processor.parse_content(
-            raw_content, snapshot_extension, url=url, username=username
-        )
+
+    # Determine reader mode: useAsync=true bypasses snapshot, useAsync=false needs snapshot HTML
+    defuddle_args = (config or {}).get('defuddle_args', {})
+    use_async = defuddle_args.get('useAsync', False) is True
+    snapshot_disabled = (
+        snapshot_config is not None
+        and snapshot_config.get('enabled', True) is False
+    )
+
+    reader_notice = None
+    if use_async:
+        reader_notice = 'async'
+        # useAsync=true: defuddle fetches directly, no snapshot needed
+        result = reader_processor.parse_url(url, username=username)
+        snap_path_final = None
+        snapshot_view_url = ''
     else:
-        result = reader_processor.parse_html(
-            raw_content, url=url, username=username
-        )
+        # useAsync=false: need snapshot HTML
+        create_snapshot(url, snap_path, username=username)
+        with open(snap_path, encoding='utf-8') as f:
+            raw_content = f.read()
+        if snapshot_extension in ('json', 'xml'):
+            result = reader_processor.parse_content(
+                raw_content, snapshot_extension, url=url, username=username
+            )
+        else:
+            result = reader_processor.parse_html(
+                raw_content, url=url, username=username
+            )
+        snap_path_final = snap_path
+        snapshot_view_url = f'/admin/site-adapters/view-snapshot?file={snap_filename}'
+        if snapshot_disabled:
+            reader_notice = 'temp_snapshot'
+
     reader_html = result.get('content', '')
-    snapshot_view_url = f'/admin/site-adapters/view-snapshot?file={snap_filename}'
     reader_filename, reader_path = _write_reader_test_asset(
         reader_html, url, result, url, snapshot_view_url
     )
@@ -524,10 +546,11 @@ def _test_reader(url, base_dir, username, entries):
             'reader_view': f'/admin/site-adapters/view-reader?file={reader_filename}',
             'html_size': os.path.getsize(reader_path),
             'view_url': f'/admin/site-adapters/view-snapshot?file={reader_filename}',
-            'snapshot_size': os.path.getsize(snap_path),
+            'snapshot_size': os.path.getsize(snap_path_final) if snap_path_final and os.path.exists(snap_path_final) else 0,
             'snapshot_view_url': snapshot_view_url,
         },
         'defuddle_args': config.get('defuddle_args') if config else None,
+        'reader_notice': reader_notice,
     }
     if no_match:
         result_data['default_config'] = _make_default_reader_config()
@@ -718,6 +741,10 @@ def _test_pipeline(url, base_dir, username, entries):
     # Check if snapshots are disabled by adapter config (snapshot.enabled: false)
     snapshot_disabled = snap_config is not None and snap_config.get('enabled', True) is False
 
+    # Determine reader mode: useAsync=true bypasses snapshot, useAsync=false needs snapshot HTML
+    defuddle_args = (reader_config or {}).get('defuddle_args', {})
+    use_async = defuddle_args.get('useAsync', False) is True
+
     os.makedirs(TEST_ASSETS_DIR, exist_ok=True)
     snapshot_extension = (
         normalize_content_type((snap_config or {}).get('content_type')) or 'html'
@@ -732,12 +759,35 @@ def _test_pipeline(url, base_dir, username, entries):
     )
     snap_path = os.path.join(TEST_ASSETS_DIR, snap_filename)
 
-    if snapshot_disabled:
-        # Snapshot disabled: skip snapshot + reader, report disabled state
-        article = {'title': '', 'content': '', 'wordCount': 0}
+    reader_notice = None
+    if use_async:
+        # useAsync=true: defuddle fetches directly, no snapshot needed
+        reader_notice = 'async'
+        try:
+            article = reader_processor.parse_url(url, username=username)
+        except Exception:
+            article = {'title': '', 'content': '', 'wordCount': 0}
         snapshot_view_url = ''
         reader_filename, reader_path = _write_reader_test_asset(
-            '', url, article, url, ''
+            article.get('content', ''), url, article, url, ''
+        )
+    elif snapshot_disabled:
+        # useAsync=false + snapshot.enabled=false → 临时快照
+        reader_notice = 'temp_snapshot'
+        create_snapshot(url, snap_path, username=username)
+        with open(snap_path, encoding='utf-8') as f:
+            raw_content = f.read()
+        if snapshot_extension in ('json', 'xml'):
+            article = reader_processor.parse_content(
+                raw_content, snapshot_extension, url=url, username=username
+            )
+        else:
+            article = reader_processor.parse_html(
+                raw_content, url=url, username=username
+            )
+        snapshot_view_url = f'/admin/site-adapters/view-snapshot?file={snap_filename}'
+        reader_filename, reader_path = _write_reader_test_asset(
+            article.get('content', ''), url, article, url, snapshot_view_url
         )
     else:
         create_snapshot(url, snap_path, username=username)
@@ -795,13 +845,13 @@ def _test_pipeline(url, base_dir, username, entries):
             'adapter': snap_match['adapter'],
             'route_key': snap_match['route_key'],
             'no_match': snapshot_no_match,
-            'disabled': snapshot_disabled,
+            'disabled': snapshot_disabled or use_async,
             'original_url': url,
             'request_url': snap_config.get('_request_url', url) if snap_config else url,
             'result': {
-                'file': snap_filename if not snapshot_disabled else '',
-                'size': os.path.getsize(snap_path) if os.path.exists(snap_path) else 0,
-                'view_url': f'/admin/site-adapters/view-snapshot?file={snap_filename}' if not snapshot_disabled else '',
+                'file': snap_filename if not snapshot_disabled and not use_async else '',
+                'size': os.path.getsize(snap_path) if os.path.exists(snap_path) and not use_async else 0,
+                'view_url': f'/admin/site-adapters/view-snapshot?file={snap_filename}' if not snapshot_disabled and not use_async else '',
             },
         },
         'reader': {
@@ -822,10 +872,11 @@ def _test_pipeline(url, base_dir, username, entries):
                 'reader_view': f'/admin/site-adapters/view-reader?file={reader_filename}',
                 'html_size': os.path.getsize(reader_path),
                 'view_url': f'/admin/site-adapters/view-snapshot?file={reader_filename}',
-                'snapshot_size': os.path.getsize(snap_path) if os.path.exists(snap_path) else 0,
+                'snapshot_size': os.path.getsize(snap_path) if os.path.exists(snap_path) and not use_async else 0,
                 'snapshot_view_url': snapshot_view_url,
             },
             'defuddle_args': reader_config.get('defuddle_args') if reader_config else None,
+            'reader_notice': reader_notice,
         },
     }
     if metadata_no_match:
