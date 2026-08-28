@@ -5,6 +5,9 @@ import tempfile
 
 from django.test import TestCase, override_settings
 
+from site_adapters.services.config.bootstrap import (
+    ensure_base_dirs,
+)
 from site_adapters.services.config.loader import (
     _cache,
     _read_builtin_source,
@@ -337,6 +340,110 @@ class EnsureDefaultsAdapterTestCase(TestCase):
 
         data_after = self._read_runtime()
         self.assertEqual(data_before["_builtin"], data_after["_builtin"])
+
+
+# ---------------------------------------------------------------------------
+# Initial config seeding (defaults + official subscription)
+# ---------------------------------------------------------------------------
+
+_OFFICIAL_SUB_KEY = ("woohoodai", "official-standard")
+
+
+class InitialConfigSeedingTestCase(TestCase):
+    def setUp(self):
+        self.base_dir = tempfile.mkdtemp()
+        self.addCleanup(self.cleanup)
+
+    def cleanup(self):
+        _cache.invalidate()
+        shutil.rmtree(self.base_dir)
+
+    def _config_path(self):
+        return os.path.join(self.base_dir, "adapters", "config.jsonc")
+
+    def _read_config(self):
+        from site_adapters.services.config import load_jsonc_file
+        return load_jsonc_file(self._config_path())
+
+    def _entries(self, data):
+        return data.get("_adapters", [])
+
+    def _has_official(self, entries):
+        return any(
+            (item.get("id"), item.get("name")) == _OFFICIAL_SUB_KEY
+            for item in entries
+        )
+
+    def _run_bootstrap(self):
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            ensure_base_dirs()
+
+    def test_fresh_install_seeds_defaults_and_official_subscription(self):
+        self._run_bootstrap()
+        data = self._read_config()
+        entries = self._entries(data)
+        self.assertTrue(
+            any(
+                item.get("id") == "defaults" and item.get("name") == "defaults"
+                for item in entries
+            )
+        )
+        self.assertTrue(self._has_official(entries))
+
+    def test_fresh_install_official_subscription_is_remote(self):
+        self._run_bootstrap()
+        data = self._read_config()
+        official = next(
+            item for item in self._entries(data) if self._has_official([item])
+        )
+        self.assertTrue(official["source"].startswith("https://"))
+        self.assertEqual(official["update_interval"], 86400)
+        self.assertTrue(official["enabled"])
+
+    def test_existing_config_is_not_modified(self):
+        config_path = self._config_path()
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        original = {
+            "_adapters": [
+                {"id": "defaults", "name": "defaults", "source": "./defaults/adapters.jsonc"},
+                {"id": "custom", "name": "custom", "source": "https://example.com/x.jsonc"},
+            ],
+            "_disabled_domains": ["example.com"],
+        }
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(original, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+
+        self._run_bootstrap()
+
+        data = self._read_config()
+        self.assertFalse(self._has_official(self._entries(data)))
+        self.assertEqual(data["_disabled_domains"], ["example.com"])
+        self.assertEqual(len(self._entries(data)), 2)
+
+    def test_deleted_official_subscription_is_not_re_seeded(self):
+        self._run_bootstrap()
+        data = self._read_config()
+        entries = [item for item in self._entries(data) if not self._has_official([item])]
+        with open(self._config_path(), "w", encoding="utf-8") as f:
+            json.dump(
+                {"_adapters": entries, "_disabled_domains": []},
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
+            f.write("\n")
+
+        self._run_bootstrap()
+
+        data = self._read_config()
+        self.assertFalse(self._has_official(self._entries(data)))
+        self.assertTrue(
+            any(
+                item.get("id") == "defaults" and item.get("name") == "defaults"
+                for item in self._entries(data)
+            )
+        )
 
 
 # ---------------------------------------------------------------------------

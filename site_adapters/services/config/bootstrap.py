@@ -48,6 +48,38 @@ def _defaults_adapter_entry() -> dict:
     }
 
 
+def _default_official_subscription_entry() -> dict:
+    """Official standard adapter subscription bundled with new installs."""
+    return {
+        'id': 'woohoodai',
+        'name': 'official-standard',
+        'source': 'https://raw.githubusercontent.com/WooHooDai/linkding-cn-adapters/refs/heads/main/src/standard/adapters.jsonc',
+        'update_interval': 86400,
+        'enabled': True,
+    }
+
+
+def _write_initial_config(adapters_dir: str, config_path: str):
+    """Write config.jsonc on first deployment.
+
+    This is only called when config.jsonc does not exist yet, so it is safe
+    to seed both the defaults adapter and the official subscription here.
+    Once the file exists we never touch the _adapters list again; this is what
+    prevents the official subscription from reappearing after a user deletes it.
+    """
+    default_config = {
+        '_adapters': [
+            _default_official_subscription_entry(),
+            _defaults_adapter_entry(),
+        ]
+    }
+    os.makedirs(adapters_dir, exist_ok=True)
+    atomic_write(
+        config_path,
+        json.dumps(default_config, indent=2, ensure_ascii=False),
+    )
+
+
 def _ensure_defaults_config_entry(adapters_dir: str, config_path: str):
     """Create config.jsonc or append the defaults entry when it is missing."""
     if os.path.exists(config_path):
@@ -76,12 +108,7 @@ def _ensure_defaults_config_entry(adapters_dir: str, config_path: str):
             logger.exception('Failed to repair defaults entry in %s', config_path)
         return
 
-    default_config = {'_adapters': [_defaults_adapter_entry()]}
-    os.makedirs(adapters_dir, exist_ok=True)
-    atomic_write(
-        config_path,
-        json.dumps(default_config, indent=2, ensure_ascii=False),
-    )
+    _write_initial_config(adapters_dir, config_path)
 
 
 def ensure_defaults_adapter(
@@ -168,6 +195,14 @@ def ensure_base_dirs() -> str:
     os.makedirs(adapters_dir, exist_ok=True)
     for name in ('logs', 'test_assets'):
         os.makedirs(os.path.join(base_dir, name), exist_ok=True)
+
+    # On a brand-new install, seed config.jsonc with defaults + the official
+    # subscription. Existing config.jsonc is left untouched so user-managed
+    # subscriptions, ordering and disabled domains are preserved, and a deleted
+    # official subscription does not get re-added.
+    config_path = os.path.join(adapters_dir, 'config.jsonc')
+    if not os.path.exists(config_path):
+        _write_initial_config(adapters_dir, config_path)
 
     ensure_defaults_adapter(adapters_dir)
     return adapters_dir
