@@ -508,7 +508,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
           btnEl.disabled = true;
           var origHTML = btnEl.innerHTML;
           btnEl.innerHTML = '<svg width="16" height="16" aria-hidden="true" class="wa-spin"><use href="#ld-icon-loader"></use></svg>';
-          apiPost(urls.subscriptionManage, { action: 'update', index: idx }).then(function (r) {
+          apiPost(urls.subscriptionManage, { action: 'update', index: idx, force: 1 }).then(function (r) {
             if (r.error) { toast(r.error, 'error'); }
             else { subData = r.adapters || []; renderSubscriptions(); toast(gettext('Updated'), 'success'); }
           }).catch(function () { toast(gettext('Update failed'), 'error'); })
@@ -660,23 +660,22 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
         var parts = src.replace(/\\/g, '/').replace(/\/$/, '').split('/');
         var fname = (parts[parts.length - 1] || '').replace(/\.(jsonc|json)$/i, '');
         if (!fname || fname === 'adapters') fname = parts.length > 1 ? parts[parts.length - 2] : '';
-        if (fname) {
-          displayNameEl.placeholder = fname;
-        } else { displayNameEl.placeholder = ''; }
-        if (src.startsWith('./') || src.startsWith('../') || src.startsWith('/')) {
-          apiGet(urls.subscriptionManage + '?action=detect_id&source=' + encodeURIComponent(src)).then(function (r) {
-            if (r) {
-              if (r.id) { idEl.value = r.id; }
-              if (r.name) {
-                nameEl.value = r.name;
-                // _meta.name is the canonical display name; prefer it over the
-                // path-derived placeholder set above.
-                displayNameEl.placeholder = r.name;
-              }
+       if (fname) {
+         displayNameEl.placeholder = fname;
+       } else { displayNameEl.placeholder = ''; }
+        // 远程源与本地源都向后端 detect_id 请求自动探测 id/name
+        apiGet(urls.subscriptionManage + '?action=detect_id&source=' + encodeURIComponent(src)).then(function (r) {
+          if (r) {
+            if (r.id) { idEl.value = r.id; }
+            if (r.name) {
+              nameEl.value = r.name;
+              // _meta.name is the canonical display name; prefer it over the
+              // path-derived placeholder set above.
+              displayNameEl.placeholder = r.name;
             }
-          }).catch(function () {});
-        }
-      } else { displayNameEl.placeholder = ''; idEl.value = ''; nameEl.value = ''; }
+          }
+        }).catch(function () {});
+     } else { displayNameEl.placeholder = ''; idEl.value = ''; nameEl.value = ''; }
       // 根据 source 是否为远程切换 interval 显示
       var intervalGroup = document.getElementById('sub-interval-group');
       intervalGroup.hidden = src && !(src.startsWith('https://') || src.startsWith('http://'));
@@ -717,7 +716,7 @@ var MODE = (function () { try { return localStorage.getItem(TAB_KEY) || "subscri
       }
       var idx = remoteSubs[completed + errors];
       btn.innerHTML = '<svg width="14" height="14" aria-hidden="true" class="wa-spin"><use href="#ld-icon-loader"></use></svg>';
-      apiPost(urls.subscriptionManage, { action: 'update', index: idx }).then(function (r) {
+      apiPost(urls.subscriptionManage, { action: 'update', index: idx, force: 1 }).then(function (r) {
         if (r.error) errors++; else completed++;
         updateNext();
       }).catch(function () { errors++; updateNext(); });

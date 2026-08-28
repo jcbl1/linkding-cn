@@ -7,7 +7,7 @@ import logging
 import os
 import shutil
 import time
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods, require_POST
@@ -47,9 +47,22 @@ def subscription_manage(request):
             source = request.GET.get('source', '').strip()
             if not source:
                 return JsonResponse({'error': 'source required'}, status=400)
-            from site_adapters.services.subscriptions import is_remote_source, _read_subscription_file, resolve_adapter_path
+            from site_adapters.services.subscriptions import (
+                is_remote_source, _read_subscription_file, resolve_adapter_path,
+                _download_jsonc, _normalize_source_to_file,
+            )
             if is_remote_source(source):
+                # 远程源：下载并提取 _meta
+                try:
+                    file_url = _normalize_source_to_file(source)
+                    data, _ = _download_jsonc(file_url)
+                    if data and isinstance(data.get('_meta'), dict):
+                        meta = data['_meta']
+                        return JsonResponse({'id': meta.get('id', ''), 'name': meta.get('name', '')})
+                except Exception:
+                    logger.warning('detect_id remote source failed: %s', source)
                 return JsonResponse({'id': '', 'name': ''})
+            # 本地源：读取本地文件提取 _meta
             try:
                 file_path = resolve_adapter_path('', source)
                 data = _read_subscription_file(file_path)
@@ -73,10 +86,11 @@ def subscription_manage(request):
             auto_detect_data = None
             auto_detect_meta = {}
             if is_remote_source(source) and (not item.get('id', '').strip() or not item.get('name', '').strip()):
-                from site_adapters.services.subscriptions import _download_jsonc
+                from site_adapters.services.subscriptions import _download_jsonc, _normalize_source_to_file
                 download_error = None
                 try:
-                    auto_detect_data, auto_detect_meta = _download_jsonc(source)
+                    file_url = _normalize_source_to_file(source)
+                    auto_detect_data, auto_detect_meta = _download_jsonc(file_url)
                     if auto_detect_data and isinstance(auto_detect_data.get('_meta'), dict):
                         meta = auto_detect_data['_meta']
                         if not item.get('id', '').strip():
@@ -109,13 +123,14 @@ def subscription_manage(request):
             if is_remote_source(source) and auto_detect_data is not None:
                 from site_adapters.services.subscriptions import (
                     _write_adapter_file,
+                    _content_fingerprint,
                     resolve_adapter_path,
                     _normalize_source_to_directory,
                     _update_meta_entry,
                     _resolve_includes,
                 )
                 adapters_root = _get_adapters_dir()
-                file_path = resolve_adapter_path(item.get('name', ''), source, adapters_root)
+                file_path = resolve_adapter_path(item.get('name', ''), source, adapters_root, item.get('id', ''))
                 base_url = _normalize_source_to_directory(source)
 
                 if '_includes' in auto_detect_data:
@@ -126,14 +141,26 @@ def subscription_manage(request):
 
                 try:
                     _write_adapter_file(file_path, base_url, auto_detect_data)
-                    _update_meta_entry(
-                        base_url,
-                        last_fetch=time.time(),
-                        content_hash=auto_detect_meta.get('content_hash', ''),
-                        etag=auto_detect_meta.get('etag', ''),
-                        last_modified=auto_detect_meta.get('last_modified', ''),
-                        fetch_status='ok',
-                    )
+                    update_fields = {
+                        'last_fetch': time.time(),
+                        'content_hash': _content_fingerprint(auto_detect_data),
+                        'fetch_status': 'ok',
+                    }
+                    if auto_detect_meta.get('etag'):
+                        update_fields['etag'] = auto_detect_meta['etag']
+                    if auto_detect_meta.get('last_modified'):
+                        update_fields['last_modified'] = auto_detect_meta['last_modified']
+                    meta_block = auto_detect_data.get('_meta')
+                    if isinstance(meta_block, dict):
+                        if meta_block.get('version') is not None:
+                            update_fields['version'] = meta_block['version']
+                        check_url = meta_block.get('checkUpdateUrl')
+                        if check_url and not check_url.startswith(('https://', 'http://')):
+                            from site_adapters.services.subscriptions import _normalize_source_to_file
+                            check_url = urljoin(_normalize_source_to_file(source), check_url)
+                        if check_url:
+                            update_fields['checkUpdateUrl'] = check_url
+                    _update_meta_entry(base_url, **update_fields)
                     _invalidate_site_adapters_cache()
                 except Exception as e:
                     logger.warning('Failed to cache new subscription immediately: %s', e)
@@ -295,7 +322,7 @@ def subscription_domain_read(request):
             continue
         if adapter.get('name') == sub_name:
             from site_adapters.services.subscriptions import resolve_adapter_path
-            file_path = resolve_adapter_path(sub_name, adapter.get('source', ''))
+            file_path = resolve_adapter_path(sub_name, adapter.get('source', ''), adapter_id=adapter.get('id', ''))
             data = _read_subscription_file(file_path)
             if data and isinstance(data.get('domains'), dict) and domain_key in data['domains']:
                 return JsonResponse({'config': data['domains'][domain_key], 'domain': domain_key})

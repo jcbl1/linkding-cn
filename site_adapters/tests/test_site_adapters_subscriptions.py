@@ -31,6 +31,7 @@ class SiteAdaptersSubscriptionsTestCase(TestCase):
         resp.text = json.dumps(payload)
         resp.headers = headers or {}
         resp.raise_for_status.return_value = None
+        resp.json.return_value = payload
         return resp
 
     def test_fetch_subscription_preserves_string_aliases(self):
@@ -85,11 +86,11 @@ class SiteAdaptersSubscriptionsTestCase(TestCase):
             )
 
         # 验证 _meta.json
-        from site_adapters.services.subscriptions import _get_meta_entry
+        from site_adapters.services.subscriptions import _content_fingerprint, _get_meta_entry
         entry = _get_meta_entry("https://example.test/bundle/")
         self.assertIsNotNone(entry.get("last_fetch"))
         self.assertEqual(entry.get("etag"), '"abc123"')
-        self.assertEqual(entry.get("content_hash"), mock.ANY)
+        self.assertEqual(entry.get("content_hash"), _content_fingerprint(payload))
 
     def test_fetch_subscription_scripts_downloaded(self):
         """订阅源中包含 scripts 引用时，脚本应被下载到 scripts/ 目录。"""
@@ -160,7 +161,7 @@ class SiteAdaptersSubscriptionsTestCase(TestCase):
             "./scripts/a.js", "https://base.test/bundle/"
         )
         self.assertEqual(url, "https://base.test/bundle/scripts/a.js")
-        self.assertEqual(name, "scripts/a.js")
+        self.assertEqual(name, "a.js")
 
     def test_resolve_script_ref_plain_name_infers_scripts_dir(self):
         """纯文件名推断在远端 scripts/ 目录。"""
@@ -315,7 +316,7 @@ class SiteAdaptersSubscriptionsTestCase(TestCase):
         from site_adapters.services.subscriptions import _normalize_source_to_directory
         self.assertEqual(
             _normalize_source_to_directory("https://example.test/bundle/adapters.jsonc"),
-            "https://example.test/bundle",
+            "https://example.test/bundle/",
         )
         self.assertEqual(
             _normalize_source_to_directory("https://example.test/bundle/"),
@@ -325,3 +326,181 @@ class SiteAdaptersSubscriptionsTestCase(TestCase):
             _normalize_source_to_directory("./defaults/adapters.jsonc"),
             "./defaults",
         )
+
+    def response_304(self):
+        resp = mock.Mock()
+        resp.status_code = 304
+        resp.headers = {}
+        resp.raise_for_status.return_value = None
+        return resp
+
+    def test_content_hash_skips_rewrite_when_unchanged(self):
+        """内容指纹未变时，不应重新写入缓存或下载脚本。"""
+        payload = {
+            "domains": {"example.com": {"metadata": {"select_title": ["h1"]}}},
+        }
+        from site_adapters.services.subscriptions import _write_adapter_file
+        real_write = _write_adapter_file
+        write_calls = []
+
+        def counting_write(*args, **kwargs):
+            write_calls.append(args)
+            return real_write(*args, **kwargs)
+
+        with mock.patch(
+            "site_adapters.services.subscriptions.requests.get",
+            return_value=self.response(payload),
+        ), mock.patch(
+            "site_adapters.services.subscriptions._write_adapter_file",
+            side_effect=counting_write,
+        ):
+            fetch_subscription("https://example.test/bundle/", name="bundle", force=True)
+            self.assertEqual(len(write_calls), 1)
+            write_calls.clear()
+            fetch_subscription("https://example.test/bundle/", name="bundle", force=True)
+
+        self.assertEqual(write_calls, [])
+
+    def test_version_precheck_skips_body_when_unchanged(self):
+        """checkUpdateUrl 返回相同版本时，不下载正文。"""
+        payload = {
+            "_meta": {
+                "id": "bundle",
+                "name": "bundle",
+                "version": 1,
+                "checkUpdateUrl": "https://example.test/bundle/check",
+            },
+            "domains": {"example.com": {}},
+        }
+        calls = []
+
+        def mock_get(url, *args, **kwargs):
+            calls.append(url)
+            if url.endswith("/check"):
+                return self.response({"id": "bundle", "version": 1})
+            return self.response(payload)
+
+        with mock.patch(
+            "site_adapters.services.subscriptions.requests.get",
+            side_effect=mock_get,
+        ):
+            fetch_subscription("https://example.test/bundle/", name="bundle", force=True)
+            calls.clear()
+            fetch_subscription("https://example.test/bundle/", name="bundle", force=True)
+
+        self.assertEqual(calls, ["https://example.test/bundle/check"])
+
+    def test_version_precheck_triggers_body_when_changed(self):
+        """checkUpdateUrl 返回新版本时，应继续下载正文。"""
+        payload = {
+            "_meta": {
+                "id": "bundle",
+                "name": "bundle",
+                "version": 1,
+                "checkUpdateUrl": "https://example.test/bundle/check",
+            },
+            "domains": {"example.com": {}},
+        }
+        calls = []
+
+        def mock_get(url, *args, **kwargs):
+            calls.append(url)
+            if url.endswith("/check"):
+                return self.response({"id": "bundle", "version": 2})
+            return self.response(payload)
+
+        with mock.patch(
+            "site_adapters.services.subscriptions.requests.get",
+            side_effect=mock_get,
+        ):
+            fetch_subscription("https://example.test/bundle/", name="bundle", force=True)
+            calls.clear()
+            fetch_subscription("https://example.test/bundle/", name="bundle", force=True)
+
+        self.assertIn("https://example.test/bundle/adapters.jsonc", calls)
+
+    def test_304_syncs_new_version(self):
+        """正文返回 304 但版本预检发现新版本时，应同步运行时 version。"""
+        payload = {
+            "_meta": {
+                "id": "bundle",
+                "name": "bundle",
+                "version": 1,
+                "checkUpdateUrl": "https://example.test/bundle/check",
+            },
+            "domains": {"example.com": {}},
+        }
+        calls = []
+        body_count = {'n': 0}
+
+        def mock_get(url, *args, **kwargs):
+            calls.append(url)
+            if url.endswith("/check"):
+                return self.response({"id": "bundle", "version": 2})
+            body_count['n'] += 1
+            if body_count['n'] == 1:
+                return self.response(payload)
+            return self.response_304()
+
+        with mock.patch(
+            "site_adapters.services.subscriptions.requests.get",
+            side_effect=mock_get,
+        ):
+            fetch_subscription("https://example.test/bundle/", name="bundle", force=True)
+            calls.clear()
+            fetch_subscription("https://example.test/bundle/", name="bundle", force=True)
+
+        from site_adapters.services.subscriptions import _get_meta_entry
+        entry = _get_meta_entry("https://example.test/bundle/")
+        self.assertEqual(entry.get("version"), "2")
+
+    def test_version_precheck_failure_falls_back_to_body(self):
+        """版本接口返回异常 payload 时，应降级为完整下载正文。"""
+        payload = {
+            "_meta": {
+                "id": "bundle",
+                "name": "bundle",
+                "version": 1,
+                "checkUpdateUrl": "https://example.test/bundle/check",
+            },
+            "domains": {"example.com": {}},
+        }
+        calls = []
+
+        def mock_get(url, *args, **kwargs):
+            calls.append(url)
+            if url.endswith("/check"):
+                return self.response({"unexpected": True})
+            return self.response(payload)
+
+        with mock.patch(
+            "site_adapters.services.subscriptions.requests.get",
+            side_effect=mock_get,
+        ):
+            fetch_subscription("https://example.test/bundle/", name="bundle", force=True)
+            calls.clear()
+            fetch_subscription("https://example.test/bundle/", name="bundle", force=True)
+
+        self.assertIn("https://example.test/bundle/adapters.jsonc", calls)
+
+    def test_force_bypasses_interval_gate(self):
+        """force 应跳过 update_interval 时间闸门并重新拉取。"""
+        payload = {"domains": {"example.com": {}}}
+        calls = []
+
+        def mock_get(url, *args, **kwargs):
+            calls.append(url)
+            return self.response(payload)
+
+        with mock.patch(
+            "site_adapters.services.subscriptions.requests.get",
+            side_effect=mock_get,
+        ):
+            fetch_subscription("https://example.test/bundle/", name="bundle")
+            calls.clear()
+            # 同 interval 内非 force 应跳过
+            fetch_subscription("https://example.test/bundle/", name="bundle")
+            self.assertEqual(calls, [])
+            # force 应重新拉取
+            fetch_subscription("https://example.test/bundle/", name="bundle", force=True)
+            self.assertEqual(calls, ["https://example.test/bundle/adapters.jsonc"])

@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -127,6 +128,9 @@ def _resolve_script_ref(script_ref: str, base_url: str) -> tuple[str | None, str
     # 计算本地存储键和对应的下载 URL
     if script_ref.startswith('./'):
         local_key = script_ref[2:]  # 去掉 ./
+        # 去掉 scripts/ 前缀，因为本地存储时 scripts_dir 已包含该层
+        if local_key.startswith('scripts/'):
+            local_key = local_key[len('scripts/'):]
         download_url = urljoin(base_url, script_ref)
     elif script_ref.startswith('../'):
         download_url = urljoin(base_url, script_ref)
@@ -194,15 +198,36 @@ def is_remote_source(source: str) -> bool:
 
 
 def _normalize_source_to_directory(source: str) -> str:
-    """将 source 规范化为目录路径（去掉末尾的 adapters.jsonc 文件名）。"""
+    """将 source 规范化为目录路径（去掉末尾的 adapters.jsonc 文件名）。
+
+    远程 URL 统一保证末尾斜杠，确保 urljoin 解析相对路径时不会丢失末段。
+    """
     if source.endswith('/' + _ADAPTER_FILE):
         source = source[:-len('/' + _ADAPTER_FILE)]
     elif source.endswith(_ADAPTER_FILE):
         source = source[:-len(_ADAPTER_FILE)]
+    # 远程 URL 统一补末尾斜杠
+    if is_remote_source(source) and not source.endswith('/'):
+        source = source + '/'
     return source
 
 
-def resolve_adapter_path(name: str, source: str, adapters_dir: str | None = None) -> str:
+def _normalize_source_to_file(source: str) -> str:
+    """将 source 规范化为可下载的 adapters.jsonc 文件 URL/路径。
+
+    目录形式的 source 会自动拼上 adapters.jsonc；已带文件名的原样返回。
+    与 fetch_subscription 的下载路径补全逻辑保持一致。
+    """
+    directory = _normalize_source_to_directory(source)
+    if is_remote_source(source):
+        if source.endswith('.jsonc'):
+            return source
+        return directory.rstrip('/') + '/' + _ADAPTER_FILE
+    return os.path.join(directory, _ADAPTER_FILE)
+
+
+def resolve_adapter_path(name: str, source: str, adapters_dir: str | None = None,
+                           adapter_id: str = '') -> str:
     """解析适配器文件路径。
 
     source 是订阅源目录（包含 adapters.jsonc）的路径，兼容旧格式（包含文件名）。
@@ -215,7 +240,9 @@ def resolve_adapter_path(name: str, source: str, adapters_dir: str | None = None
     source = _normalize_source_to_directory(source)
 
     if is_remote_source(source):
-        return os.path.join(adapters_dir, name, _ADAPTER_FILE)
+        from site_adapters.services.base import _adapter_dir as _base_adapter_dir
+        dir_name = _base_adapter_dir({'id': adapter_id, 'name': name})
+        return os.path.join(adapters_dir, dir_name, _ADAPTER_FILE)
     # 本地目录路径：拼接 adapters.jsonc
     if os.path.isabs(source):
         return os.path.join(source, _ADAPTER_FILE)
@@ -256,13 +283,12 @@ def _download_jsonc(url: str, etag: str = '', last_modified: str = '') -> tuple[
     content = resp.text
     if len(content) > _MAX_SUBSCRIPTION_SIZE:
         raise ValueError("Subscription too large (%d bytes, max %d)" % (len(content), _MAX_SUBSCRIPTION_SIZE))
-    content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
 
     data = parse_jsonc(content)
     if not isinstance(data, dict):
         raise ValueError("订阅顶层必须是对象")
 
-    response_meta = {'content_hash': content_hash}
+    response_meta = {}
     if 'ETag' in resp.headers:
         response_meta['etag'] = resp.headers['ETag']
     if 'Last-Modified' in resp.headers:
@@ -362,6 +388,16 @@ def _collect_script_refs(data: dict) -> dict[str, list[str]]:
     return refs
 
 
+def _content_fingerprint(data: dict) -> str:
+    """对解析后的规范化数据计算稳定指纹，用于跨次下载的变化检测。
+
+    与 _write_adapter_file 的序列化方式一致（sort_keys + indent=2），
+    因此指纹同时可用于本地缓存字节比对。
+    """
+    canonical = json.dumps(data, sort_keys=True, ensure_ascii=False, indent=2)
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+
 def _write_adapter_file(file_path: str, url: str, data: dict):
     """将订阅镜像到本地 adapters/<adapter>/。不做任何内容改写。
 
@@ -375,8 +411,8 @@ def _write_adapter_file(file_path: str, url: str, data: dict):
     domain_refs = _collect_script_refs(data)
     if domain_refs:
         scripts_dir = os.path.join(sub_dir, 'scripts')
-        # 收集所有将被引用的本地脚本路径
-        referenced_paths: set[str] = set()
+        # 收集唯一脚本引用 (local_key → download_url)，去重避免重复下载
+        unique_scripts: dict[str, str] = {}
         for _domain_key, refs in domain_refs.items():
             for script_ref in refs:
                 download_url, local_key = _resolve_script_ref(script_ref, url)
@@ -385,28 +421,47 @@ def _write_adapter_file(file_path: str, url: str, data: dict):
                 if not _is_safe_script_key(local_key):
                     logger.warning('Unsafe script key: %s', local_key)
                     continue
-                target_path = os.path.join(scripts_dir, local_key)
-                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                if local_key not in unique_scripts:
+                    unique_scripts[local_key] = download_url
+
+        # 并行下载所有唯一脚本
+        def _download_one(l_key: str, dl_url: str) -> tuple[str, str | None]:
+            try:
+                _validate_download_url(dl_url)
+                resp = requests.get(dl_url, timeout=15)
+                resp.raise_for_status()
+                return l_key, resp.text
+            except Exception as e:
+                logger.warning('Failed to download script %s: %s', dl_url, e)
+                return l_key, None
+
+        downloaded: dict[str, str | None] = {}
+        if unique_scripts:
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futures = {pool.submit(_download_one, k, v): k for k, v in unique_scripts.items()}
+                for fut in as_completed(futures):
+                    l_key, content = fut.result()
+                    downloaded[l_key] = content
+
+        # 写入下载成功的脚本（哈希比对，仅在变化时写入）
+        referenced_paths: set[str] = set()
+        for local_key, content in downloaded.items():
+            if content is None:
+                continue
+            target_path = os.path.join(scripts_dir, local_key)
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            new_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+            old_hash = ''
+            if os.path.exists(target_path):
                 try:
-                    _validate_download_url(download_url)
-                    resp = requests.get(download_url, timeout=15)
-                    resp.raise_for_status()
-                    new_content = resp.text
-                except Exception as e:
-                    logger.warning('Failed to download script %s: %s', download_url, e)
-                    continue
-                new_hash = hashlib.sha256(new_content.encode('utf-8')).hexdigest()
-                old_hash = ''
-                if os.path.exists(target_path):
-                    try:
-                        with open(target_path, encoding='utf-8') as f:
-                            old_hash = hashlib.sha256(f.read().encode('utf-8')).hexdigest()
-                    except OSError:
-                        pass
-                if new_hash != old_hash:
-                    atomic_write(target_path, new_content)
-                    logger.info('Script updated: %s', local_key)
-                referenced_paths.add(local_key)
+                    with open(target_path, encoding='utf-8') as f:
+                        old_hash = hashlib.sha256(f.read().encode('utf-8')).hexdigest()
+                except OSError:
+                    pass
+            if new_hash != old_hash:
+                atomic_write(target_path, content)
+                logger.info('Script updated: %s', local_key)
+            referenced_paths.add(local_key)
 
         # 清理不再被引用的脚本
         if os.path.isdir(scripts_dir):
@@ -431,7 +486,8 @@ def _write_adapter_file(file_path: str, url: str, data: dict):
                         pass
 
     # 原样写入 adapters.jsonc（不注入 _meta，不改写路径）
-    content_str = json.dumps(data, indent=2, ensure_ascii=False)
+    # 使用与 _content_fingerprint 一致的规范化序列化，保证字节可比。
+    content_str = json.dumps(data, sort_keys=True, ensure_ascii=False, indent=2)
     atomic_write(file_path, content_str)
 
 
@@ -481,6 +537,34 @@ def is_allowed_script_path(script_path: str, base_dir: str) -> bool:
 # 单个订阅下载
 # ---------------------------------------------------------------------------
 
+def _fetch_remote_version(check_update_url: str, adapter_id: str = '') -> str | None:
+    """请求发布者提供的轻量版本接口，返回 version 字符串。
+
+    任何失败（URL 非法、请求异常、响应格式错误、id 不匹配）都返回 None，
+    由调用方降级为完整拉取，避免轻量检查成为更新链路的硬依赖。
+    """
+    try:
+        validate_subscription_url(check_update_url)
+    except ValueError as exc:
+        logger.warning('Invalid checkUpdateUrl: %s: %s', check_update_url, exc)
+        return None
+    try:
+        resp = requests.get(check_update_url, timeout=15)
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception as exc:
+        logger.warning('Version check failed: %s: %s', check_update_url, exc)
+        return None
+    if not isinstance(payload, dict) or payload.get('version') is None:
+        logger.warning('Version check returned unexpected payload: %s', check_update_url)
+        return None
+    remote_id = payload.get('id')
+    if adapter_id and remote_id is not None and str(remote_id) != str(adapter_id):
+        logger.warning('Version check id mismatch: %s != %s', remote_id, adapter_id)
+        return None
+    return str(payload['version'])
+
+
 def fetch_subscription(url: str, name: str = '', adapter_id: str = '', force: bool = False,
                        update_interval: int = 86400) -> str | None:
     """下载远程订阅源并镜像到本地。
@@ -488,21 +572,20 @@ def fetch_subscription(url: str, name: str = '', adapter_id: str = '', force: bo
     url 可以是目录路径（自动拼 adapters.jsonc），也可以是直接的 .jsonc 文件 URL。
     状态信息存储在 _meta.json 中，不写入缓存的 adapters.jsonc。
 
+    更新判定顺序（从廉到贵）：
+      1. update_interval 时间闸门（force 跳过）
+      2. checkUpdateUrl 版本预检（发布者提供时）
+      3. ETag / Last-Modified 条件请求（304 即未变）
+      4. content_hash 内容指纹（服务端无验证器时兜底，内容未变则跳过脚本刷新）
+
     Returns:
         缓存文件路径；失败时若旧缓存存在也返回该路径；完全失败返回 None。
     """
     # 构建下载 URL、基准 URL、_meta.json key
     meta_key = _normalize_source_to_directory(url)
 
-    if is_remote_source(url):
-        if url.endswith('.jsonc'):
-            file_url = url
-        else:
-            file_url = meta_key.rstrip('/') + '/' + _ADAPTER_FILE
-        base_url = meta_key
-    else:
-        base_url = meta_key
-        file_url = os.path.join(meta_key, _ADAPTER_FILE)
+    base_url = meta_key
+    file_url = _normalize_source_to_file(url)
 
     # 本地路径：直接返回
     if not is_remote_source(url):
@@ -533,6 +616,22 @@ def fetch_subscription(url: str, name: str = '', adapter_id: str = '', force: bo
             return file_path
 
     try:
+        # 版本预检：发布者在 _meta 中声明 checkUpdateUrl 时使用。
+        check_update_url = meta_entry.get('checkUpdateUrl', '')
+        if check_update_url and not check_update_url.startswith(('https://', 'http://')):
+            check_update_url = urljoin(file_url, check_update_url)
+        remote_version = None
+        stored_version = meta_entry.get('version')
+        if check_update_url:
+            remote_version = _fetch_remote_version(check_update_url, adapter_id=adapter_id)
+            if remote_version is not None:
+                if stored_version is not None and remote_version == str(stored_version):
+                    _update_meta_entry(meta_key, last_fetch=time.time())
+                    _last_fetch_cache[(meta_key, name)] = (time.time(), update_interval)
+                    logger.info("Subscription version unchanged: %s (%s)", meta_key, remote_version)
+                    return file_path
+                logger.info("Subscription version changed: %s -> %s", stored_version, remote_version)
+
         logger.info("Fetching subscription: %s", file_url)
 
         etag = meta_entry.get('etag', '')
@@ -541,29 +640,53 @@ def fetch_subscription(url: str, name: str = '', adapter_id: str = '', force: bo
         data, response_meta = _download_jsonc(file_url, etag=etag, last_modified=last_modified)
 
         if data is None:
-            _update_meta_entry(meta_key, last_fetch=time.time())
+            update_fields = {'last_fetch': time.time()}
+            if remote_version is not None:
+                # 版本预检发现了新版本，但正文 304：同步版本号，不重下脚本。
+                update_fields['version'] = remote_version
+                logger.warning("Subscription 304 but version changed: %s (%s)", meta_key, remote_version)
+            _update_meta_entry(meta_key, **update_fields)
+            _last_fetch_cache[(meta_key, name)] = (time.time(), update_interval)
             logger.info("Subscription unchanged: %s", meta_key)
             return file_path
 
         if '_includes' in data:
             data = _resolve_includes(file_url, data, set())
 
-        _write_adapter_file(file_path, meta_key, data)
-
         update_fields = {
             'last_fetch': time.time(),
-            'content_hash': response_meta.get('content_hash', ''),
+            'content_hash': _content_fingerprint(data),
         }
         if response_meta.get('etag'):
             update_fields['etag'] = response_meta['etag']
         if response_meta.get('last_modified'):
             update_fields['last_modified'] = response_meta['last_modified']
+
+        # 持久化发布者元信息，供后续版本预检与展示使用
+        meta_block = data.get('_meta')
+        if isinstance(meta_block, dict):
+            if meta_block.get('version') is not None:
+                update_fields['version'] = meta_block['version']
+            check_url = meta_block.get('checkUpdateUrl')
+            if check_url and not check_url.startswith(('https://', 'http://')):
+                check_url = urljoin(file_url, check_url)
+            if check_url:
+                update_fields['checkUpdateUrl'] = check_url
+            else:
+                # 发布者移除了版本接口时，清理旧的运行时值，避免继续请求过期 URL
+                update_fields['checkUpdateUrl'] = ''
+
+        if update_fields['content_hash'] != meta_entry.get('content_hash'):
+            _write_adapter_file(file_path, meta_key, data)
+            logger.info("Subscription updated: %s", meta_key)
+        else:
+            logger.info("Subscription content unchanged (hash): %s", meta_key)
+
         _update_meta_entry(meta_key, **update_fields)
 
         cache_key = (meta_key, name)
         _last_fetch_cache[cache_key] = (time.time(), update_interval)
 
-        logger.info("Subscription updated: %s", meta_key)
         return file_path
     except Exception as e:
         logger.error("Subscription fetch failed: %s: %s", meta_key, e)

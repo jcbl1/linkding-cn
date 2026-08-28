@@ -253,7 +253,7 @@ def _validate_subscriptions(issues: list[dict], adapters, file: str | None = Non
                     issues.append(_issue('error', 'adapter_source_not_https', f"{label}.source must be an HTTPS URL", file=file, path=f"{label}.source"))
             else:
                 # Resolve relative source paths against adapters_dir, same as resolve_adapter_path
-                resolved = resolve_adapter_path(name, source, adapters_dir) if adapters_dir else source
+                resolved = resolve_adapter_path(name, source, adapters_dir, adapter_id=adp.get('id', '')) if adapters_dir else source
                 if not os.path.exists(resolved):
                     issues.append(_issue('warning', 'adapter_source_not_found', f"{label}.source local file not found: {source}", file=file, path=f"{label}.source"))
         interval = adp.get('update_interval', 86400)
@@ -638,7 +638,7 @@ def validate_config(base_dir: str, domain_filename: str = '') -> list[dict]:
                     issues.append(_issue('warning', 'adapter_missing_source', f"Adapter missing source: {name}", path=name))
                     continue
                 from site_adapters.services.subscriptions import resolve_adapter_path
-                file_path = resolve_adapter_path(name, source, adapters_dir)
+                file_path = resolve_adapter_path(name, source, adapters_dir, adapter_id=adapter_id)
 
                 if not os.path.exists(file_path):
                     issues.append(_issue('warning', 'adapter_file_not_found', f"Adapter file not found: {name}", file=file_path, adapter=adapter_label))
@@ -690,7 +690,7 @@ def validate_config(base_dir: str, domain_filename: str = '') -> list[dict]:
             source = item.get('source', '')
             if not source:
                 continue
-            file_path = resolve_adapter_path(item.get('name', ''), source, adapters_dir)
+            file_path = resolve_adapter_path(item.get('name', ''), source, adapters_dir, item.get('id', ''))
             data = _read_subscription_file(file_path)
             if data and isinstance(data.get('domains'), dict) and domain_filename in data['domains']:
                 _validate_domain_config(issues, domain_filename, data['domains'][domain_filename], os.path.dirname(file_path), file=file_path)

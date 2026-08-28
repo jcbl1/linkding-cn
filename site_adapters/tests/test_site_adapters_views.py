@@ -120,6 +120,66 @@ class SiteAdaptersViewsTestCase(TestCase):
         self.assertEqual(domains[0]["d"], "example.com")
         self.assertEqual(domains[0]["ct"], "login")
 
+    def test_action_update_forwards_force_flag(self):
+        """update 动作应将 force 参数原样传给 fetch_subscription。"""
+        self._write_jsonc(
+            "adapters/config.jsonc",
+            {
+                "_adapters": [
+                    {"id": "custom", "name": "custom", "source": "https://example.test/bundle/", "enabled": True}
+                ]
+            },
+        )
+        url = reverse("linkding:settings.site_adapters.subscription_manage")
+
+        with mock.patch(
+            "site_adapters.services.subscriptions.fetch_subscription",
+            return_value=None,
+        ) as fetch_mock:
+            self.client.post(url, {"action": "update", "index": "0"})
+            self.assertIs(fetch_mock.call_args.kwargs.get("force"), False)
+            fetch_mock.reset_mock()
+            self.client.post(url, {"action": "update", "index": "0", "force": "1"})
+            self.assertIs(fetch_mock.call_args.kwargs.get("force"), True)
+
+    def test_remote_subscription_cache_detected_when_id_differs_from_name(self):
+        """远程缓存目录为 {id}.{name}，展示读取路径必须一致，否则误报缺失/0域名。"""
+        from site_adapters.services.subscriptions import fetch_subscription
+
+        self._write_jsonc(
+            "adapters/config.jsonc",
+            {
+                "_adapters": [
+                    {"id": "custom", "name": "bundle", "source": "https://example.test/bundle/", "enabled": True}
+                ]
+            },
+        )
+        payload = {
+            "_meta": {"id": "custom", "name": "bundle"},
+            "domains": {"example.com": {"metadata": {"select_title": ["h1"]}}},
+        }
+        resp = mock.Mock()
+        resp.status_code = 200
+        resp.text = json.dumps(payload)
+        resp.headers = {}
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = payload
+
+        with mock.patch("site_adapters.services.subscriptions.requests.get", return_value=resp):
+            fetch_subscription(
+                "https://example.test/bundle/",
+                name="bundle",
+                adapter_id="custom",
+                force=True,
+            )
+
+        response = self.client.get(reverse("linkding:settings.site_adapters.subscription_manage"))
+        self.assertEqual(response.status_code, 200)
+        adapter = next(a for a in response.json()["adapters"] if a["id"] == "custom")
+        self.assertIs(adapter["cached"], True)
+        self.assertFalse(adapter["cache_missing"])
+        self.assertEqual(adapter["domain_count"], 1)
+
 
     def test_domain_crud_rejects_unsafe_inputs_and_invalid_json(self):
         os.makedirs(os.path.join(self.base_dir, "domains"))

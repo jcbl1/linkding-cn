@@ -352,7 +352,7 @@ class SourceCache:
 
             from site_adapters.services.base import _adapter_dir
             from site_adapters.services.subscriptions import resolve_adapter_path
-            local_path = resolve_adapter_path(adapter_id, source, adapters_dir) if source else os.path.join(adapters_dir, _adapter_dir(item), 'adapters.jsonc')
+            local_path = resolve_adapter_path(name, source, adapters_dir, adapter_id=adapter_id) if source else os.path.join(adapters_dir, _adapter_dir(item), 'adapters.jsonc')
 
             adapter_data = self._sources.get(cache_key, (0, {'_meta': {}}))[1]
             meta = adapter_data.get('_meta', {})

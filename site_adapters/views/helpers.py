@@ -334,7 +334,8 @@ def _adapter_cache_info(adapter: dict) -> dict:
     source = adapter.get('source', '')
     dir_name = _adapter_dir(adapter)
     adapters_root = _get_adapters_dir()
-    file_path = resolve_adapter_path(name, source, adapters_root) if name else os.path.join(adapters_root, dir_name, 'adapters.jsonc')
+    # 远程缓存目录是 {id}.{name}（与写入路径一致），读取时必须带上 id
+    file_path = resolve_adapter_path(name, source, adapters_root, adapter.get('id', '')) if name else os.path.join(adapters_root, dir_name, 'adapters.jsonc')
     cached = os.path.exists(file_path)
     cached_domains = list_cached_domains_from_file(file_path) if cached else []
     is_remote = is_remote_source(source)
@@ -346,6 +347,7 @@ def _adapter_cache_info(adapter: dict) -> dict:
         'domains': cached_domains,
     }
     # 从 _meta.json 读取运行时状态（key 需规范化为目录 URL）
+    remote_runtime_version = None
     if is_remote:
         from site_adapters.services.subscriptions import _normalize_source_to_directory
         meta_key = _normalize_source_to_directory(source)
@@ -355,6 +357,8 @@ def _adapter_cache_info(adapter: dict) -> dict:
                 'last_fetch': meta_entry.get('last_fetch'),
                 'fetch_status': meta_entry.get('fetch_status', 'ok'),
             })
+            if meta_entry.get('version') is not None:
+                remote_runtime_version = meta_entry['version']
     # 从缓存的 adapters.jsonc 读取发布者元信息
     if cached:
         try:
@@ -369,6 +373,9 @@ def _adapter_cache_info(adapter: dict) -> dict:
                 })
         except (json.JSONDecodeError, OSError):
             pass
+    # 远程订阅的 version 以运行时状态为准（版本预检/304 同步会更新它）
+    if remote_runtime_version is not None:
+        info['version'] = remote_runtime_version
     return info
 
 
@@ -471,7 +478,7 @@ def build_domain_files() -> list[dict]:
             continue
         name = adapter.get('name', '')
         source = adapter.get('source', '')
-        file_path = resolve_adapter_path(name, source, adapters_dir)
+        file_path = resolve_adapter_path(name, source, adapters_dir, adapter_id=adapter.get('id', ''))
 
         if not file_path or not os.path.exists(file_path):
             continue

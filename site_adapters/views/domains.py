@@ -37,6 +37,7 @@ def _defaults_file_path() -> str:
             return resolve_adapter_path(
                 adapter.get('name', ''),
                 adapter.get('source', ''),
+                adapter_id=adapter.get('id', ''),
             )
     # 回退：构造默认路径
     return os.path.join(_get_adapters_dir(), 'defaults', 'adapters.jsonc')
@@ -59,7 +60,7 @@ def _read_domain_from_adapter(domain_key: str, adapter_name: str = '') -> tuple[
         source = adapter.get('source', '')
         if not source:
             continue
-        file_path = resolve_adapter_path(name, source)
+        file_path = resolve_adapter_path(name, source, adapter_id=adapter.get('id', ''))
         if not os.path.exists(file_path):
             continue
 
