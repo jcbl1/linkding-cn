@@ -9,6 +9,7 @@ from site_adapters.services.auth.cookies import (
     verify_and_refresh,
 )
 from site_adapters.services.auth.credentials import get_shared_cookie
+from site_adapters.services.config import apply_request_url
 from site_adapters.services.config.resolver import get_snapshot_config
 from site_adapters.services.engine.script_runner import run_script, resolve_hook_timeout
 
@@ -19,6 +20,30 @@ logger = logging.getLogger(__name__)
 
 def _snapshot_format(config: dict | None) -> str:
     return website_loader.resolve_content_type(config, default="html")
+
+
+def _apply_snapshot_before_result(url: str, config: dict, result: dict) -> None:
+    """Apply the partial config returned by a snapshot before hook in place.
+
+    Mirrors the metadata pipeline: user-facing keys such as ``request_url``
+    and ``user_cookie`` are mapped to the internal keys the SingleFile engine
+    actually reads.
+    """
+    from site_adapters.services.config.resolver import _merge_dicts
+
+    merged = _merge_dicts(config, result)
+    for key, value in result.items():
+        if key == 'request_url':
+            if isinstance(value, str) and value.startswith(('http://', 'https://')):
+                merged['_request_url'] = value
+            else:
+                resolved = apply_request_url(url, value)
+                if resolved:
+                    merged['_request_url'] = resolved
+        elif key == 'user_cookie' and value:
+            merged['_user_cookie'] = value
+    config.clear()
+    config.update(merged)
 
 
 def _run_snapshot(url: str, filepath: str, config: dict | None):
@@ -102,10 +127,7 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
         elif isinstance(result, dict):
             # Before hook returned config overrides (e.g. dynamic User-Agent).
             # Deep-merge into config so SingleFile picks up the changes.
-            from site_adapters.services.config.resolver import _merge_dicts
-            merged = _merge_dicts(config, result)
-            config.clear()
-            config.update(merged)
+            _apply_snapshot_before_result(url, config, result)
             logger.debug("Before hook returned config overrides, merged: %s", result)
 
     # 2. Run replace hook or built-in engine

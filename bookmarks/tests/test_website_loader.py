@@ -1492,6 +1492,63 @@ class UseBrowserTestCase(TestCase):
 
         self.assertIsNone(result)
 
+    def test_load_page_via_browser_wait_elements_supports_or(self):
+        """wait_elements entries split on "|" are passed as OR alternatives."""
+        browser = mock.MagicMock()
+        context = mock.MagicMock()
+        page = mock.MagicMock()
+        page.content.return_value = "<html><body>rendered</body></html>"
+        browser.new_context.return_value = context
+        context.new_page.return_value = page
+
+        config = {
+            "use_browser": {
+                "enabled": True,
+                "wait_elements": [".opus-module-content | .bili-opus-view", ".login"],
+            }
+        }
+        with mock.patch(
+            "site_adapters.services.engine.browser_provider.launch_browser",
+            return_value=browser,
+        ):
+            result = website_loader._load_page_via_browser(
+                "https://example.com", config
+            )
+
+        self.assertEqual(result, "<html><body>rendered</body></html>")
+        self.assertEqual(page.wait_for_function.call_count, 2)
+        first_args, first_kwargs = page.wait_for_function.call_args_list[0]
+        self.assertEqual(
+            first_kwargs["arg"], [".opus-module-content", ".bili-opus-view"]
+        )
+
+    def test_load_page_via_browser_wait_elements_timeout_keeps_dom(self):
+        """A wait_elements timeout is non-fatal and keeps the rendered DOM."""
+        browser = mock.MagicMock()
+        context = mock.MagicMock()
+        page = mock.MagicMock()
+        page.content.return_value = "<html><body>partial</body></html>"
+        page.wait_for_function.side_effect = TimeoutError("selector timed out")
+        browser.new_context.return_value = context
+        context.new_page.return_value = page
+
+        config = {
+            "use_browser": {
+                "enabled": True,
+                "wait_elements": [".opus-module-content"],
+            }
+        }
+        with mock.patch(
+            "site_adapters.services.engine.browser_provider.launch_browser",
+            return_value=browser,
+        ):
+            result = website_loader._load_page_via_browser(
+                "https://example.com", config
+            )
+
+        self.assertEqual(result, "<html><body>partial</body></html>")
+        page.content.assert_called_once()
+
 
 class BrowserEventLoopLeakTestCase(TestCase):
     """Regression tests for Playwright event-loop leak that caused

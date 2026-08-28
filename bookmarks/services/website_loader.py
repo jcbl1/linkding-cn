@@ -1113,6 +1113,39 @@ def load_website_metadata_for_test(url: str, username: str = ''):
 _browser_semaphore = threading.Semaphore(2)
 
 
+def _wait_for_browser_elements(page, wait_elements, timeout_ms: int) -> None:
+    """Wait for configured selectors before returning browser content.
+
+    Each entry supports "|" separated OR alternatives, matching the snapshot
+    engine semantics. A timeout is non-fatal: the current DOM is kept so a
+    JS-rendered page is never discarded in favor of a plain requests fallback.
+    """
+    for entry in wait_elements:
+        if not entry:
+            continue
+        alternatives = [s.strip() for s in str(entry).split("|") if s.strip()]
+        if not alternatives:
+            continue
+        try:
+            page.wait_for_function(
+                "alts => alts.some(sel => document.querySelector(sel))",
+                arg=alternatives,
+                timeout=timeout_ms,
+            )
+        except Exception as e:
+            try:
+                current_url = page.url
+            except Exception:
+                current_url = ""
+            logger.warning(
+                "Browser wait_elements not satisfied, continuing with current DOM. "
+                "url=%s selectors=%s: %s",
+                current_url,
+                alternatives,
+                e,
+            )
+
+
 def _load_page_via_browser(url: str, config: dict) -> str | None:
     """Load page HTML via browser engine. Returns HTML string or None on failure."""
     browser_config = config.get('use_browser') or {}
@@ -1143,11 +1176,9 @@ def _load_page_via_browser(url: str, config: dict) -> str | None:
         page = context.new_page()
         page.goto(url, timeout=timeout_ms, wait_until=wait_until)
 
-        # Wait for specific elements if configured
-        for selector in wait_elements:
-            if not selector:
-                continue
-            page.wait_for_selector(selector, timeout=timeout_ms)
+        # Wait for configured elements (OR alternatives via "|"). Timeouts are
+        # non-fatal so the rendered DOM is still returned to the caller.
+        _wait_for_browser_elements(page, wait_elements, timeout_ms)
 
         return page.content()
     except Exception as e:

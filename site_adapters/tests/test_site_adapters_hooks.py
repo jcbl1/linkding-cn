@@ -575,6 +575,55 @@ def before(url, config):
                 if os.path.exists(output_path):
                     os.unlink(output_path)
 
+    def test_before_hook_returns_request_url_for_singlefile(self):
+        """before hook can return request_url that redirects SingleFile capture."""
+        self._write("adapters/defaults/scripts/before_snap_req.py", """
+def before(url, config):
+    return {
+        'request_url': 'https://modified.example.com/opus/123',
+        'user_cookie': 'session=abc',
+    }
+""")
+        self._write("adapters/config.jsonc", json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults",
+                          "source": "./defaults/adapters.jsonc"}]
+        }))
+        self._write("adapters/defaults/adapters.jsonc", json.dumps({
+            "domains": {
+                "example.com": {
+                    "snapshot": {
+                        "scripts": [
+                            {"path": "before_snap_req.py", "hook": "before"}
+                        ]
+                    }
+                }
+            }
+        }))
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            from site_adapters.services.config.resolver import get_snapshot_config
+            from bookmarks.services.snapshot_processor import _run_snapshot_with_hooks
+
+            config = get_snapshot_config("https://example.com/page")
+            self.assertIsNotNone(config)
+            with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False) as tmp:
+                output_path = tmp.name
+            with mock.patch(
+                "bookmarks.services.snapshot_processor._create_snapshot"
+            ) as mock_create:
+                _run_snapshot_with_hooks(
+                    "https://example.com/page", output_path, config,
+                    config["scripts"]
+                )
+            passed_config = mock_create.call_args.args[2]
+            self.assertEqual(
+                passed_config["_request_url"],
+                "https://modified.example.com/opus/123",
+            )
+            self.assertEqual(passed_config["_user_cookie"], "session=abc")
+            if os.path.exists(output_path):
+                os.unlink(output_path)
+
     def test_replace_hook_writes_output(self):
         """replace hook writes HTML to output_path."""
         self._write("adapters/defaults/scripts/replace_snap.py", """
