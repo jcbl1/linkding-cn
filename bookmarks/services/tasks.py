@@ -707,7 +707,7 @@ def load_preview_image(
         bookmark.save(
             update_fields=["preview_image_retry_count", "preview_image_next_retry_at"]
         )
-    _load_preview_image_task(bookmark.id, priority=priority)
+    _load_preview_image_task(bookmark.id, force=force, priority=priority)
 
 
 @task(priority=PRIORITY_PREVIEW)
@@ -721,10 +721,10 @@ def delete_preview_image_temp_file(filepath: str):
 
 
 @task(priority=PRIORITY_PREVIEW)
-def _load_preview_image_task(bookmark_id: int):
+def _load_preview_image_task(bookmark_id: int, force: bool = False):
     try:
         with BACKGROUND_SERIAL_LOCK:
-            return _load_preview_image_task_unlocked(bookmark_id)
+            return _load_preview_image_task_unlocked(bookmark_id, force)
     except TaskLockedException:
         logger.debug(
             "Skipping preview image for bookmark_id=%s, background serial lock is busy",
@@ -733,7 +733,7 @@ def _load_preview_image_task(bookmark_id: int):
         raise RetryTask(delay=random.uniform(1, 3)) from None
 
 
-def _load_preview_image_task_unlocked(bookmark_id: int):
+def _load_preview_image_task_unlocked(bookmark_id: int, force: bool = False):
     try:
         bookmark = Bookmark.objects.get(id=bookmark_id)
     except Bookmark.DoesNotExist:
@@ -743,7 +743,7 @@ def _load_preview_image_task_unlocked(bookmark_id: int):
 
     try:
         new_preview_image_file = preview_image_loader.load_preview_image(
-            bookmark.url, bookmark
+            bookmark.url, bookmark, force=force
         )
     except Exception:
         logger.exception("Failed to load preview image. bookmark_id=%s", bookmark_id)
@@ -908,8 +908,15 @@ def _refresh_metadata_task(bookmark_id: int):
         bookmark.description = metadata.description
         update_fields.append("description")
     if metadata.preview_image:
+        preview_image_changed = (
+            metadata.preview_image != bookmark.preview_image_remote_url
+        )
         bookmark.preview_image_remote_url = metadata.preview_image
         update_fields.append("preview_image_remote_url")
+        if preview_image_changed and bookmark.preview_image_file:
+            # 让新远程图先展示，本地文件由下方下载任务完成后写回
+            bookmark.preview_image_file = ""
+            update_fields.append("preview_image_file")
     if metadata.url and metadata.url != bookmark.url:
         bookmark.url = metadata.url
         update_fields.append("url")
@@ -917,6 +924,10 @@ def _refresh_metadata_task(bookmark_id: int):
 
     bookmark.save(update_fields=update_fields)
     logger.info("Successfully refreshed metadata for bookmark. url=%s", bookmark.url)
+
+    # 重新下载本地预览图，确保 remote_url 已提交后再取新图
+    if not settings.LD_DISABLE_BACKGROUND_TASKS:
+        load_preview_image(bookmark.owner, bookmark, force=True)
 
     # 若url变动，则按需更新html快照
     if bookmark.owner.profile.enable_automatic_html_snapshots:

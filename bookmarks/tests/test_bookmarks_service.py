@@ -390,6 +390,32 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
 
             mock_load_favicon.assert_called_once_with(self.user, bookmark, priority=None)
 
+    def test_update_should_clear_local_preview_when_remote_preview_changed(self):
+        bookmark = self.setup_bookmark(preview_image_file="old_preview.png")
+        bookmark.preview_image_remote_url = "https://example.com/new-preview.png"
+
+        update_bookmark(bookmark, "tag1,tag2", self.user)
+
+        bookmark.refresh_from_db()
+        self.assertEqual(bookmark.preview_image_remote_url, "https://example.com/new-preview.png")
+        self.assertEqual(bookmark.preview_image_file, "")
+        self.mock_load_preview_image.assert_called_once_with(
+            self.user, bookmark, force=True, priority=None
+        )
+
+    def test_update_should_keep_local_preview_when_remote_preview_unchanged(self):
+        bookmark = self.setup_bookmark(preview_image_file="old_preview.png")
+        bookmark.preview_image_remote_url = "https://example.com/old-preview.png"
+        bookmark.save()
+
+        update_bookmark(bookmark, "tag1,tag2", self.user)
+
+        bookmark.refresh_from_db()
+        self.assertEqual(bookmark.preview_image_file, "old_preview.png")
+        self.mock_load_preview_image.assert_called_once_with(
+            self.user, bookmark, force=False, priority=None
+        )
+
     def test_update_should_not_create_html_snapshot(self):
         with patch.object(tasks, "create_html_snapshot") as mock_create_html_snapshot:
             bookmark = self.setup_bookmark()
@@ -1103,7 +1129,6 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
         )
 
         self.assertEqual(self.mock_schedule_refresh_metadata.call_count, 3)
-        self.assertEqual(self.mock_load_preview_image.call_count, 3)
         self.assertEqual(self.mock_refresh_favicon.call_count, 3)
 
     def test_refresh_bookmarks_metadata_should_only_refresh_specified_bookmarks(self):
@@ -1116,13 +1141,8 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
         )
 
         self.assertEqual(self.mock_schedule_refresh_metadata.call_count, 2)
-        self.assertEqual(self.mock_load_preview_image.call_count, 2)
 
         for call_args in self.mock_schedule_refresh_metadata.call_args_list:
-            args, kwargs = call_args
-            self.assertNotIn(bookmark2.id, args)
-
-        for call_args in self.mock_load_preview_image.call_args_list:
             args, kwargs = call_args
             self.assertNotIn(bookmark2.id, args)
 
@@ -1138,13 +1158,8 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
         )
 
         self.assertEqual(self.mock_schedule_refresh_metadata.call_count, 2)
-        self.assertEqual(self.mock_load_preview_image.call_count, 2)
 
         for call_args in self.mock_schedule_refresh_metadata.call_args_list:
-            args, kwargs = call_args
-            self.assertNotIn(inaccessible_bookmark.id, args)
-
-        for call_args in self.mock_load_preview_image.call_args_list:
             args, kwargs = call_args
             self.assertNotIn(inaccessible_bookmark.id, args)
 
@@ -1159,7 +1174,6 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
         )
 
         self.assertEqual(self.mock_schedule_refresh_metadata.call_count, 3)
-        self.assertEqual(self.mock_load_preview_image.call_count, 3)
 
     def test_trash_bookmark(self):
         bookmark = self.setup_bookmark()

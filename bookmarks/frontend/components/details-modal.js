@@ -19,10 +19,13 @@ class DetailsModal extends Modal {
       title: this.dataset.bookmarkTitle || "",
       description: this.dataset.bookmarkDescription || "",
       notes: this.dataset.bookmarkNotes || "",
+      preview_image_remote_url: this.dataset.bookmarkPreviewImageRemoteUrl || "",
       tag_names: (this.dataset.bookmarkTagNames || "")
         .split(" ")
         .filter(Boolean),
     };
+    this._pendingMetadata = null;
+    this._urlEditing = false;
 
     // 不自动聚焦
     requestAnimationFrame(() => {
@@ -37,6 +40,7 @@ class DetailsModal extends Modal {
       titleInput.addEventListener("input", () => this._autoResize(titleInput));
       titleInput.addEventListener("blur", (e) => {
         e.target.scrollTop = 0;
+        if (this._urlEditing && this._pendingMetadata) return;
         this._patchBookmark("title", e.target.value);
       });
     }
@@ -46,6 +50,7 @@ class DetailsModal extends Modal {
       el.addEventListener("input", () => this._autoResize(el));
       el.addEventListener("blur", (e) => {
         const field = e.target.dataset.field;
+        if (this._urlEditing && this._pendingMetadata) return;
         if (field) this._patchBookmark(field, e.target.value);
       });
       el.addEventListener("keydown", (e) => {
@@ -279,6 +284,21 @@ class DetailsModal extends Modal {
         if (descText) descText.textContent = value || "";
         break;
       }
+      case "preview_image_remote_url": {
+        const previewImg = item.querySelector("img.preview-image");
+        if (previewImg) {
+          previewImg.src = value || "";
+          previewImg.style.display = value ? "" : "none";
+        }
+        // 同步弹窗内预览图
+        const modalPreviewImg = this.querySelector(".info-preview-image");
+        if (modalPreviewImg) {
+          modalPreviewImg.src = value || "";
+          const section = modalPreviewImg.closest(".detail-section");
+          if (section) section.style.display = value ? "" : "none";
+        }
+        break;
+      }
       case "tag_names": {
         const tags = Array.isArray(value) ? value : [];
         const tagsContainer = item.querySelector(".tags");
@@ -336,6 +356,7 @@ class DetailsModal extends Modal {
     if (!input) return;
 
     wrapper.classList.add("editing");
+    this._urlEditing = true;
     input.value = this._data.url;
     input.focus();
     input.setSelectionRange(input.value.length, input.value.length);
@@ -368,16 +389,15 @@ class DetailsModal extends Modal {
 
     const newUrl = input.value.trim();
     wrapper.classList.remove("editing");
+    this._urlEditing = false;
     input.removeEventListener("keydown", input._onKey);
     input.removeEventListener("blur", input._onBlur);
 
+    // 只有点击保存时才真正把刷新得到的元数据写入数据库
+    this._applyPendingMetadata();
+
     if (newUrl && newUrl !== this._data.url) {
       this._patchBookmark("url", newUrl);
-    } else if (this._metadataRefreshed) {
-      // 元数据已通过 _patchBookmarkQuiet 保存，同步列表项
-      this._syncListItemField("title", this._data.title);
-      this._syncListItemField("description", this._data.description);
-      this._metadataRefreshed = false;
     }
   }
 
@@ -387,15 +407,81 @@ class DetailsModal extends Modal {
     if (!wrapper || !input) return;
 
     wrapper.classList.remove("editing");
+    this._urlEditing = false;
     input.removeEventListener("keydown", input._onKey);
     input.removeEventListener("blur", input._onBlur);
 
-    if (this._metadataRefreshed) {
-      this._syncListItemField("title", this._data.title);
-      this._syncListItemField("description", this._data.description);
-      this._metadataRefreshed = false;
+    this._revertPendingMetadata();
+  }
+
+  _applyPendingMetadata() {
+    if (!this._pendingMetadata) return;
+    const pending = this._pendingMetadata;
+    this._pendingMetadata = null;
+
+    const fields = ["title", "description", "preview_image_remote_url"];
+    for (const field of fields) {
+      if (
+        Object.prototype.hasOwnProperty.call(pending, field) &&
+        pending[field] !== this._data[field]
+      ) {
+        this._patchBookmark(field, pending[field]);
+      }
     }
   }
+
+  _revertPendingMetadata() {
+    if (!this._pendingMetadata) return;
+    this._pendingMetadata = null;
+
+    // 恢复为数据库中已保存的值
+    const titleEl = this.querySelector(".bookmark-title-input");
+    if (titleEl) {
+      titleEl.value = this._data.title;
+      this._autoResize(titleEl);
+    }
+    const descEl = this.querySelector('.detail-textarea[data-field="description"]');
+    if (descEl) {
+      descEl.value = this._data.description;
+      this._autoResize(descEl);
+    }
+    this._setModalPreviewImage(this._data.preview_image_remote_url);
+  }
+
+  _setModalPreviewImage(src) {
+    let img = this.querySelector(".info-preview-image");
+    if (!img) {
+      let section = this.querySelector("[data-preview-section]");
+      if (!section) {
+        section = document.createElement("div");
+        section.className = "detail-section";
+        section.dataset.previewSection = "";
+        const label = document.createElement("div");
+        label.className = "detail-label";
+        label.textContent = gettext("Preview image");
+        section.appendChild(label);
+        const ref = this.querySelector(".detail-dates");
+        if (ref) {
+          ref.after(section);
+        } else {
+          this.querySelector(".modal-body")?.appendChild(section);
+        }
+      }
+      img = document.createElement("img");
+      img.className = "info-preview-image";
+      img.alt = "";
+      img.referrerPolicy = "strict-origin-when-cross-origin";
+      img.onerror = () => {
+        img.style.display = "none";
+      };
+      section.appendChild(img);
+    }
+    img.src = src || "";
+    img.style.display = src ? "" : "none";
+    const section = img.closest(".detail-section");
+    if (section) section.style.display = src ? "" : "none";
+  }
+
   // ---- 重新抓取元数据（条件性更新，与编辑页面逻辑一致） ----
 
   async _refreshMetadata() {
@@ -409,43 +495,40 @@ class DetailsModal extends Modal {
       if (!r.ok) return;
       const data = await r.json();
       const metadata = data.metadata;
-      const existing = data.bookmark;
 
-      // 条件性更新（URL 不更新，它是输入）
-      // 只更新 UI + 数据库，不触发页面刷新（保持 URL 编辑态）
+      // 只更新 UI 并暂存，真正写库要等点击“保存”
+      const pending = {};
 
       // (1) 标题：获取到的标题非空 → 替换
-      if (metadata.title) {
-        this._data.title = metadata.title;
+      if (metadata.title && metadata.title !== this._data.title) {
+        pending.title = metadata.title;
         const el = this.querySelector(".bookmark-title-input");
         if (el) { el.value = metadata.title; this._autoResize(el); }
-        await this._patchBookmarkQuiet("title", metadata.title);
       }
 
       // (2) 描述：获取到的描述非空，且书签现有描述为空 → 填充
-      if (metadata.description && !existing?.description) {
-        this._data.description = metadata.description;
+      if (metadata.description && !this._data.description) {
+        pending.description = metadata.description;
         const el = this.querySelector('.detail-textarea[data-field="description"]');
         if (el) { el.value = metadata.description; this._autoResize(el); }
-        await this._patchBookmarkQuiet("description", metadata.description);
       }
 
       // (3) 预览图：获取到的预览图非空，且与现有 remote_url 不同 → 替换
-      if (metadata.preview_image && metadata.preview_image !== (existing?.preview_image_remote_url || "")) {
-        await this._patchBookmarkQuiet("preview_image_remote_url", metadata.preview_image);
-        this._metadataRefreshed = true;
+      if (
+        metadata.preview_image &&
+        metadata.preview_image !== (this._data.preview_image_remote_url || "")
+      ) {
+        pending.preview_image_remote_url = metadata.preview_image;
+        this._setModalPreviewImage(metadata.preview_image);
       }
 
-      // 标记有元数据更新，退出 URL 编辑态时刷新列表
-      if (metadata.title || (metadata.description && !existing?.description) || metadata.preview_image) {
-        this._metadataRefreshed = true;
-      }
+      this._pendingMetadata = Object.keys(pending).length ? pending : null;
     } catch (err) {
       console.error("Refresh metadata failed:", err);
     }
   }
 
-  // ---- API PATCH（静默保存 + 局部同步列表项） ----
+  // ---- API PATCH（保存 + 局部同步列表项） ----
 
   async _patchBookmark(field, value) {
     const current = this._data[field];
@@ -479,24 +562,6 @@ class DetailsModal extends Modal {
       console.error("Save failed:", err);
     }
   }
-
-  /** 静默 PATCH：只保存到数据库，不刷新页面 */
-  async _patchBookmarkQuiet(field, value) {
-    try {
-      const r = await fetch(`${this.apiBase}bookmarks/${this.bookmarkId}/`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", "X-CSRFToken": getCSRFToken() },
-        body: JSON.stringify({ [field]: value }),
-      });
-      if (r.ok) {
-        const data = await r.json();
-        this._data = { ...this._data, ...data };
-      }
-    } catch (err) {
-      console.error("Save failed:", err);
-    }
-  }
-
 
   // ---- 标签（显示态 ↔ 编辑态，编辑态动态创建 ld-tag-autocomplete） ----
 

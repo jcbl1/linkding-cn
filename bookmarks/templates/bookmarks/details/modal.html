@@ -6,6 +6,7 @@
                   data-bookmark-title="{{ details.bookmark.resolved_title }}"
                   data-bookmark-description="{{ details.bookmark.resolved_description|default_if_none:'' }}"
                   data-bookmark-notes="{{ details.bookmark.notes|default_if_none:'' }}"
+                  data-bookmark-preview-image-remote-url="{{ details.bookmark.preview_image_remote_url }}"
                   data-bookmark-is-archived="{{ details.bookmark.is_archived|yesno:'true,false' }}"
                   data-bookmark-unread="{{ details.bookmark.unread|yesno:'true,false' }}"
                   data-bookmark-shared="{{ details.bookmark.shared|yesno:'true,false' }}"
@@ -254,7 +255,7 @@
         {# 预览图 #}
         {% if details.preview_image_enabled %}
           {% if details.bookmark.preview_image_file or details.bookmark.preview_image_remote_url %}
-            <div class="detail-section">
+            <div class="detail-section" data-preview-section>
               <div class="detail-label">{% translate "Preview image" %}</div>
               {% if details.bookmark.preview_image_file %}
                 <img class="info-preview-image" src="{% static details.bookmark.preview_image_file %}" alt=""/>

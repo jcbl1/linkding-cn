@@ -508,7 +508,7 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
 
         # update bookmark during API call to check that saving
         # the image does not overwrite updated bookmark data
-        def mock_load_preview_image_impl(url, bookmark_obj):
+        def mock_load_preview_image_impl(url, bookmark_obj, force=False):
             bookmark.title = "Updated title"
             bookmark.save()
             return "test.png"
@@ -1389,6 +1389,60 @@ class BookmarkTasksTestCase(TestCase, BookmarkFactoryMixin):
             bookmark.refresh_from_db()
             self.assertEqual(bookmark.title, "New title")
             self.assertEqual(bookmark.description, "New description")
+
+    def test_refresh_metadata_clears_local_preview_when_remote_preview_changes(self):
+        bookmark = self.setup_bookmark(preview_image_file="old_preview.png")
+        mock_website_metadata = WebsiteMetadata(
+            url=bookmark.url,
+            title=None,
+            description=None,
+            preview_image="https://example.com/new-preview.png",
+        )
+
+        with mock.patch(
+            "bookmarks.services.tasks.load_website_metadata"
+        ) as mock_load_website_metadata, mock.patch(
+            "bookmarks.services.tasks.load_preview_image"
+        ) as mock_load_preview_image:
+            mock_load_website_metadata.return_value = mock_website_metadata
+
+            tasks.refresh_metadata(bookmark)
+
+            bookmark.refresh_from_db()
+            self.assertEqual(
+                bookmark.preview_image_remote_url,
+                "https://example.com/new-preview.png",
+            )
+            self.assertEqual(bookmark.preview_image_file, "")
+            mock_load_preview_image.assert_called_once_with(
+                bookmark.owner, bookmark, force=True
+            )
+
+    def test_refresh_metadata_keeps_local_preview_when_remote_preview_unchanged(self):
+        bookmark = self.setup_bookmark(preview_image_file="old_preview.png")
+        bookmark.preview_image_remote_url = "https://example.com/preview.png"
+        bookmark.save(update_fields=["preview_image_remote_url"])
+        mock_website_metadata = WebsiteMetadata(
+            url=bookmark.url,
+            title=None,
+            description=None,
+            preview_image="https://example.com/preview.png",
+        )
+
+        with mock.patch(
+            "bookmarks.services.tasks.load_website_metadata"
+        ) as mock_load_website_metadata, mock.patch(
+            "bookmarks.services.tasks.load_preview_image"
+        ) as mock_load_preview_image:
+            mock_load_website_metadata.return_value = mock_website_metadata
+
+            tasks.refresh_metadata(bookmark)
+
+            bookmark.refresh_from_db()
+            self.assertEqual(bookmark.preview_image_file, "old_preview.png")
+            mock_load_preview_image.assert_called_once_with(
+                bookmark.owner, bookmark, force=True
+            )
 
     def test_enrich_metadata_updates_blank_fields_only(self):
         bookmark = self.setup_bookmark(title="", description="")
