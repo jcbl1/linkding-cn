@@ -56,6 +56,9 @@ class Command(BaseCommand):
         subscription = sub.add_parser("validate-subscription")
         subscription.add_argument("source")
 
+        prefetch = sub.add_parser("prefetch-subscriptions")
+        prefetch.add_argument("--force", action="store_true")
+
         from_us = sub.add_parser("from-userscript")
         from_us.add_argument("source")
     def handle(self, *args, **opts):
@@ -167,6 +170,46 @@ class Command(BaseCommand):
             style = self.style.ERROR if level == 'error' else self.style.WARNING
             msg = issue['message'] if isinstance(issue, dict) else str(issue)
             self.stdout.write(style(msg))
+
+    def handle_prefetch_subscriptions(self, opts):
+        """Download remote subscriptions that are missing or due for refresh."""
+        from site_adapters.services.config.bootstrap import ensure_base_dirs
+        from site_adapters.services.subscriptions import (
+            fetch_all_subscriptions,
+            fetch_subscription,
+        )
+        from site_adapters.views.helpers import _get_adapters_list
+
+        ensure_base_dirs()
+        adapters = _get_adapters_list()
+        remote_adapters = [
+            adapter
+            for adapter in adapters
+            if isinstance(adapter, dict)
+            and adapter.get("enabled") is not False
+            and str(adapter.get("source", "")).startswith("https://")
+        ]
+        paths = []
+
+        if opts["force"]:
+            for adapter in remote_adapters:
+                source = adapter.get("source", "")
+                path = fetch_subscription(
+                    source,
+                    name=adapter.get("name", ""),
+                    adapter_id=adapter.get("id", ""),
+                    force=True,
+                    update_interval=adapter.get("update_interval", 86400),
+                )
+                if path:
+                    paths.append(path)
+        else:
+            paths = fetch_all_subscriptions(remote_adapters)
+
+        if paths:
+            self.stdout.write(self.style.SUCCESS(f"prefetched {len(paths)} subscription(s)"))
+        else:
+            self.stdout.write(self.style.SUCCESS("no subscriptions needed prefetching"))
 
     def _load_subscription(self, source: str):
         if os.path.isdir(source):

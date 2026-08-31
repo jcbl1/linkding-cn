@@ -26,6 +26,9 @@ python manage.py enable_wal
 python manage.py create_initial_superuser
 # Migrate legacy background tasks to Huey
 python manage.py migrate_tasks
+# Pre-fetch remote site adapter subscriptions so they are available without
+# requiring the admin to open /admin/site-adapters and click update.
+python manage.py site_adapter prefetch-subscriptions
 
 # Ensure folders are owned by the right user
 chown -R www-data: /etc/linkding/data
