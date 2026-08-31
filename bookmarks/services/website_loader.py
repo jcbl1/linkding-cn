@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from functools import lru_cache
 from http.cookies import SimpleCookie
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -20,6 +20,7 @@ from lxml import etree
 
 from bookmarks.utils import get_registrable_domain
 from site_adapters.services.auth.cookies import (
+    cookie_string_to_playwright_list,
     verify_and_refresh,
 )
 from site_adapters.services.auth.cookies import _should_refresh_cookie
@@ -1209,7 +1210,13 @@ def _wait_for_browser_elements(page, wait_elements, timeout_ms: int) -> None:
 
 
 def _load_page_via_browser(url: str, config: dict) -> str | None:
-    """Load page HTML via browser engine. Returns HTML string or None on failure."""
+    """Load page HTML via a fresh ephemeral browser context.
+
+    The context never shares the persistent ``chromium-profile`` used by
+    snapshots or cookie refresh, so concurrent metadata loads cannot race on
+    a profile lock. Already-resolved cookies are injected into the context to
+    cover logged-in sites. Returns HTML string or None on failure.
+    """
     browser_config = config.get('use_browser') or {}
     if not isinstance(browser_config, dict):
         return None
@@ -1235,6 +1242,19 @@ def _load_page_via_browser(url: str, config: dict) -> str | None:
     try:
         browser = launch_browser(headless=True)
         context = browser.new_context()
+        cookie_str = _cookie_string_from_config(config)
+        if cookie_str:
+            domain_key = config.get("_domain_key") or urlparse(url).hostname or ""
+            cookies = cookie_string_to_playwright_list(cookie_str, domain_key)
+            if cookies:
+                try:
+                    context.add_cookies(cookies)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to inject browser cookies for metadata. url=%s: %s",
+                        url,
+                        e,
+                    )
         page = context.new_page()
         page.goto(url, timeout=timeout_ms, wait_until=wait_until)
 

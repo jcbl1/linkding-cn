@@ -314,7 +314,7 @@ data/site_adapters/
 | `rewrite_title` / `rewrite_description` / `rewrite_image` | 对提取结果的规则重写 |
 | `load_full_page` | 是否加载完整页面内容，默认 `true` |
 | `max_content_limit` | 最大加载字节数，默认 5 MB |
-| `use_browser` | 用无头浏览器加载页面，处理 JS 渲染内容；失败回退 requests |
+| `use_browser` | 用全新的临时无头浏览器加载页面并注入已解析 Cookie；支持 `enabled`、`wait_until`（`domcontentloaded` / `load` / `networkidle`）、`wait_elements`、`timeout`；不共享快照使用的持久化 profile；失败回退 requests |
 | `scripts` | 脚本钩子，见「自定义脚本钩子」 |
 
 #### 选择器语法
@@ -418,7 +418,7 @@ reader 使用 defuddle 引擎，**不支持自定义脚本**。常用参数：
 - `type: "auto"`：系统自动维护 Cookie；`type: "login"`：用户手动提供 Cookie。
 - `verify.http_head_probe`：L1 HTTP HEAD 探针；`verify.content_check`：L2 页面内容校验。
 - `refresh.wait_cookie`：刷新时等待出现的 Cookie 名称（字符串或数组）。
-- `refresh.user_data_dir: "default"` 使用项目内置 Chromium profile，可帮助绕过 Reddit 等站点的 bot 检测。
+- `refresh.user_data_dir` 仅显式声明时才携带持久化 profile；Chromium 与 CloakBrowser 都会复用该 profile。`"default"` 使用项目内置 Chromium profile，可帮助绕过 Reddit 等站点的 bot 检测；省略则使用临时无状态上下文。
 - 当 `auth.cookie` 存在时，`http` 中的 `Cookie` 头会被忽略（两者互斥）。
 
 ### 自定义 Header
@@ -759,7 +759,7 @@ python manage.py site_adapter pipeline "<url>" --skip-snapshot
 
 - 检查 `verify` 配置是否过严或过松。
 - 查看 `data/site_adapters/logs/execution-*.jsonl` 中的验证结果。
-- 必要时用 `refresh.user_data_dir: "default"` 复用持久化浏览器 profile。
+- 必要时显式配置 `refresh.user_data_dir: "default"` 复用持久化浏览器 profile；只有显式声明才会携带 profile，方便识别并发快照/Cookie 刷新时的 profile 锁冲突。
 
 **Q: 远程订阅源更新不生效？**
 

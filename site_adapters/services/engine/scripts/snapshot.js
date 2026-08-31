@@ -52,7 +52,7 @@ async function getLauncher() {
     const cb = await import("cloakbrowser");
     const opts = {};
     const key = process.env.CLOAKBROWSER_LICENSE_KEY || licenseKey;
-    if (key) opts.license_key = key;
+    if (key) opts.licenseKey = key;
     return { launch: cb.launch, opts };
   }
 

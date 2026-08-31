@@ -1549,6 +1549,42 @@ class UseBrowserTestCase(TestCase):
         self.assertEqual(result, "<html><body>partial</body></html>")
         page.content.assert_called_once()
 
+    def test_load_page_via_browser_injects_cookies_from_config(self):
+        """Browser metadata loading should inject stored cookies into the context."""
+        browser = mock.MagicMock()
+        context = mock.MagicMock()
+        page = mock.MagicMock()
+        page.content.return_value = "<html><body>rendered</body></html>"
+        browser.new_context.return_value = context
+        context.new_page.return_value = page
+
+        config = {
+            "use_browser": {"wait_until": "domcontentloaded"},
+            "_domain_key": "*.xiaoheihe.cn",
+            "_user_cookie": "x_xhh_tokenid=abc; smidV2=def",
+        }
+        cookies = [
+            {"name": "x_xhh_tokenid", "value": "abc", "domain": ".xiaoheihe.cn", "path": "/"},
+            {"name": "smidV2", "value": "def", "domain": ".xiaoheihe.cn", "path": "/"},
+        ]
+        with (
+            mock.patch(
+                "site_adapters.services.engine.browser_provider.launch_browser",
+                return_value=browser,
+            ),
+            mock.patch(
+                "bookmarks.services.website_loader.cookie_string_to_playwright_list",
+                return_value=cookies,
+            ) as mock_convert,
+        ):
+            result = website_loader._load_page_via_browser(
+                "https://api.xiaoheihe.cn/share", config
+            )
+
+        self.assertEqual(result, "<html><body>rendered</body></html>")
+        mock_convert.assert_called_once()
+        context.add_cookies.assert_called_once_with(cookies)
+
 
 class BrowserEventLoopLeakTestCase(TestCase):
     """Regression tests for Playwright event-loop leak that caused
