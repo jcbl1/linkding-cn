@@ -178,12 +178,42 @@ def _normalize_metadata_result(url: str, metadata, source: str):
     return _empty_metadata(url)
 
 
+def _metadata_dict_is_empty(result: dict) -> bool:
+    """Return True when a replace-hook result carries no extractable fields."""
+    return not any(
+        result.get(key)
+        for key in ("title", "description", "image", "preview_image")
+    )
+
+
 def _load_with_hooks(url: str, config: dict, scripts: list, username: str = '',
                      ignore_cache: bool = False) -> WebsiteMetadata:
     """Execute metadata pipeline with hook scripts.
 
     Order: before hooks → [replace or built-in engine] → after hooks
     """
+    # Replace hooks issue their own HTTP requests, so acquire an auto cookie
+    # before executing them when no credential is available yet.
+    if config.get("cookie", {}).get("type") == "auto" and not _cookie_string_from_config(config):
+        try:
+            verify_and_refresh(
+                cookie_config=config.get("cookie"),
+                url=config.get("_request_url", url),
+                domain_key=config.get("_domain_key"),
+                verify_context={"url": url, "status": 0, "title": "", "body_preview": ""},
+                username=username,
+                scope=config.get("_effective_cookie_scope", ""),
+            )
+            # The refreshed credential is persisted by verify_and_refresh; a
+            # rebuilt config makes it visible to the hook below.
+            refreshed_config = get_metadata_config(url, username=username)
+            if refreshed_config:
+                config = refreshed_config
+        except Exception:
+            logger.exception(
+                "Metadata preflight cookie refresh failed. url=%s", url
+            )
+
     # 1. Run before hooks
     for entry in scripts:
         if entry.get('hook') != 'before':
@@ -213,6 +243,38 @@ def _load_with_hooks(url: str, config: dict, scripts: list, username: str = '',
             hook_timeout = resolve_hook_timeout(entry, config)
             result = run_script(script_path, hook_name='replace', url=url,
                                 config=dict(config), timeout=hook_timeout)
+            # Replace hooks own their HTTP requests, so an empty result with an
+            # auto cookie can mean the saved token was rejected. Refresh once
+            # and retry before giving up.
+            if isinstance(result, dict) and _metadata_dict_is_empty(result):
+                cookie_config = config.get("cookie") or {}
+                if (
+                    cookie_config.get("type") == "auto"
+                    and cookie_config.get("refresh")
+                    and _should_refresh_cookie(cookie_config)
+                ):
+                    logger.info(
+                        "Replace hook returned empty metadata; forcing cookie refresh. url=%s",
+                        url,
+                    )
+                    new_cookie = verify_and_refresh(
+                        cookie_config=cookie_config,
+                        url=config.get("_request_url", url),
+                        domain_key=config.get("_domain_key"),
+                        verify_context={"url": url, "status": 0, "title": "", "body_preview": ""},
+                        username=username,
+                        scope=config.get("_effective_cookie_scope", ""),
+                        force_refresh=True,
+                    )
+                    if new_cookie:
+                        config["_user_cookie"] = new_cookie
+                        result = run_script(
+                            script_path,
+                            hook_name='replace',
+                            url=url,
+                            config=dict(config),
+                            timeout=hook_timeout,
+                        )
             if result is None:
                 return _empty_metadata(url)
             if isinstance(result, dict):

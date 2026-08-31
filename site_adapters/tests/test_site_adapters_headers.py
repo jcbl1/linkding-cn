@@ -23,14 +23,40 @@ from site_adapters.services.auth.credentials import (
     get_shared_header,
     save_user_header,
     save_shared_header,
+    save_user_cookie,
     delete_user_header,
     delete_shared_header,
 )
+from site_adapters.services.auth.cookies import _filter_cookies_for_domain
 from site_adapters.services.config.loader import _cache
 from site_adapters.services.config.resolver import (
     get_metadata_config,
 )
 from site_adapters.services.auth import get_auth_for_request
+
+
+class CookieDomainFilterTestCase(TestCase):
+    def test_wildcard_keeps_only_target_domain_cookies(self):
+        cookies = [
+            {"name": "token", "value": "1", "domain": ".xiaoheihe.cn"},
+            {"name": "api_only", "value": "2", "domain": "api.xiaoheihe.cn"},
+            {"name": "www_only", "value": "3", "domain": "www.xiaoheihe.cn"},
+            {"name": "parent", "value": "4", "domain": "xiaoheihe.cn"},
+            {"name": "other", "value": "5", "domain": ".example.com"},
+        ]
+        result = _filter_cookies_for_domain(cookies, "*.xiaoheihe.cn")
+        names = {c["name"] for c in result}
+        self.assertEqual(names, {"token", "api_only", "www_only", "parent"})
+
+    def test_exact_host_does_not_keep_other_subdomains(self):
+        cookies = [
+            {"name": "parent", "value": "1", "domain": ".xiaoheihe.cn"},
+            {"name": "api_only", "value": "2", "domain": "api.xiaoheihe.cn"},
+            {"name": "www_only", "value": "3", "domain": "www.xiaoheihe.cn"},
+        ]
+        result = _filter_cookies_for_domain(cookies, "api.xiaoheihe.cn")
+        names = {c["name"] for c in result}
+        self.assertEqual(names, {"parent", "api_only"})
 
 
 class NormalizeHeadersBlockTestCase(TestCase):
@@ -366,6 +392,35 @@ class ResolverHeaderInjectionTestCase(TestCase):
                             header_name='X-Test', value='from-saved')
             config = get_metadata_config('https://example.com/page', username='user1')
             self.assertEqual(config['headers'].get('X-Test'), 'from-http')
+
+    def test_section_cookie_falls_back_to_domain_user_cookie(self):
+        """Section-level cookie config reads a domain-level saved cookie."""
+        self.setup_adapter('example.com', {
+            'metadata': {
+                'auth': {'cookie': {'type': 'auto'}},
+                'select_title': ['h1'],
+            },
+        })
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            save_user_cookie(username='user1', domain='example.com',
+                             cookie_str='session=abc')
+            config = get_metadata_config('https://example.com/page', username='user1')
+            self.assertEqual(config.get('_user_cookie'), 'session=abc')
+
+    def test_section_cookie_does_not_fall_back_on_type_mismatch(self):
+        """Domain cookie type mismatch still blocks cross-scope fallback."""
+        self.setup_adapter('example.com', {
+            'auth': {'cookie': {'type': 'auto'}},
+            'metadata': {
+                'auth': {'cookie': {'type': 'login'}},
+                'select_title': ['h1'],
+            },
+        })
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            save_user_cookie(username='user1', domain='example.com',
+                             cookie_str='session=abc')
+            config = get_metadata_config('https://example.com/page', username='user1')
+            self.assertIsNone(config.get('_user_cookie'))
 
 
 class GetAuthForRequestTestCase(TestCase):

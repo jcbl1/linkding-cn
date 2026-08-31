@@ -300,14 +300,15 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
                 username=username, hostname=hostname, scope=effective_cookie_scope)
 
             # Cross-scope fallback: if section-level and no cookie found,
-            # fall back to domain-level only when cookie types match.
+            # fall back to domain-level saved cookies. Only block the fallback
+            # when the domain explicitly declares a different cookie type.
             if not user_cookie_str and section_has_cookie:
                 domain_cookie_type = ''
                 domain_cookie_cfg = _merge_auth(top_auth, default_auth).get('cookie', {})
                 if domain_cookie_cfg and domain_cookie_cfg.get('enabled', True):
                     domain_cookie_type = domain_cookie_cfg.get('type', 'auto')
                 section_cookie_type = cookie_config.get('type', 'auto')
-                if domain_cookie_type and domain_cookie_type == section_cookie_type:
+                if not domain_cookie_type or domain_cookie_type == section_cookie_type:
                     user_cookie_str, _ = get_best_cookie(
                         username=username, hostname=hostname, scope='')
 

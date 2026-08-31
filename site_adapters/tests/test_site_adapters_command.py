@@ -9,7 +9,7 @@ from django.core.management import call_command
 from django.test import TestCase, override_settings
 
 from site_adapters.services.config.loader import _cache
-from site_adapters.services.auth.cookies import _should_refresh_cookie
+from site_adapters.services.auth.cookies import _should_refresh_cookie, verify_and_refresh
 
 
 class SiteAdaptersCommandTestCase(TestCase):
@@ -115,3 +115,30 @@ class SiteAdaptersCommandTestCase(TestCase):
             "type": "login",
             "refresh": {**default_refresh, "wait_cookie": "reddit_session"},
         }))
+
+    def test_verify_and_refresh_uses_hostname_lookup_for_wildcard_domain(self):
+        """A stored cookie for a wildcard key is reused, not force-refreshed."""
+        from site_adapters.services.auth.credentials import save_shared_cookie
+
+        save_shared_cookie(domain="*.xiaoheihe.cn",
+                           cookie_str="x_xhh_tokenid=abc",
+                           scope="metadata")
+
+        with mock.patch(
+            "site_adapters.services.auth.cookies.refresh_cookie_declarative",
+        ) as refresh:
+            result = verify_and_refresh(
+                cookie_config={
+                    "type": "auto",
+                    "refresh": {"url": "https://www.xiaoheihe.cn/",
+                                "wait_cookie": "x_xhh_tokenid",
+                                "timeout": 30},
+                },
+                url="https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=0f487254ffbc",
+                domain_key="*.xiaoheihe.cn",
+                verify_context={"url": "", "status": 0, "title": "", "body_preview": ""},
+                scope="metadata",
+            )
+
+        refresh.assert_not_called()
+        self.assertEqual(result, "x_xhh_tokenid=abc")
