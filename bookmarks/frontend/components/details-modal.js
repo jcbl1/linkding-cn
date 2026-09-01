@@ -506,8 +506,8 @@ class DetailsModal extends Modal {
         if (el) { el.value = metadata.title; this._autoResize(el); }
       }
 
-      // (2) 描述：获取到的描述非空，且书签现有描述为空 → 填充
-      if (metadata.description && !this._data.description) {
+      // (2) 描述：获取到的描述非空，且与现有描述不同 → 覆盖
+      if (metadata.description && metadata.description !== this._data.description) {
         pending.description = metadata.description;
         const el = this.querySelector('.detail-textarea[data-field="description"]');
         if (el) { el.value = metadata.description; this._autoResize(el); }
