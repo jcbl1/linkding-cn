@@ -138,8 +138,9 @@ RUN --mount=type=cache,target=/root/.npm \
 
 # Install playwright Python package into venv in parallel with linkding-plus apk/npm steps
 FROM build-deps AS playwright-install
+ARG TARGETARCH
 ENV VIRTUAL_ENV=/etc/linkding/.venv
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,id=uv-${TARGETARCH} \
     /root/.local/bin/uv pip install 'playwright>=1.59.0'
 
 
