@@ -1,10 +1,7 @@
 import { setAfterPageLoadFocusTarget } from "../utils/focus.js";
 import { handleBookmarkAction } from "../utils/bookmark-action.js";
+import { getCSRFToken } from "../utils/csrf.js";
 import { Modal } from "./modal.js";
-
-function getCSRFToken() {
-  return document.cookie.match(/csrftoken=([^;]+)/)?.[1] || "";
-}
 
 function gettext(s) {
   return window.gettext ? window.gettext(s) : s;
@@ -294,7 +291,7 @@ class DetailsModal extends Modal {
             if (i > 0) tagsContainer.appendChild(document.createTextNode(" "));
             const link = document.createElement("a");
             link.href = `?q=%23${encodeURIComponent(tag)}`;
-            link.textContent = `#${tag}`;
+            link.textContent = tag;
             tagsContainer.appendChild(link);
           });
         }
@@ -574,7 +571,7 @@ class DetailsModal extends Modal {
     const view = this.querySelector(".detail-tags-view");
     if (!view) return;
     if (tagNames.length) {
-      view.innerHTML = `<span class="info-tags">${tagNames.map((t) => `<span class="info-tag">#${t}</span>`).join("")}</span>`;
+      view.innerHTML = `<span class="info-tags">${tagNames.map((t) => `<span class="info-tag">${t}</span>`).join("")}</span>`;
     } else {
       view.innerHTML = `<span class="info-placeholder">${gettext("Click to edit tags")}</span>`;
     }
@@ -612,6 +609,7 @@ class DetailsModal extends Modal {
       link.className = "info-file-link";
       link.href = `/assets/${assetId}`;
       link.target = "_blank";
+      link.dataset.turbo = "false";
       link.textContent = newName || currentName;
       link.title = newName || currentName;
       input.replaceWith(link);

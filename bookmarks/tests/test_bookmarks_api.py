@@ -15,6 +15,7 @@ import bookmarks.services.bookmarks
 from bookmarks.api.serializers import BookmarkSerializer
 from bookmarks.models import Bookmark, BookmarkSearch, UserProfile
 from bookmarks.services import website_loader
+from bookmarks.services import tasks
 from bookmarks.services.website_loader import WebsiteMetadata
 from bookmarks.tests.helpers import BookmarkFactoryMixin, LinkdingApiTestCase
 from bookmarks.utils import app_version
@@ -499,7 +500,7 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
         self.assertEqual(bookmark.title, "")
         self.assertEqual(bookmark.description, "")
         mock_load_website_metadata.assert_not_called()
-        mock_schedule_metadata_enrichment.assert_called_once_with(bookmark)
+        mock_schedule_metadata_enrichment.assert_called_once_with(bookmark, priority=tasks.PRIORITY_NEW_BOOKMARK)
 
     def test_create_bookmark_schedules_background_enrichment_on_retryable_failure(self):
         self.authenticate()
@@ -1109,7 +1110,7 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
         self.assertEqual(bookmark.title, bookmark_data["title"])
         self.assertEqual(bookmark.description, bookmark_data["description"])
         self.assertEqual(
-            "http://testserver/static/example_com.png", bookmark_data["favicon_url"]
+            "http://testserver/favicon/example.com", bookmark_data["favicon_url"]
         )
         self.assertEqual(
             "http://testserver/static/preview.png", bookmark_data["preview_image_url"]
@@ -1220,7 +1221,7 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
             )
 
             mock_load_website_metadata.assert_called_once_with(
-                "https://example.com", ignore_cache=False
+                "https://example.com", ignore_cache=False, username="testuser"
             )
             mock_load_website_metadata.reset_mock()
 
@@ -1231,7 +1232,7 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
             )
 
             mock_load_website_metadata.assert_called_once_with(
-                "https://example.com", ignore_cache=True
+                "https://example.com", ignore_cache=True, username="testuser"
             )
 
     def test_check_returns_empty_metadata_on_retryable_failure(self):

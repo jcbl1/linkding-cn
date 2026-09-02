@@ -1,3 +1,12 @@
+// Track mouse position for elementFromPoint lookups
+let _lastMouseX = 0;
+let _lastMouseY = 0;
+
+document.addEventListener("mousemove", (e) => {
+  _lastMouseX = e.clientX;
+  _lastMouseY = e.clientY;
+}, { passive: true });
+
 document.addEventListener("keydown", (event) => {
   const targetNodeName = event.target.nodeName;
   const isInputTarget =
@@ -47,6 +56,35 @@ document.addEventListener("keydown", (event) => {
       searchInput.focus();
       event.preventDefault();
     }
+  }
+
+  if (event.key === "q") {
+    const target = document.elementFromPoint(_lastMouseX, _lastMouseY);
+    if (!target) return;
+
+    const li = target.closest("li[ld-bookmark-item]");
+    if (!li) return;
+
+    let fieldType;
+    if (target.closest(".inline-edit-notes, .toggle-notes")) {
+      fieldType = "notes";
+    } else if (target.closest(".tags")) {
+      fieldType = "tags";
+    } else if (target.closest(".description-container")) {
+      fieldType = "description";
+    } else if (target.closest(".title, .title-link")) {
+      fieldType = "title";
+    }
+    if (!fieldType) return;
+
+    const item = li.__behaviors?.find(
+      (b) => typeof b.startQuickEdit === "function",
+    );
+    if (item) {
+      event.preventDefault();
+      item.startQuickEdit(fieldType);
+    }
+    return;
   }
 
   if (event.key === "n") {

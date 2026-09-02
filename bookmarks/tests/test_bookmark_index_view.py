@@ -8,13 +8,13 @@ from django.urls import reverse
 from django.utils import timezone, translation
 
 from bookmarks.models import BookmarkSearch, UserProfile
-from bookmarks.views.contexts import SidebarUserSummaryContext
 from bookmarks.tests.helpers import (
     BookmarkFactoryMixin,
     BookmarkListTestMixin,
     DomainSidebarTestMixin,
     TagCloudTestMixin,
 )
+from bookmarks.views.contexts import SidebarUserSummaryContext
 
 
 class BookmarkIndexViewTestCase(
@@ -136,7 +136,7 @@ class BookmarkIndexViewTestCase(
         user = self.get_or_create_test_user()
         user.profile.language = language
         user.profile.save(update_fields=["language"])
-        self.client.cookies["django_language"] = language
+        self.client.cookies["ld_language"] = language
         return user
 
     def test_should_list_unarchived_and_user_owned_bookmarks(self):
@@ -694,7 +694,6 @@ class BookmarkIndexViewTestCase(
             soup.select_one(".sidebar [data-sidebar-module='bundles']")
         )
 
-    @unittest.skip("Pre-existing: domain count format changed (no parentheses in icon mode)")
     def test_list_domains_without_normalization_rules(self):
         self.setup_bookmark(
             url="https://example.com/alpha"
@@ -725,7 +724,6 @@ class BookmarkIndexViewTestCase(
             ],
         )
 
-    @unittest.skip("Pre-existing: domain count format changed (no parentheses in icon mode)")
     def test_list_domains_with_custom_domain_hierarchy(self):
         profile = self.get_or_create_test_user().profile
         profile.custom_domain_root = "docs.feishu.cn\nfeishu.cn"
@@ -763,7 +761,6 @@ class BookmarkIndexViewTestCase(
             ],
         )
 
-    @unittest.skip("Pre-existing: domain count format changed (no parentheses in icon mode)")
     def test_domain_links_replace_existing_domain_filter_and_highlight_selection(self):
         profile = self.get_or_create_test_user().profile
         profile.custom_domain_root = "docs.feishu.cn\nfeishu.cn"
@@ -774,7 +771,7 @@ class BookmarkIndexViewTestCase(
 
         response = self.client.get(
             reverse("linkding:bookmarks.index")
-            + "?q=hello+domain:(docs.feishu.cn+|+.docs.feishu.cn)"
+            + '?q=hello+domain:"docs.feishu.cn+|+.docs.feishu.cn"'
         )
 
         self.assertVisibleDomains(
@@ -800,7 +797,7 @@ class BookmarkIndexViewTestCase(
         root_link = soup.select_one('li[data-domain-host="feishu.cn"] a')
         self.assertIsNotNone(root_link)
         self.assertEqual(
-            root_link.attrs["href"], "?q=hello+domain%3A%28feishu.cn+%7C+.feishu.cn%29"
+            root_link.attrs["href"], "?q=hello+domain%3A%22feishu.cn+%7C+.feishu.cn%22"
         )
 
         selected_link = soup.select_one('li[data-domain-host="docs.feishu.cn"] a')
@@ -834,7 +831,6 @@ class BookmarkIndexViewTestCase(
         ]
         self.assertEqual(child_classes[0], "domain-selection-prefix")
 
-    @unittest.skip("Pre-existing: domain count format changed (no parentheses in icon mode)")
     def test_domain_groups_are_sorted_by_root_bookmark_count_desc(self):
         profile = self.get_or_create_test_user().profile
         profile.custom_domain_root = "docs.feishu.cn\nfeishu.cn\ngithub.com"
@@ -872,7 +868,6 @@ class BookmarkIndexViewTestCase(
             ],
         )
 
-    @unittest.skip("Pre-existing: domain count format changed (no parentheses in icon mode)")
     def test_domain_children_are_sorted_by_bookmark_count_desc(self):
         profile = self.get_or_create_test_user().profile
         profile.custom_domain_root = (
@@ -1087,7 +1082,6 @@ class BookmarkIndexViewTestCase(
         self.assertIsNotNone(count)
         self.assertEqual(count.text.strip(), "1")
 
-    @unittest.skip("Pre-existing: domain count format changed (no parentheses in icon mode)")
     def test_domain_compact_mode_groups_non_top_roots_under_other(self):
         for index in range(17):
             for count in range(17 - index):
@@ -1097,7 +1091,9 @@ class BookmarkIndexViewTestCase(
 
         response = self.client.get(reverse("linkding:bookmarks.index"))
 
-        expected_domains = [
+        # Server renders 10 top roots + "Other" group node = 11 items.
+        # The 7 overflow domains under "Other" are loaded via AJAX.
+        server_domains = [
             {
                 "host": f"domain-{index}.example.com",
                 "label": f"domain-{index}.example.com",
@@ -1115,6 +1111,37 @@ class BookmarkIndexViewTestCase(
                 "group": True,
                 "clickable": False,
             },
+        ]
+
+        self.assertVisibleDomains(response, server_domains)
+
+        soup = self.make_soup(response.content.decode())
+        domain_list = soup.select_one("ul.domain-menu")
+        self.assertIsNotNone(domain_list)
+        self.assertEqual(domain_list.attrs["data-domain-compact-mode"], "true")
+
+        root_hosts = [
+            item.attrs["data-domain-host"]
+            for item in domain_list.select(":scope > li.domain-menu-item")
+        ]
+        self.assertEqual(root_hosts[-1], "__other__")
+
+        menu_links = soup.select(
+            "section[aria-labelledby='domains-heading'] .menu-link"
+        )
+        menu_texts = [link.text.strip() for link in menu_links]
+        self.assertEqual(menu_texts, ["Full mode", "All domains"])
+
+        # Verify overflow domains loaded via AJAX
+        ajax_response = self.client.get(
+            reverse("linkding:domain_tree.children") + "?node_id=__other__"
+        )
+        self.assertEqual(ajax_response.status_code, 200)
+        ajax_soup = self.make_soup(ajax_response.content.decode())
+        ajax_items = ajax_soup.select("li.domain-menu-item")
+        self.assertEqual(len(ajax_items), 7)
+
+        overflow_domains = [
             {
                 "host": "domain-10.example.com",
                 "label": "domain-10.example.com",
@@ -1166,24 +1193,22 @@ class BookmarkIndexViewTestCase(
             },
         ]
 
-        self.assertVisibleDomains(response, expected_domains)
-
-        soup = self.make_soup(response.content.decode())
-        domain_list = soup.select_one("ul.domain-menu")
-        self.assertIsNotNone(domain_list)
-        self.assertEqual(domain_list.attrs["data-domain-compact-mode"], "true")
-
-        root_hosts = [
-            item.attrs["data-domain-host"]
-            for item in domain_list.select(":scope > li.domain-menu-item")
-        ]
-        self.assertEqual(root_hosts[-1], "__other__")
-
-        menu_links = soup.select(
-            "section[aria-labelledby='domains-heading'] .menu-link"
-        )
-        menu_texts = [link.text.strip() for link in menu_links]
-        self.assertEqual(menu_texts, ["Icon mode", "All domains"])
+        for index, item in enumerate(ajax_items):
+            expected = overflow_domains[index]
+            self.assertEqual(item.attrs["data-domain-host"], expected["host"])
+            self.assertEqual(
+                int(item.attrs["data-domain-level"]), expected["level"]
+            )
+            primary = item.select_one("[data-domain-primary]")
+            self.assertIsNotNone(primary)
+            label = primary.select_one(".domain-label-text") or primary.select_one(
+                ".domain-label"
+            )
+            self.assertEqual(label.text.strip(), expected["label"])
+            count_el = primary.select_one(".count")
+            self.assertIsNotNone(count_el)
+            count_text = count_el.text.strip()
+            self.assertIn(count_text, [str(expected["count"]), f"({expected['count']})"])
 
     def test_domain_compact_icon_mode_uses_icon_layout_for_other_children(self):
         for index in range(17):
@@ -1200,22 +1225,9 @@ class BookmarkIndexViewTestCase(
 
         other_item = soup.select_one('li[data-domain-host="__other__"]')
         self.assertIsNotNone(other_item)
-
-        other_children = other_item.select_one(
-            ":scope > ul.domain-children.domain-children-icon"
-        )
-        self.assertIsNotNone(other_children)
-
-        other_child = other_children.select_one(
-            'li[data-domain-host="domain-10.example.com"]'
-        )
-        self.assertIsNotNone(other_child)
-        self.assertIsNotNone(
-            other_child.select_one(":scope > .domain-row.domain-row-icon")
-        )
-        self.assertIsNotNone(
-            other_child.select_one(":scope > .domain-row .domain-root-icon-summary")
-        )
+        # Group nodes load children dynamically, not server-side
+        self.assertEqual(other_item.get("data-domain-group"), "true")
+        self.assertEqual(other_item.get("data-loaded"), "false")
 
     def test_sidebar_summary_renders_compact_stats_and_calendar_shell(self):
         with translation.override("zh-hans"):

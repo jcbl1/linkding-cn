@@ -7,7 +7,7 @@ from bookmarks.tests.helpers import BookmarkFactoryMixin
 class LinkdingE2ETestCase(LiveServerTestCase, BookmarkFactoryMixin):
     def setUp(self) -> None:
         self.client.force_login(self.get_or_create_test_user())
-        self.cookie = self.client.cookies["sessionid"]
+        self.cookie = self.client.cookies["ld_sessionid"]
 
     def setup_browser(self, playwright) -> BrowserContext:
         browser = playwright.chromium.launch(headless=True)
@@ -15,7 +15,7 @@ class LinkdingE2ETestCase(LiveServerTestCase, BookmarkFactoryMixin):
         context.add_cookies(
             [
                 {
-                    "name": "sessionid",
+                    "name": "ld_sessionid",
                     "value": self.cookie.value,
                     "domain": self.live_server_url.replace("http:", ""),
                     "path": "/",

@@ -33,7 +33,7 @@ class AssetServiceTestCase(TestCase, BookmarkFactoryMixin):
         )
         self.mock_detect_content_type = self.mock_detect_content_type_patcher.start()
 
-    def _write_html_snapshot(self, _url, filepath):
+    def _write_html_snapshot(self, _url, filepath, **kwargs):
         with open(filepath, "w") as snapshot_file:
             snapshot_file.write(self.html_content)
 
@@ -85,6 +85,7 @@ class AssetServiceTestCase(TestCase, BookmarkFactoryMixin):
         self.mock_singlefile_create_snapshot.assert_called_once_with(
             "https://example.com",
             expected_temp_filepath,
+            username="testuser",
         )
 
         # should create gzip file in asset folder
@@ -218,6 +219,68 @@ class AssetServiceTestCase(TestCase, BookmarkFactoryMixin):
         self.assertEqual(asset.status, BookmarkAsset.STATUS_COMPLETE)
         self.assertEqual(asset.content_type, BookmarkAsset.CONTENT_TYPE_HTML)
         self.mock_singlefile_create_snapshot.assert_called()
+
+    def test_create_json_snapshot(self):
+        bookmark = self.setup_bookmark(url="https://api.example.com/item")
+        asset = assets.create_snapshot_asset(bookmark)
+        asset.save()
+        asset.date_created = timezone.datetime(
+            2023, 8, 11, 21, 45, 11, tzinfo=datetime.UTC
+        )
+
+        def write_json_snapshot(_url, filepath, **_kwargs):
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write('{"title": "JSON snapshot"}')
+
+        self.mock_singlefile_create_snapshot.side_effect = write_json_snapshot
+
+        with (
+            timezone.override("UTC"),
+            mock.patch(
+                "bookmarks.services.assets.get_snapshot_config",
+                return_value={"content_type": "json"},
+            ),
+        ):
+            assets.create_snapshot(asset)
+
+        expected_filename = (
+            "snapshot_2023-08-11_214511_https___api.example.com_item.json.gz"
+        )
+        asset.refresh_from_db()
+        self.assertEqual(asset.content_type, BookmarkAsset.CONTENT_TYPE_JSON)
+        self.assertEqual(asset.file, expected_filename)
+        self.assertIn("JSON snapshot from", asset.display_name)
+
+    def test_create_xml_snapshot(self):
+        bookmark = self.setup_bookmark(url="https://example.com/feed.xml")
+        asset = assets.create_snapshot_asset(bookmark)
+        asset.save()
+        asset.date_created = timezone.datetime(
+            2023, 8, 11, 21, 45, 11, tzinfo=datetime.UTC
+        )
+
+        def write_xml_snapshot(_url, filepath, **_kwargs):
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write("<feed><entry><title>XML snapshot</title></entry></feed>")
+
+        self.mock_singlefile_create_snapshot.side_effect = write_xml_snapshot
+
+        with (
+            timezone.override("UTC"),
+            mock.patch(
+                "bookmarks.services.assets.get_snapshot_config",
+                return_value={"content_type": "xml"},
+            ),
+        ):
+            assets.create_snapshot(asset)
+
+        expected_filename = (
+            "snapshot_2023-08-11_214511_https___example.com_feed.xml.xml.gz"
+        )
+        asset.refresh_from_db()
+        self.assertEqual(asset.content_type, BookmarkAsset.CONTENT_TYPE_XML)
+        self.assertEqual(asset.file, expected_filename)
+        self.assertIn("XML snapshot from", asset.display_name)
 
     @override_settings(LD_SNAPSHOT_PDF_MAX_SIZE=100)
     def test_create_pdf_snapshot_fails_when_content_length_exceeds_limit(self):

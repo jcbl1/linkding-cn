@@ -139,7 +139,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
             self.assertIsNone(favicon)
             return
         self.assertIsNotNone(favicon)
-        self.assertTrue(favicon["src"].startswith("/static/"))
+        self.assertTrue(favicon["src"].startswith("/favicon/"))
 
     def assertPreviewImageVisible(self, html: str, bookmark: Bookmark):
         self.assertPreviewImage(html, bookmark, True)
@@ -355,7 +355,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
             self.assertEqual(len(tag_links), len(bookmark.tags.all()))
 
             for tag in bookmark.tags.all():
-                tag_link = tags.find("a", string=f"#{tag.name}")
+                tag_link = tags.find("a", string=tag.name)
                 self.assertIsNotNone(tag_link)
                 self.assertEqual(tag_link["href"], f"?q=%23{tag.name}")
 
@@ -425,7 +425,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
             self.assertEqual(len(tag_links), len(bookmark.tags.all()))
 
             for tag in bookmark.tags.all():
-                tag_link = tags.find("a", string=f"#{tag.name}")
+                tag_link = tags.find("a", string=tag.name)
                 self.assertIsNotNone(tag_link)
                 self.assertEqual(tag_link["href"], f"?q=%23{tag.name}")
 
@@ -489,9 +489,9 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         tags = soup.select_one(".tags")
         tag_links = tags.find_all("a")
         self.assertEqual(len(tag_links), 3)
-        self.assertEqual(tag_links[0].text, "#tag1")
-        self.assertEqual(tag_links[1].text, "#tag2")
-        self.assertEqual(tag_links[2].text, "#tag3")
+        self.assertEqual(tag_links[0].text, "tag1")
+        self.assertEqual(tag_links[1].text, "tag2")
+        self.assertEqual(tag_links[2].text, "tag3")
 
     def test_bookmark_tag_link_does_not_duplicate_existing_tag_filter(self):
         tag = self.setup_tag(name="tag1")
@@ -649,7 +649,8 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
             f"""
             <a href="{snapshot_url}"
                class="date-link date-link-exists"
-               title="View latest snapshot" target="_blank" rel="noopener">
+               title="View latest snapshot" target="_blank"
+               data-turbo="false" rel="noopener">
                 {formatted_date}
             </a>
             """,
@@ -847,7 +848,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         self.assertFaviconVisible(html, bookmark)
 
     def test_favicon_should_show_placeholder_when_there_is_no_icon(self):
-        """favicon_file 为空时应显示占位符图标 + data-favicon-url 懒加载属性。"""
+        """favicon_file 为空时应显示 /favicon/{domain} URL（返回默认 favicon.svg）。"""
         profile = self.get_or_create_test_user().profile
         profile.enable_favicons = True
         profile.save()
@@ -858,8 +859,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         soup = self.make_soup(html)
         favicon = soup.select_one(".favicon")
         self.assertIsNotNone(favicon)
-        self.assertIn("favicon.svg", favicon["src"])
-        self.assertTrue(favicon.has_attr("data-favicon-url"))
+        self.assertTrue(favicon["src"].startswith("/favicon/"))
 
     def test_favicon_should_be_hidden_when_favicons_disabled(self):
         profile = self.get_or_create_test_user().profile

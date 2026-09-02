@@ -1,17 +1,22 @@
 import html
+import re
 
 from django.contrib.auth.decorators import login_required
 from django.http import (
     HttpResponseBadRequest,
-    HttpResponseRedirect,
 )
 from django.shortcuts import render
-from django.utils import timezone
 from django.urls import reverse
-from django.utils.translation import gettext as _
+
+
+def _safe_filename(name: str) -> str:
+    """Sanitize filename for Content-Disposition header."""
+    name = name.replace('"', '_').replace('\n', '_').replace('\r', '_')
+    return re.sub(r'[^\w\s.\-()\u4e00-\u9fff]', '_', name)
+
 
 from bookmarks.models import Bookmark, BookmarkAsset
-from bookmarks.services import tasks, website_loader
+from bookmarks.services import tasks
 from bookmarks.type_defs import HttpRequest
 from bookmarks.views import access
 
@@ -47,31 +52,23 @@ def read(request: HttpRequest, bookmark_id: int):
                 bookmark.url, bookmark.date_added
             )
 
-            from bookmarks.models import FaviconCache
-            from bookmarks.utils import extract_hostname, parse_domain_roots, resolve_favicon_domain
+            from bookmarks.utils import (
+                extract_hostname,
+                parse_domain_roots,
+                resolve_favicon_domain,
+            )
             hostname = extract_hostname(bookmark.url)
-            favicon_file = ""
-            favicon_unavailable = False
+            favicon_domain = ""
             if hostname:
                 domain_config = parse_domain_roots(request.user_profile.custom_domain_root)
-                domain = resolve_favicon_domain(hostname, config=domain_config)
-                fc = FaviconCache.objects.filter(domain=domain).first()
-                if fc and fc.status == FaviconCache.STATUS_SUCCESS and fc.favicon_file:
-                    favicon_file = fc.favicon_file
-                elif fc and fc.status == FaviconCache.STATUS_MISSING:
-                    favicon_unavailable = True
-                elif fc and fc.status == FaviconCache.STATUS_FAILED:
-                    # 与 FaviconLookup 逻辑一致：只有未到重试时间的才标记不可用
-                    if fc.next_retry_at and fc.next_retry_at > timezone.now():
-                        favicon_unavailable = True
+                favicon_domain = resolve_favicon_domain(hostname, config=domain_config)
 
             return render(
                 request,
                 "bookmarks/reader/read_unavailable.html",
                 {
                     "bookmark": bookmark,
-                    "favicon_file": favicon_file,
-                    "favicon_unavailable": favicon_unavailable,
+                    "favicon_domain": favicon_domain,
                     "snapshot_url": snapshot_url,
                     "web_archive_url": web_archive_url,
                     "is_authenticated": request.user.is_authenticated,
@@ -140,7 +137,9 @@ def read(request: HttpRequest, bookmark_id: int):
         elif asset.status == BookmarkAsset.STATUS_FAILURE:
             # Previous attempt failed — retry with a new asset
             remove_article(asset)
-            new_asset = tasks.create_article(bookmark)
+            new_asset = tasks.create_article(
+                bookmark, priority=tasks.PRIORITY_READING
+            )
             return render(
                 request,
                 "bookmarks/reader/read_pending.html",
@@ -152,7 +151,7 @@ def read(request: HttpRequest, bookmark_id: int):
             )
 
     # No article yet — create one via huey task
-    asset = tasks.create_article(bookmark)
+    asset = tasks.create_article(bookmark, priority=tasks.PRIORITY_READING)
     return render(
         request,
         "bookmarks/reader/read_pending.html",
@@ -162,25 +161,6 @@ def read(request: HttpRequest, bookmark_id: int):
             "api_base_url": api_base_url,
         },
     )
-
-
-@login_required
-def reparse(request: HttpRequest, bookmark_id: int):
-    if request.method != "POST":
-        return HttpResponseBadRequest("POST required")
-
-    bookmark = access.bookmark_write(request, bookmark_id)
-
-    try:
-        content = website_loader.load_full_page(bookmark.url)
-    except Exception as e:
-        content = f"<html><body><p>{_('Unable to load page content: %(error)s') % {'error': str(e)}}</p></body></html>"
-
-    from bookmarks.services.articles import create_article
-
-    create_article(bookmark, content, title=bookmark.resolved_title)
-
-    return HttpResponseRedirect(reverse("linkding:bookmarks.read", args=[bookmark_id]))
 
 
 @login_required
@@ -226,7 +206,7 @@ def export(request: HttpRequest, bookmark_id: int):
 
         response = HttpResponse(content, content_type="text/html")
         response["Content-Disposition"] = (
-            f'attachment; filename="{bookmark.resolved_title}.html"'
+            f'attachment; filename="{_safe_filename(bookmark.resolved_title)}.html"'
         )
         return response
 
@@ -246,7 +226,7 @@ def export(request: HttpRequest, bookmark_id: int):
 
         response = HttpResponse(md, content_type="text/markdown")
         response["Content-Disposition"] = (
-            f'attachment; filename="{bookmark.resolved_title}.md"'
+            f'attachment; filename="{_safe_filename(bookmark.resolved_title)}.md"'
         )
         return response
 

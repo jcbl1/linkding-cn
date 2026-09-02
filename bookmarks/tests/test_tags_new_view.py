@@ -71,7 +71,7 @@ class TagsNewViewTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
 
         self.assertInHTML(
             """
-            <div class="toast toast-success" role="alert">
+            <div data-toast-message data-toast-tone="success">
                 Tag "new_tag" created successfully.
             </div>
         """,

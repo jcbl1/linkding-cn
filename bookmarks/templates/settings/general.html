@@ -17,20 +17,18 @@
     </div>
 
     {% if success_message %}
-      <div class="toast toast-success mb-4">{{ success_message }}</div>
+      <div hidden><div data-toast-message data-toast-tone="success">{{ success_message }}</div></div>
     {% endif %}
     {% if error_message %}
-      <div class="toast toast-error mb-4">{{ error_message }}</div>
+      <div hidden><div data-toast-message data-toast-tone="error">{{ error_message }}</div></div>
     {% endif %}
     {% if error_details %}
-      <div class="toast toast-error mb-4">
+      <div hidden><div data-toast-message data-toast-tone="error">
         {% for message in error_details %}
           <div>{{ message }}</div>
         {% endfor %}
-      </div>
+      </div></div>
     {% endif %}
-    <div class="settings-feedback" data-settings-feedback></div>
-
     <div class="settings-layout">
       <div class="settings-content">
         <section id="settings-interface" class="settings-section" aria-labelledby="settings-interface-heading">
@@ -687,9 +685,9 @@ reddit.com/r/Music music reddit</pre>
             {% if has_snapshot_support %}
               <div class="settings-row">
                 <div class="settings-copy">
-                  <label for="{{ profile_quick_form.enable_automatic_html_snapshots.id_for_label }}" class="settings-label">{% translate "HTML snapshots" %}</label>
+                  <label for="{{ profile_quick_form.enable_automatic_html_snapshots.id_for_label }}" class="settings-label">{% translate "Snapshots" %}</label>
                   <div class="form-input-hint">
-                    {% translate "Automatically create HTML snapshots when adding new bookmarks." %}
+                    {% translate "Automatically create snapshots when adding new bookmarks." %}
                     {% translate "If disabled, snapshots can still be created manually from the bookmark details view." %}
                   </div>
                 </div>
@@ -700,7 +698,7 @@ reddit.com/r/Music music reddit</pre>
               </div>
               <div class="settings-row">
                 <div class="settings-copy">
-                  <label class="settings-label">{% translate "Create missing HTML snapshots" %}</label>
+                  <label class="settings-label">{% translate "Create missing snapshots" %}</label>
                 </div>
                 <div class="settings-inline-action">
                   <button class="btn btn-primary"
@@ -713,9 +711,9 @@ reddit.com/r/Music music reddit</pre>
             {% else %}
               <div class="settings-row is-disabled">
                 <div class="settings-copy">
-                  <label class="settings-label">{% translate "HTML snapshots" %}</label>
+                  <label class="settings-label">{% translate "Snapshots" %}</label>
                   <div class="form-input-hint">
-                    {% translate "This instance does not currently support HTML snapshots." %}
+                    {% translate "This instance does not currently support snapshots." %}
                   </div>
                 </div>
                 <label class="form-switch settings-switch">
@@ -805,13 +803,38 @@ reddit.com/r/Music music reddit</pre>
           <form action="{% url 'linkding:settings.save' %}" method="post" class="settings-card-stack" data-settings-save-mode="instant" data-bookmark-toolbar-form>
             {% csrf_token %}
             <input type="hidden" name="form_id" value="profile_quick">
-            <input type="hidden" name="form_fields" value="bookmark_toolbar_modules,bookmark_date_display,bookmark_date_route,bookmark_actions,bookmark_statuses,bookmark_quick_edits,bookmark_quick_tags,bookmark_action_display_mode,bookmark_status_display_mode,bookmark_quick_edit_display_mode">
+            <input type="hidden" name="form_fields" value="bookmark_toolbar_modules,bookmark_toolbar_auto_hide,bookmark_date_display,bookmark_date_route,bookmark_actions,bookmark_statuses,bookmark_quick_edits,bookmark_quick_tags,bookmark_action_display_mode,bookmark_status_display_mode,bookmark_quick_edit_display_mode">
             {{ profile_quick_form.bookmark_toolbar_modules.as_hidden }}
             {{ profile_quick_form.bookmark_actions.as_hidden }}
             {{ profile_quick_form.bookmark_statuses.as_hidden }}
             {{ profile_quick_form.bookmark_quick_edits.as_hidden }}
             {{ profile_quick_form.bookmark_quick_tags.as_hidden }}
 
+
+            {# 自动隐藏工具栏开关 #}
+            <div class="settings-card">
+              <div class="settings-row">
+                <div class="settings-copy">
+                  <label class="settings-label">{% translate "Auto-hide toolbar" %}</label>
+                  <div class="form-input-hint">
+                    {% blocktranslate trimmed %}
+· When enabled, toolbar items (except date) are hidden by default and only shown on hover (PC) or tap on empty area (mobile).<br>
+· When enabled, "Bookmark date" is forced on and cannot be disabled.<br>
+· Recommended: place "Bookmark date" first for the best experience.
+{% endblocktranslate %}
+                  </div>
+                </div>
+                <div class="settings-control">
+                  <label class="form-switch settings-switch">
+                    <input type="checkbox"
+                           data-toolbar-auto-hide
+                           name="{{ profile_quick_form.bookmark_toolbar_auto_hide.html_name }}"
+                           {% if profile_quick_form.bookmark_toolbar_auto_hide.value %}checked{% endif %}>
+                    <i class="form-icon"></i>
+                  </label>
+                </div>
+              </div>
+            </div>
             {# 工具栏模块列表（可拖拽排序，独立卡片） #}
             <div class="settings-card">
               <div class="settings-stack settings-modules-stack">

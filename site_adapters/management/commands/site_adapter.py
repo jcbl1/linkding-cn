@@ -1,0 +1,356 @@
+import json
+import os
+import shutil
+import tempfile
+
+from django.conf import settings
+from django.core.management.base import BaseCommand
+
+from bookmarks.services.website_loader import (
+    load_website_metadata,
+    normalize_content_type,
+)
+from site_adapters.services.auth.cookies import (
+    verify_and_refresh,
+)
+from site_adapters.services.auth.credentials import get_shared_cookie
+from site_adapters.services.config import parse_jsonc
+from site_adapters.services.config.loader import show_config
+from site_adapters.services.config.resolver import (
+    get_metadata_config,
+    get_reader_config,
+    get_snapshot_config,
+)
+from site_adapters.services.config.validator import classify_field, validate_config
+from site_adapters.services.subscriptions import (
+    fetch_subscription,
+)
+
+
+class Command(BaseCommand):
+    help = "Manage and test site adapter configuration"
+
+    def add_arguments(self, parser):
+        sub = parser.add_subparsers(dest="cmd", required=True)
+
+        validate = sub.add_parser("validate")
+        validate.add_argument("base_dir", nargs="?", default=None)
+        validate.add_argument("--file", default="")
+
+        show = sub.add_parser("show-config")
+        show.add_argument("url")
+        show.add_argument("--dir", default=None)
+
+        metadata = sub.add_parser("metadata")
+        metadata.add_argument("url")
+
+        cookie = sub.add_parser("cookie")
+        cookie.add_argument("url")
+        cookie.add_argument("--section", choices=("metadata", "snapshot", "reader"), default="metadata")
+
+        pipeline = sub.add_parser("pipeline")
+        pipeline.add_argument("url")
+        pipeline.add_argument("--output", "-o", default=None)
+        pipeline.add_argument("--skip-snapshot", action="store_true")
+
+        subscription = sub.add_parser("validate-subscription")
+        subscription.add_argument("source")
+
+        from_us = sub.add_parser("from-userscript")
+        from_us.add_argument("source")
+    def handle(self, *args, **opts):
+        return getattr(self, f"handle_{opts['cmd'].replace('-', '_')}")(opts)
+
+    def handle_validate(self, opts):
+        base_dir = opts["base_dir"] or settings.LD_SITE_ADAPTERS_DIR
+        issues = validate_config(base_dir, domain_filename=opts["file"])
+        if not issues:
+            self.stdout.write(self.style.SUCCESS("site adapters ok"))
+            return
+        for issue in issues:
+            level = issue['level'] if isinstance(issue, dict) else 'error'
+            style = self.style.ERROR if level == 'error' else self.style.WARNING
+            msg = issue['message'] if isinstance(issue, dict) else str(issue)
+            self.stdout.write(style(msg))
+
+    def handle_show_config(self, opts):
+        result = show_config(opts["url"], opts["dir"] or settings.LD_SITE_ADAPTERS_DIR)
+        self.stdout.write(json.dumps(result, indent=2, ensure_ascii=False))
+
+    def handle_metadata(self, opts):
+        config = get_metadata_config(opts["url"])
+        metadata = load_website_metadata(opts["url"], ignore_cache=True)
+        self.stdout.write(json.dumps({
+            "config": config,
+            "metadata": metadata.to_dict(),
+        }, indent=2, ensure_ascii=False, default=str))
+
+    def handle_cookie(self, opts):
+        config = get_metadata_config(opts["url"]) if opts["section"] == "metadata" else get_snapshot_config(opts["url"])
+        if not config:
+            self.stdout.write(self.style.ERROR("no matching domain config"))
+            return
+        domain_key = config.get("_domain_key", "")
+        cookie_config = config.get("cookie", {})
+        before = config.get("_user_cookie") or get_shared_cookie(hostname=domain_key, scope=opts["section"])[0]
+        after = before
+        if cookie_config:
+            after = verify_and_refresh(
+                cookie_config=cookie_config,
+                url=opts["url"],
+                domain_key=domain_key,
+                verify_context={"url": opts["url"], "status": 0, "title": "", "body_preview": ""},
+                scope=opts["section"],
+            )
+        self.stdout.write(json.dumps({
+            "domain": domain_key,
+            "has_cookie": bool(config.get("_user_cookie") or get_shared_cookie(hostname=domain_key, scope=opts["section"])[0]),
+            "refreshed": bool(after and after != before),
+        }, indent=2, ensure_ascii=False))
+
+    def handle_pipeline(self, opts):
+        from bookmarks.services import reader_processor
+        from bookmarks.services.snapshot_processor import create_snapshot
+
+        url = opts["url"]
+        snapshot_config = get_snapshot_config(url)
+        result = {
+            "metadata_config": get_metadata_config(url),
+            "snapshot_config": snapshot_config,
+            "reader_config": get_reader_config(url),
+            "metadata": load_website_metadata(url, ignore_cache=True).to_dict(),
+        }
+        tmp_dir = None
+        snapshot_path = opts["output"]
+        try:
+            if not opts["skip_snapshot"]:
+                snapshot_extension = (
+                    normalize_content_type((snapshot_config or {}).get("content_type"))
+                    or "html"
+                )
+                if not snapshot_path:
+                    tmp_dir = tempfile.mkdtemp()
+                    snapshot_path = os.path.join(
+                        tmp_dir, f"snapshot.{snapshot_extension}"
+                    )
+                create_snapshot(url, snapshot_path)
+                result["snapshot"] = {"path": snapshot_path, "size": os.path.getsize(snapshot_path)}
+                with open(snapshot_path, encoding="utf-8") as f:
+                    raw_content = f.read()
+                if snapshot_extension in ("json", "xml"):
+                    result["reader"] = reader_processor.parse_content(
+                        raw_content, snapshot_extension, url=url
+                    )
+                else:
+                    result["reader"] = reader_processor.parse_html(
+                        raw_content, url=url
+                    )
+            else:
+                result["reader"] = reader_processor.parse_url(url)
+            self.stdout.write(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+        finally:
+            if tmp_dir:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def handle_validate_subscription(self, opts):
+        try:
+            data, root = self._load_subscription(opts["source"])
+        except Exception as exc:
+            self.stdout.write(self.style.ERROR(f"load failed: {exc}"))
+            return
+        issues = self._validate_subscription_data(data, root)
+        if not issues:
+            self.stdout.write(self.style.SUCCESS(f"subscription ok, {len(data.get('domains', {}))} domains"))
+            return
+        for issue in issues:
+            level = issue['level'] if isinstance(issue, dict) else 'error'
+            style = self.style.ERROR if level == 'error' else self.style.WARNING
+            msg = issue['message'] if isinstance(issue, dict) else str(issue)
+            self.stdout.write(style(msg))
+
+    def _load_subscription(self, source: str):
+        if os.path.isdir(source):
+            return self._load_subscription_dir(source)
+        if source.startswith("https://"):
+            root = fetch_subscription(source, force=True)
+            if not root:
+                raise ValueError("subscription fetch failed")
+            return self._load_subscription_dir(root)
+        if source.startswith("http://"):
+            raise ValueError("subscription url must use HTTPS")
+        with open(source, encoding="utf-8") as f:
+            data = parse_jsonc(f.read())
+        if not isinstance(data, dict):
+            raise ValueError("subscription top-level must be an object")
+        if not isinstance(data.get("domains"), dict):
+            data = {
+                **data,
+                "domains": {
+                    key: value for key, value in data.items()
+                    if key not in ("*", "scripts", "domains") and not key.startswith("_")
+                },
+            }
+        return data, os.path.dirname(os.path.abspath(source))
+
+    def _load_subscription_dir(self, path: str):
+        root = os.path.abspath(path)
+        # 尝试读取 adapters.jsonc
+        sub_file = os.path.join(root, "adapters.jsonc")
+        if os.path.exists(sub_file):
+            with open(sub_file, encoding="utf-8") as f:
+                data = parse_jsonc(f.read())
+            if isinstance(data, dict) and isinstance(data.get("domains"), dict):
+                scripts_dir = os.path.join(root, "scripts")
+                if os.path.isdir(scripts_dir):
+                    data["_available_scripts"] = os.listdir(scripts_dir)
+                return data, root
+        # 回退：旧 subscription.jsonc
+        old_sub = os.path.join(root, "subscription.jsonc")
+        if os.path.exists(old_sub):
+            with open(old_sub, encoding="utf-8") as f:
+                data = parse_jsonc(f.read())
+            if isinstance(data, dict) and isinstance(data.get("domains"), dict):
+                return data, root
+        # 回退：旧目录格式
+        data = {"domains": {}}
+        global_path = os.path.join(root, "global.jsonc")
+        if os.path.exists(global_path):
+            with open(global_path, encoding="utf-8") as f:
+                global_data = parse_jsonc(f.read())
+            data["*"] = global_data.get("*", {}) if isinstance(global_data, dict) else {}
+        domains_dir = os.path.join(root, "domains")
+        if os.path.isdir(domains_dir):
+            for fname in sorted(os.listdir(domains_dir)):
+                if not (fname.endswith(".jsonc") or fname.endswith(".json")):
+                    continue
+                domain_key = fname.rsplit(".", 1)[0]
+                fpath = os.path.join(domains_dir, fname)
+                with open(fpath, encoding="utf-8") as f:
+                    data["domains"][domain_key] = parse_jsonc(f.read())
+        return data, root
+
+    def _validate_subscription_data(self, data: dict, root: str):
+        from site_adapters.services.config.validator import _issue
+        issues = []
+        domains = data.get("domains", {})
+        if not isinstance(domains, dict):
+            return [_issue('error', 'domains_not_object', "domains must be an object")]
+        for domain_key, value in domains.items():
+            if "/" in domain_key or "\\" in domain_key or ".." in domain_key:
+                issues.append(_issue('error', 'invalid_domain_key', f"invalid domain key: {domain_key}", path=domain_key))
+                continue
+            if isinstance(value, str):
+                continue
+            if not isinstance(value, dict):
+                issues.append(_issue('error', 'domain_not_object', f"{domain_key} must be an object", path=domain_key))
+                continue
+            if value.get("type") == "alias":
+                if not value.get("target"):
+                    issues.append(_issue('error', 'alias_missing_target', f"{domain_key} alias missing target", path=domain_key))
+                continue
+            for section in ("metadata", "snapshot", "reader"):
+                sec = value.get(section, {})
+                if not sec:
+                    continue
+                if not isinstance(sec, dict):
+                    issues.append(_issue('error', 'section_not_object', f"{domain_key}.{section} must be an object", path=f"{domain_key}.{section}"))
+                    continue
+                for field, field_value in sec.items():
+                    if classify_field(section, field) == "unknown":
+                        issues.append(_issue('warning', 'unknown_field', f"{domain_key}.{section}.{field} is unknown", path=f"{domain_key}.{section}.{field}"))
+                    if field == "script" or field.endswith("_script"):
+                        self._check_subscription_script(issues, root, domain_key, section, field, field_value)
+        return issues
+
+    def _check_subscription_script(self, issues, root, domain_key, section, field, value):
+        from site_adapters.services.config.validator import _issue
+        if not value:
+            return
+        if not isinstance(value, str):
+            issues.append(_issue('error', 'script_field_not_string', f"{domain_key}.{section}.{field} must be a string path or URL", path=f"{domain_key}.{section}.{field}"))
+            return
+        # URL 引用：只检查格式
+        if value.startswith("http://") or value.startswith("https://"):
+            return
+        # 相对路径：相对于根目录解析
+        if value.startswith("./") or value.startswith("../"):
+            script_path = os.path.normpath(os.path.join(root, value))
+        else:
+            script_path = os.path.normpath(os.path.join(root, "scripts", value))
+        if not os.path.exists(script_path):
+            issues.append(_issue('warning', 'script_path_not_found', f"{domain_key}.{section}.{field} script not found locally: {value}", path=f"{domain_key}.{section}.{field}"))
+
+
+    def handle_from_userscript(self, opts):
+        """Generate a site adapter config from a Tampermonkey userscript."""
+        import re
+
+        source = opts["source"]
+
+        if os.path.isfile(source):
+            with open(source, encoding="utf-8") as f:
+                content = f.read()
+        else:
+            self.stdout.write(self.style.ERROR(f"File not found: {source}"))
+            return
+
+        # Parse UserScript metadata block
+        block_match = re.search(
+            r"//\s*==UserScript==\s*\n(.*?)//\s*==/UserScript==",
+            content, re.DOTALL,
+        )
+        if not block_match:
+            self.stdout.write(self.style.ERROR("No UserScript metadata block found"))
+            return
+
+        block = block_match.group(1)
+        matches = re.findall(r"//\s*@match\s+(.+)", block)
+        grants = re.findall(r"//\s*@grant\s+(.+)", block)
+        name_match = re.search(r"//\s*@name\s+(.+)", block)
+        name = name_match.group(1).strip() if name_match else "unknown"
+
+        if not matches:
+            self.stdout.write(self.style.ERROR("No @match found in userscript"))
+            return
+
+        # Convert @match patterns to domain keys
+        domains = []
+        for pattern in matches:
+            pattern = pattern.strip()
+            # *://*.example.com/* -> *.example.com
+            m = re.match(r"\*://(?:\*\.)?([^/]+?)(?:/.*)?$", pattern)
+            if m:
+                domains.append(m.group(1))
+            else:
+                # https://example.com/path -> example.com
+                m2 = re.match(r"https?://([^/]+)", pattern)
+                if m2:
+                    domains.append(m2.group(1))
+
+        if not domains:
+            self.stdout.write(self.style.ERROR("Could not extract domains from @match"))
+            return
+
+        # Determine if script needs GM_xmlhttpRequest (suggests auth needed)
+        needs_auth = "GM_xmlhttpRequest" in grants or "GM_xmlhttpRequest" in content
+
+        # Generate config
+        for domain in domains:
+            config = {"metadata": {}, "snapshot": {}, "reader": {}}
+            if needs_auth:
+                config["auth"] = {
+                    "cookie": {"type": "login"},
+                }
+
+            self.stdout.write(self.style.SUCCESS(f"\nGenerated config for {domain} (from {name}):"))
+            self.stdout.write(json.dumps({domain: config}, indent=2, ensure_ascii=False))
+
+        # Check for DOM selectors in the script
+        selector_patterns = re.findall(
+            r"""(?:querySelector|querySelectorAll|getElementById|getElementsByClassName)\s*\(\s*['"]([^'"]+)['"]""",
+            content,
+        )
+        if selector_patterns:
+            self.stdout.write(f"\nDetected selectors in script (may help configure metadata/snapshot):")
+            for sel in set(selector_patterns[:10]):
+                self.stdout.write(f"  - {sel}")

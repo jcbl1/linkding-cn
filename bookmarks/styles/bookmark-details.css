@@ -35,6 +35,10 @@
   & .tags a {
     color: var(--alternative-color);
   }
+
+  & .tags a::before {
+    content: "#";
+  }
 }
 
 /* Bookmark details page */

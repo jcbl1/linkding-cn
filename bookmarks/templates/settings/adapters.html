@@ -1,0 +1,98 @@
+{% extends "bookmarks/layout.html" %}
+{% load i18n static %}
+
+{% block head %}
+  {% translate "Adapters - Linkding" as page_title %}
+  {% with page_title=page_title %}
+    {{ block.super }}
+  {% endwith %}
+  <link href="{% static 'site-adapters.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
+{% endblock %}
+
+{% block content %}
+  <main class="settings-page" ld-settings-page ld-site-adapters aria-labelledby="main-heading">
+    <div class="settings-page-header">
+      <div>
+        <h1 id="main-heading">{% translate "Adapters" %}</h1>
+      </div>
+    </div>
+
+    <div class="settings-layout">
+      <div class="settings-content">
+
+        {# ── Credentials Manage ── #}
+        <section class="settings-section wa-cred-section" aria-labelledby="credentials-heading">
+          <div class="settings-section-heading wa-cred-section-heading">
+            <div class="settings-label-row wa-cred-label-row">
+              <div class="wa-cred-title-row">
+                <h2 id="credentials-heading">{% translate "Credentials Manage" %}</h2>
+                <span class="settings-help" data-settings-help data-settings-help-open="false">
+                  <button type="button" class="settings-help-button" data-settings-help-button aria-label="{% translate 'More info' %}" aria-expanded="false">
+                    <svg width="20" height="20" aria-hidden="true"><use href="#ld-icon-info"></use></svg>
+                  </button>
+                  <span class="settings-help-popover" role="tooltip"><span class="form-input-hint">{% translate "Some websites require login to access their content. Provide your credentials below so linkding can fetch metadata, snapshots, and reader-mode articles from those sites." %}</span></span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="wa-warning wa-cred-warning">
+            <p class="wa-warning-title">{% translate "Security Notice" %}</p>
+            <p class="wa-warning-copy">{% translate "Your credentials are encrypted at rest but remain accessible to all admin users of this instance. Do not provide credentials if you don't trust the administrators." %}</p>
+          </div>
+
+          {% include "settings/credentials_manage.html" %}
+        </section>
+
+        {# ── Snapshot Preferences ── #}
+        <section class="settings-section" aria-labelledby="toggles-heading">
+          <div class="settings-section-heading wa-cred-section-heading">
+            <div class="settings-label-row">
+              <h2 id="toggles-heading">{% translate "Snapshot Preferences" %}</h2>
+              <span class="settings-help" data-settings-help data-settings-help-open="false">
+                <button type="button" class="settings-help-button" data-settings-help-button aria-label="{% translate 'More info' %}" aria-expanded="false">
+                  <svg width="20" height="20" aria-hidden="true"><use href="#ld-icon-info"></use></svg>
+                </button>
+                <span class="settings-help-popover" role="tooltip"><span class="form-input-hint">{% translate "Control which page elements to keep or remove when generating snapshots for each site." %}</span></span>
+              </span>
+            </div>
+          </div>
+
+          <form method="get" id="toggle-filter-form" data-turbo-frame="toggle-prefs-frame">
+            <div class="wa-toolbar" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              {% if cred_q %}<input type="hidden" name="q" value="{{ cred_q }}">{% endif %}
+              <div style="display:flex;gap:8px;max-width:340px">
+                <input type="text" class="form-input" name="tq" value="{{ toggle_q }}" placeholder="{% translate 'Filter by domain...' %}" autocomplete="off" style="flex:1">
+                <button type="submit" class="btn btn-primary btn-sm">{% translate "Search" %}</button>
+              </div>
+              <label class="form-switch" style="margin:0">
+                <input type="checkbox" name="modified_only" value="1" {% if modified_only %}checked{% endif %}>
+                <i class="form-icon"></i> {% translate "Only modified" %}
+              </label>
+            </div>
+          </form>
+
+          <div class="wa-table-scroll" style="max-height:500px">
+            <turbo-frame id="toggle-prefs-frame" >
+              {% include "settings/adapters_toggle_list.html" %}
+            </turbo-frame>
+          </div>
+        </section>
+
+      </div>
+    </div>
+
+    <div class="modals"></div>
+  </main>
+
+  <script>
+    window.__ld_csrf_token = "{{ csrf_token }}";
+    window.__ld_urls = window.__ld_urls || {};
+    window.__ld_urls.credentials_api = "{% url 'linkding:settings.credentials_api' %}";
+    window.__ld_urls.matchDomain = "{% url 'linkding:settings.match_domain_config' %}";
+    window.__ld_credentials_data = {{ credentials_json|safe }};
+    window.__ld_snapshot_toggles_url = "{% url 'linkding:settings.snapshot_toggles' %}";
+    window.__ld_auth_domains = {{ auth_domains_json|safe }};
+  </script>
+  <script src="{% static 'adapters.js' %}?v={{ app_version }}"></script>
+{% endblock %}

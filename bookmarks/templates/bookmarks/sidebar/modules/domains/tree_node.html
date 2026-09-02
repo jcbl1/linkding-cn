@@ -4,7 +4,8 @@
     data-domain-level="{{ domain.level }}"
     data-domain-node-id="{{ domain.node_id }}"
     data-domain-has-children="{{ domain.has_children|yesno:'true,false' }}"
-    data-domain-group="{{ domain.is_group_node|yesno:'true,false' }}">
+    data-domain-group="{{ domain.is_group_node|yesno:'true,false' }}"
+    data-loaded="{% if not domain.is_group_node or not domain.has_children %}true{% else %}false{% endif %}">
   <div class="domain-row{% if domains.is_icon_mode and domain.prefers_icon_layout %} domain-row-icon{% endif %}" style="--domain-level: {{ domain.level }};">
     <div class="domain-content">
       {% if domain.url %}
@@ -31,9 +32,8 @@
                   </svg>
                 </span>
               {% else %}
-                <img class="favicon" src="{% static domain.favicon_file %}"
-                     onerror="handleFaviconError(this,'https://{{ domain.host|escapejs }}')"
-                     alt="" width="16" height="16">
+                <img class="favicon" src="{% url 'linkding:favicon_image' domain=domain.favicon_domain %}"
+                     alt="" width="16" height="16" loading="lazy">
               {% endif %}
               <span class="domain-text domain-text-icon">
                 <span class="domain-label">
@@ -52,15 +52,14 @@
                 </svg>
               </span>
             {% else %}
-              <img class="favicon" src="{% static domain.favicon_file %}"
-                   onerror="handleFaviconError(this,'https://{{ domain.host|escapejs }}')"
-                   alt="" width="16" height="16">
+              <img class="favicon" src="{% url 'linkding:favicon_image' domain=domain.favicon_domain %}"
+                   alt="" width="16" height="16" loading="lazy">
             {% endif %}
             <span class="domain-text">
               <span class="domain-label">
                 <span class="domain-label-text">{{ domain.label }}</span>
               </span>
-              <span class="count">({{ domain.count }})</span>
+              <span class="count">{{ domain.count }}</span>
             </span>
           {% endif %}
         </span>
@@ -83,10 +82,15 @@
     </div>
   </div>
   {% if domain.has_children %}
-    <ul class="domain-children{% if domains.is_icon_mode and domain.children_prefer_icon_layout %} domain-children-icon{% endif %}">
-      {% for domain in domain.children %}
-        {% include "bookmarks/sidebar/modules/domains/tree_node.html" with domain=domain %}
-      {% endfor %}
-    </ul>
+    {% if not domain.is_group_node %}
+      {# 非分组节点子节点少，在服务端渲染 #}
+      <ul class="domain-children{% if domains.is_icon_mode and domain.children_prefer_icon_layout %} domain-children-icon{% endif %}">
+        {% for child in domain.children %}
+          {% include "bookmarks/sidebar/modules/domains/tree_node.html" with domain=child %}
+        {% endfor %}
+      </ul>
+    {% else %}
+      {# 分组节点（如"其他"）子节点多，在前端动态加载 #}
+    {% endif %}
   {% endif %}
 </li>

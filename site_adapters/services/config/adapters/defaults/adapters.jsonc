@@ -1,0 +1,64 @@
+{
+  "_meta": {
+    "id": "defaults",
+    "name": "defaults",
+    "description": "Built-in system adapter.\n`_builtin` serves as the system-wide baseline, always merged before any domain-specific config.\nDomain configs override `_builtin` fields when present."
+  },
+  "_builtin": {
+    // The _builtin section is regenerated and overwritten on every service restart.
+    // To add or override fields, define them in the _builtin_overrides section below.
+    "defaults": {
+      "timeout": 30,
+      "http": {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0"
+      }
+    },
+    "metadata": {
+      "load_full_page": true,   // Stream the full page content
+      "max_content_limit": 5120000,
+      "select_title": [
+        "meta[property=\"og:title\"]",
+        "h1[class*='title']",
+        "h1[class*='Title']",
+        ".article-title",
+        ".post-title",
+        ".entry-title",
+        ".ArticleTitle",
+        ".post__title",
+        "h1",
+        "title",
+        "meta[name=\"twitter:title\"]"
+      ],
+      "select_description": [
+        "meta[property=\"og:description\"]",
+        "meta[name=\"description\"]",
+        "meta[name=\"twitter:description\"]"
+      ],
+      "select_image": [
+        "meta[property=\"og:image\"]",
+        "meta[name=\"og:image\"]",
+        "meta[name=\"twitter:image\"]",
+        "meta[property=\"twitter:image\"]",
+        "link[rel=\"preload\"][as=\"image\"]"
+      ]
+    },
+    "snapshot": {
+      "process_lazy_images": [
+        "data-src", "data-actualsrc", "data-original", "data-lazy-src",
+        "data-original-src", "data-actual-image", "data-lazy", "data-defer-src"
+      ],
+      "singlefile_args": {
+        "--browser-arg": "--disable-blink-features=AutomationControlled",
+        "--block-fonts": true
+      }
+    },
+    "reader": {
+      "defuddle_args": {
+        "useAsync": false
+      }
+    }
+  },
+  "_builtin_overrides": {},
+  "defaults": {},
+  "domains": {}
+}

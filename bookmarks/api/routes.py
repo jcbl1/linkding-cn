@@ -163,7 +163,7 @@ class BookmarkViewSet(
         normalized_url = normalize_url(url)
         try:
             metadata = website_loader.load_website_metadata(
-                url, ignore_cache=ignore_cache
+                url, ignore_cache=ignore_cache, username=request.user.username
             )
         except website_loader.RetryableMetadataError as exc:
             logger.warning(
@@ -355,6 +355,7 @@ class TagViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
+    mixins.DestroyModelMixin,
 ):
     request: HttpRequest
     serializer_class = TagSerializer

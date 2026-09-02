@@ -12,9 +12,6 @@ class CollapseSidePanelE2ETestCase(LinkdingE2ETestCase):
         page = self.page.locator(".bookmarks-page")
         expect(page).to_have_class(lambda c: "sidebar-open" in c)
         expect(self.page.locator(".bookmarks-page .sidebar")).to_be_visible()
-        expect(
-            self.page.locator(".bookmarks-page [data-sidebar-toggle]")
-        ).to_be_visible()
 
     def assertSidePanelIsHidden(self):
         page = self.page.locator(".bookmarks-page")
@@ -55,16 +52,20 @@ class CollapseSidePanelE2ETestCase(LinkdingE2ETestCase):
             self.assertSidePanelIsHidden()
 
     def test_side_panel_toggle_button_should_toggle_visibility(self):
+        user = self.get_or_create_test_user()
+        user.profile.show_sidebar = False
+        user.profile.save()
+
         with sync_playwright() as p:
             self.open(reverse("linkding:bookmarks.index"), p)
 
-            # Initially visible
-            self.assertSidePanelIsVisible()
-
-            # Click toggle to hide
-            self.page.locator("[data-sidebar-toggle]").click()
+            # Initially hidden (overlay mode)
             self.assertSidePanelIsHidden()
 
-            # Click toggle to show again
+            # Click toggle to show
             self.page.locator("[data-sidebar-toggle]").click()
             self.assertSidePanelIsVisible()
+
+            # Click toggle to hide again
+            self.page.locator("[data-sidebar-toggle]").click()
+            self.assertSidePanelIsHidden()

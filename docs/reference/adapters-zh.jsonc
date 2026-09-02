@@ -1,0 +1,243 @@
+// ==========================================================================
+//  Site Adapters — 完整字段参考
+//  由 fields.py 自动生成（单一信源）  |  2026-08-25 17:19:34
+//
+//  Re-generate: python scripts/generate-adapters-reference.py
+//  Guide:       docs/site-adapters.md
+// ==========================================================================
+
+// 优先级与合并规则
+//  - 跨订阅源：config.jsonc._adapters 列表中越靠前的订阅源优先级越高。
+//  - 订阅源内部：
+//  - defaults: ( _builtin < _builtin_overrides < ) 适配器级 defaults < 域名级 defaults < metadata/snapshot/reader
+//  - auth: auth < defaults.auth < section.auth；http.Cookie < auth.cookie
+//  - 合并策略：对象类型深合并（高优先级继承覆盖并合并低优先级）；标量、数组整体替换；`null` 表示删除该键。
+//  - routes：域名配置中的 'routes' 对象按文档顺序用正则匹配 URL 路径，首个匹配的 route 配置深合并到域名级配置之上。未匹配任何 route 时使用域名级配置。routes 为可选项，没有 routes 的域名行为不变。
+
+{
+
+  // ======================================================================
+  //  _meta — 适配器元信息（顶层）
+  // ======================================================================
+  "_meta": {
+    // 必填字段
+    "id": "local",                                         // [必填] 发布者/作者命名空间，如 "com.rsshub"。目录名: {id}.{name}。
+    "name": "my-adapter",                                  // [必填] 适配器显示名称，也是目录名的一部分。
+    "version": 1,                                          // [必填] 单调递增版本号。配置文件或关联脚本变化时都需要递增。
+    // 可选字段
+    "description": "",                                     // [可选] 可读的描述信息。
+    "updateUrl": "",                                       // [可选] 完整下载地址（远程订阅源使用）。
+    "checkUpdateUrl": "",                                  // [可选] 轻量版本检查地址（返回 {id, version}）。
+  },
+
+  // ======================================================================
+  //  _builtin — 仅 defaults 适配器。系统级基线配置，作为所有域名的最低优先级层。禁止修改；需要调整时使用 _builtin_overrides。
+  // ======================================================================
+//   "_builtin": {
+//     "defaults": {
+//       "timeout": 30,                                       // 请求超时时间（秒）。
+//       "proxy": null,                                       // HTTP 代理地址。
+//       "rewrite_url": ["^https://m\\.example\\.com/(.*)", "https://www.example.com/\\1"], // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。用于改写最终展示/保存的 URL。
+//       "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。用于改写真正发起请求的 URL。
+//       "http": {},                                          // 自定义 HTTP 请求头。所有键值对都会作为 header 透传。
+//       "auth": null,                                        // 认证配置。
+//     },
+//     // metadata / snapshot / reader section 与下方域名配置结构相同
+//   },
+
+  // ======================================================================
+  //  _builtin_overrides — 仅 defaults 适配器。深合并到 _builtin 之上，用于覆盖系统默认值。
+  // ======================================================================
+//   "_builtin_overrides": {
+//     // 结构与 _builtin 相同。除非需要覆盖系统默认值，否则保持为空。
+//   },
+
+  // ======================================================================
+  //  defaults — 适配器级默认值，合并到每个域名配置（域名自身字段覆盖此默认值）
+  // ======================================================================
+  "defaults": {
+    "timeout": 30,                                         // 请求超时时间（秒）。
+    "proxy": null,                                         // HTTP 代理地址。
+    "rewrite_url": ["^https://m\\.example\\.com/(.*)", "https://www.example.com/\\1"], // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。用于改写最终展示/保存的 URL。
+    "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。用于改写真正发起请求的 URL。
+    "http": {},                                            // 自定义 HTTP 请求头。所有键值对都会作为 header 透传。
+    "auth": null,                                          // 认证配置。
+  },
+
+  // ======================================================================
+  //  domains — 按域名组织的配置
+  // ======================================================================
+  "domains": {
+
+    // 别名 — 与其他域名共享配置
+    "www.example_mobile.com": { "type": "alias", "target": "example.com" },
+
+    // 完整域名配置 — 包含所有可用 section
+    "example.com": {
+
+      // auth — 认证配置
+      "auth": {
+        // Cookie 认证
+        "cookie": {
+          "enabled": true,                                 // 是否启用 Cookie 处理。默认为 true。
+          "type": "auto",                                  // "auto": 系统自动维护 Cookie；"login": 用户手动提供 Cookie。
+          "verify": {
+            "http_head_probe": {
+              "enabled": true,                             // 是否启用 L1 HTTP HEAD 探针。默认为 true。
+              "url": "",                                   // 覆盖探测 URL。默认使用书签 URL。
+              "timeout": 5,                                // 探针超时（秒）。默认为 5。
+              "invalid_status": [401, 403],                // 判定失效的 HTTP 状态码。默认为 [401, 403]。
+              "invalid_location_patterns": ["login", "signin"], // 字符串正则数组，用于匹配重定向 Location；任一匹配即判定失效。
+              "set_cookie_cleared": true,                  // 服务端 Set-Cookie 清空已有 Cookie 时视为失效。默认为 true。
+            },
+            "content_check": {
+              "enabled": true,                             // 是否启用 L2 页面内容验证。默认为 true。
+              "url": "",                                   // 覆盖验证 URL。默认使用书签 URL。
+              "check_selectors": ["title", "body"],        // 检查页面的哪些部分。默认为 ["title", "body"]。
+              "valid_patterns": ["dashboard", "logged.?in"], // 字符串正则数组。任一匹配即判定有效（短路）。
+              "valid_selectors": [],                       // CSS 选择器。任一元素存在即判定有效（短路）。
+              "invalid_patterns": ["log in", "captcha"],   // 字符串正则数组。title/body 中任一匹配即判定失效。
+              "invalid_selectors": [],                     // CSS 选择器。任一元素存在即判定失效。
+            },
+          },
+          "refresh": {
+            "url": "",                                     // 刷新时访问的 URL。默认使用书签 URL。
+            "wait_cookie": [],                             // 页面加载后等待出现的 Cookie 名称（字符串或数组）。
+            "timeout": 30,                                 // 浏览器刷新超时（秒）。默认为 30。
+            "interval": 14400,                             // 最小刷新间隔（秒）。默认为 14400（4 小时）。
+            "user_data_dir": "default",                    // Cookie 刷新使用的持久化浏览器用户目录。"default" 使用项目内置 Chromium profile（与 SingleFile 快照共享），可绕过 Reddit 等站点的 bot 检测。也支持绝对路径或相对于 BASE_DIR 的路径。省略则使用临时无状态上下文。
+          },
+        },
+
+        // OAuth2 Token 自动刷新
+        "oauth2": {
+          "enabled": true,                                 // 是否启用 OAuth2 Token 处理。默认为 true。
+          "endpoint": "",                                  // [必填] OAuth2 Token 端点 URL。
+          "client_id": "",                                 // OAuth2 client_id。
+          "client_secret": "",                             // OAuth2 client_secret。
+          "grant_type": "refresh_token",                   // 授权类型。默认为 "refresh_token"。
+          "format": "form",                                // 请求体格式。默认为 "form"。
+          "access_token_path": "$.access_token",           // 响应中 access_token 的标准 JSONPath。默认为 "$.access_token"。
+          "refresh_token_path": "$.refresh_token",         // 响应中 refresh_token 的标准 JSONPath。默认为 "$.refresh_token"。
+          "expires_in_path": "$.expires_in",               // 响应中 expires_in 的标准 JSONPath。默认为 "$.expires_in"。
+          "header": "Authorization",                       // 注入 Token 的 HTTP header 名称。默认为 "Authorization"。
+          "header_format": "Bearer {token}",               // Header 值模板，{token} 被替换。默认为 "Bearer {token}"。
+          "extra_params": {},                              // Token 请求体中的额外键值对。
+        },
+
+        // 自定义 HTTP 请求头
+        "headers": {
+          "X-API-Key": "",                                 // 自定义 HTTP 请求头。支持两种形式：扁平形式（{"X-API-Key": ""}），键为 header 名称，值为字符串默认值；或结构化形式（{"enabled": true, "help": "...", "values": {"X-API-Key": ""}}），当需要特殊字段时使用。扁平形式中保留键：enabled、help、values。如需声明名为 'enabled' 或 'help' 的 header，请使用结构化形式并在 values 中声明。
+        },
+
+        // HTTP Basic Auth 认证
+        "basic_auth": {
+          "username": "",                                  // HTTP Basic Auth 用户名。
+          "password": "",                                  // HTTP Basic Auth 密码。
+        }
+      },
+
+      // defaults — 域名级基线配置，被 metadata / snapshot / reader 继承
+      "defaults": {
+        "timeout": 30,                                     // 请求超时时间（秒）。
+        "proxy": null,                                     // HTTP 代理地址。
+        "rewrite_url": ["^https://m\\.example\\.com/(.*)", "https://www.example.com/\\1"], // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。用于改写最终展示/保存的 URL。
+        "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。用于改写真正发起请求的 URL。
+        "http": {},                                        // 自定义 HTTP 请求头。所有键值对都会作为 header 透传。
+        "auth": null,                                      // 认证配置。
+      },
+
+      // metadata — 元数据提取（标题、描述、预览图）
+      "metadata": {
+        "auth": null,                                      // 认证配置。
+        "http": {},                                        // 自定义 HTTP 请求头。所有键值对都会作为 header 透传。
+        "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。用于改写真正发起请求的 URL。
+        "rewrite_url": ["^https://m\\.example\\.com/(.*)", "https://www.example.com/\\1"], // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。用于改写最终展示/保存的 URL。
+        "content_type": "html",                            // 声明式提取的响应格式。"html" 使用 CSS 选择器和 JSON-LD 兜底；"xml" 使用标准 XPath；"json" 使用标准 JSONPath，例如 $.data.items[0].title。
+        "xmlns": {"atom": "http://www.w3.org/2005/Atom"},  // 可选的 XML XPath namespace 前缀映射。Atom/RSS 自动提供 atom/rss 前缀；文档任意层级声明的前缀会自动注册；无前缀元素名自动绑定文档默认 namespace；此字段用于覆盖或补充自定义前缀。
+        "select_title": [],                                // 标题选择器，按顺序尝试，取第一个非空结果。HTML 使用标准 CSS，支持 ::json(path) 伪元素扩展以从 JSON-LD script 标签提取字段（如 'script[type="application/ld+json"]::json(description)'）；XML 使用标准 XPath；JSON 使用标准 JSONPath。
+        "select_description": [],                          // 描述选择器，按顺序尝试。HTML 使用标准 CSS，支持 ::json(path) 伪元素扩展以从 JSON-LD script 标签提取字段（如 'script[type="application/ld+json"]::json(description)'）；XML 使用标准 XPath；JSON 使用标准 JSONPath。
+        "select_image": [],                                // 预览图选择器，按顺序尝试。HTML 使用标准 CSS，支持 ::json(path) 伪元素扩展以从 JSON-LD script 标签提取字段（如 'script[type="application/ld+json"]::json(image.url)'）；XML 使用标准 XPath；JSON 使用标准 JSONPath。
+        "rewrite_title": ["\\s*- Example$", ""],           // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。应用于提取到的标题。
+        "rewrite_description": ["\\[read more\\]", ""],    // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。应用于提取到的描述。
+        "rewrite_image": ["^http://", "https://"],         // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。应用于提取到的预览图 URL。
+        "load_full_page": true,                            // 是否加载完整页面内容。默认为 true。
+        "max_content_limit": 5120000,                      // 最大加载字节数。默认为 5120000（5 MB）。
+        "use_browser": {},                                 // 使用浏览器引擎而非 requests 加载页面。启用后启动无头浏览器（Chromium 或 CloakBrowser）加载页面，可处理 JavaScript 渲染的内容。浏览器加载失败时回退到 requests 并记录警告日志。设为 null 可显式禁用/移除从 defaults 继承的浏览器配置。
+        "scripts": [
+//           {"path": "example_before.py", "hook": "before"},
+//           {"path": "example_replace.py", "hook": "replace"},
+//           {"path": "example_after.py", "hook": "after", "timeout": 120}
+        ],                                                 // 自定义脚本钩子。hook: before | replace | after。before 在内置引擎中运行，after 修改保存后的快照 HTML；replace 完全接管内置引擎。可选的 per-script timeout（秒）仅为此脚本覆盖 section 级 timeout；省略时继承 section 级 timeout。
+        "timeout": 30,                                     // 请求超时时间（秒）。同时作为未声明自身 timeout 的脚本钩子的回退超时。
+        "proxy": null,                                     // HTTP 代理地址。
+      },
+
+      // snapshot — HTML 快照生成（SingleFile + DOM 清理），或原始 XML/JSON 捕获
+      // hook 为 "replace" 的快照脚本会绕过 SingleFile 和声明式字段 keep_elements / remove_elements / remove_classes / set_styles / singlefile_args。HTML 清理字段仅对 html 快照生效。before/after hook 可与这些字段并存。
+      "snapshot": {
+        "enabled": true,                                   // 是否允许为该域名/路由创建快照。默认 true。设为 false 时不创建快照资产。这是纯减法控制：只能禁用快照，无法绕过全局或用户级开关强制开启。
+        "content_type": "html",                            // 快照格式。"html" 使用 SingleFile；"xml" 和 "json" 保存原始响应。
+        "auth": null,                                      // 认证配置。
+        "http": {},                                        // 自定义 HTTP 请求头。所有键值对都会作为 header 透传。
+        "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。用于改写真正发起请求的 URL。
+        "keep_elements": [],                               // 快照中保留的元素。其余全部移除。
+        "remove_elements": [],                             // 快照中移除的元素。
+        "process_lazy_images": true,                       // 修复懒加载图片。true 使用内置属性列表；数组指定自定义属性名（与内置列表合并）。false 禁用。
+        "process_carousels": ["faceplate-carousel"],       // 需要转换为横向媒体列表的轮播容器 CSS 选择器。轮播转换默认关闭。
+        "remove_classes": {},                              // 移除指定元素的 CSS class。格式: {"selector": ["class1", "class2"]}。
+        "set_styles": {},                                  // 设置指定元素的内联样式。格式：{"selector": {"prop": "value"}}。支持 !important 和 CSS 自定义属性（--var）。":root" 选择器指向 documentElement。
+        "wait_elements": [".notion-scroller"],             // 捕获前等待元素出现。每个条目是一个选择器，"|" 分隔 OR 关系。如 [".a | .b", ".c"] 等待 (".a" 或 ".b") 且 ".c" 同时存在。未匹配的选择器超时后降级执行。
+        "wait_elements_timeout": 10,                       // wait_elements 的超时时间（秒）。省略时默认取 min(timeout, 30)。
+        "singlefile_args": {},                             // SingleFile CLI 参数，如 {"--browser-wait-delay": 2000}。
+        "toggles": {},                                     // 用户可切换的元素去除。{"id": {"selector": "...", "label": "...", "default": true}}。
+        "scripts": [
+//           {"path": "example_before.py", "hook": "before"},
+//           {"path": "example_replace.py", "hook": "replace"},
+//           {"path": "example_after.py", "hook": "after", "timeout": 120}
+        ],                                                 // 自定义脚本钩子。hook: before | replace | after。before 在 SingleFile 内运行，after 修改保存后的快照文件；replace 接管 SingleFile，并绕过声明式快照字段。可选的 per-script timeout（秒）仅为此脚本覆盖 section 级 timeout；省略时继承 section 级 timeout。
+        "timeout": 30,                                     // 快照超时时间（秒）。同时作为未声明自身 timeout 的脚本钩子的回退超时。
+        "proxy": null,                                     // HTTP 代理地址。
+      },
+
+      // reader — 文章提取（defuddle 引擎）
+      "reader": {
+        "timeout": 30,                                     // 请求超时时间（秒）。
+        "proxy": null,                                     // HTTP 代理地址。
+        "http": {},                                        // 自定义 HTTP 请求头。所有键值对都会作为 header 透传。
+        "auth": null,                                      // 认证配置。
+      // Defuddle 参数；仅展示 contentSelector，其余参数均已注释
+        "defuddle_args": {
+          "contentSelector": [".article"],                 // 正文内容选择器。HTML/XML 快照支持 CSS 和 XPath；JSON 快照支持 CSS 和 JSONPath。数组会按顺序尝试，使用第一个匹配项，并绕过自动正文识别。
+//           "markdown": true,                                // 将提取内容转换为 Markdown。默认为 false。
+//           "separateMarkdown": false,                       // 在响应中同时包含 HTML 和 Markdown。默认为 false。
+//           "includeReplies": "extractors",                  // 是否包含回复。"extractors" 包含站点提取器的回复；true 包含全部回复；false 排除回复。
+//           "language": "en",                                // 首选语言，BCP 47 标签，如 en、fr、ja。
+//           "profile": false,                                // 启用分步性能分析，耗时记录在 result.profile。
+//           "debug": false,                                  // 启用调试日志。默认为 false。
+//           "removeExactSelectors": true,                    // 移除与内置精确选择器匹配的元素，如广告和社交按钮。默认为 true。
+//           "removePartialSelectors": true,                  // 移除与内置模糊选择器匹配的元素，如广告和社交按钮。默认为 true。
+//           "removeImages": false,                           // 从提取内容中移除图片。默认为 false。
+//           "useAsync": true,                                // 本地 HTML 无内容时，允许异步提取器从第三方 API 获取内容。默认为 true。
+//           "removeHiddenElements": true,                    // 移除隐藏元素。默认为 true。
+//           "removeLowScoring": true,                        // 移除低评分内容块。默认为 true。
+//           "removeSmallImages": true,                       // 移除小尺寸图片。默认为 true。
+//           "standardize": true,                             // 标准化脚注、标题、代码块等 HTML。默认为 true。
+//           "removeContentPatterns": true,                   // 移除阅读时长提示、文章卡片等内容型模板。默认为 true。
+//           "fetch": null,                                   // [预留] 预留给未来的脚本式扩展。上游 Defuddle 允许传入自定义 fetch 函数，用于提取过程中的所有 HTTP 请求，包括 YouTube 字幕、Reddit 评论等异步请求；函数无法表达为 JSONC 值。
+        },
+      },
+
+      // routes — 基于路径的配置覆盖（可选，首个匹配生效）
+      "routes": {
+            "^/article/": {
+                  "metadata": { "select_title": [".article-title"] },
+            },
+            "^/video/": {
+                  "snapshot": { "keep_elements": [".video-player"] }
+            }
+      },
+
+    }
+  }
+}

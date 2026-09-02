@@ -1,7 +1,11 @@
+{% comment %}
+  Django messages 通过 messages-bootstrap.js 在前端转统一为浮层 Toast。
+  data-toast-tone / data-toast-message 属性由 JS 读取后即移除节点。
+{% endcomment %}
 {% if messages %}
-  <div class="message-list">
+  <div hidden>
     {% for message in messages %}
-      <div class="toast toast-{{ message.tags }}" role="alert">
+      <div data-toast-message data-toast-tone="{{ message.tags }}">
         {{ message }}
       </div>
     {% endfor %}

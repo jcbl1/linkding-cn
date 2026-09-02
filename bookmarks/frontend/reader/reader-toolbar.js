@@ -2,13 +2,7 @@ import { LitElement, html } from "lit";
 import { READER_ICONS } from "./reader-icons";
 import { gettext } from "../utils/i18n.js";
 import { loadReaderSettings, saveReaderSettings, setReaderTheme } from "./reader-settings.js";
-
-function getCSRFToken() {
-  const match = document.cookie.match(/csrftoken=([^;]+)/);
-  if (match) return match[1];
-  const meta = document.querySelector('meta[name="csrfmiddlewaretoken"]');
-  return meta ? meta.content : "";
-}
+import { getCSRFToken } from "../utils/csrf.js";
 
 async function syncReaderSettingsToServer(partial) {
   try {

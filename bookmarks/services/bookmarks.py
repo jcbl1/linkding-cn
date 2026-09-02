@@ -6,7 +6,12 @@ from django.utils import timezone
 from bookmarks.models import Bookmark, BookmarkAsset, User, parse_tag_string
 from bookmarks.services import auto_tagging, tasks, website_loader
 from bookmarks.services.tags import get_or_create_tags
-from bookmarks.utils import extract_hostname, normalize_url, parse_domain_roots, resolve_favicon_domain
+from bookmarks.utils import (
+    extract_hostname,
+    normalize_url,
+    parse_domain_roots,
+    resolve_favicon_domain,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,20 +59,29 @@ def create_bookmark(
 
     # Tasks that don't need to be in the transaction
     # Create snapshot on web archive
-    tasks.create_web_archive_snapshot(current_user, bookmark, False)
+    tasks.create_web_archive_snapshot(
+        current_user,
+        bookmark,
+        False,
+        priority=tasks.PRIORITY_NEW_BOOKMARK,
+    )
     # Load favicon and let task logic decide whether to reuse cached state
-    tasks.load_favicon(current_user, bookmark)
+    tasks.load_favicon(current_user, bookmark, priority=tasks.PRIORITY_NEW_BOOKMARK)
     # Load preview image
-    tasks.load_preview_image(current_user, bookmark)
+    tasks.load_preview_image(
+        current_user, bookmark, priority=tasks.PRIORITY_NEW_BOOKMARK
+    )
     # Create HTML snapshot
     if (
         current_user.profile.enable_automatic_html_snapshots
         and not disable_html_snapshot
     ):
-        tasks.create_html_snapshot(bookmark)
+        tasks.create_html_snapshot(bookmark, priority=tasks.PRIORITY_NEW_BOOKMARK)
 
     if schedule_metadata_enrichment and _needs_metadata_enrichment(bookmark):
-        tasks.schedule_metadata_enrichment(bookmark)
+        tasks.schedule_metadata_enrichment(
+            bookmark, priority=tasks.PRIORITY_NEW_BOOKMARK
+        )
 
     return bookmark
 
@@ -82,9 +96,18 @@ def update_bookmark(bookmark: Bookmark, tag_string, current_user: User):
     bookmark.date_modified = timezone.now()
     bookmark.save()
     # Update favicon
-    tasks.load_favicon(current_user, bookmark)
+    tasks.load_favicon(
+        current_user,
+        bookmark,
+        priority=tasks.PRIORITY_NEW_BOOKMARK if has_url_changed else None,
+    )
     # Update preview image
-    tasks.load_preview_image(current_user, bookmark)
+    tasks.load_preview_image(
+        current_user,
+        bookmark,
+        force=has_url_changed,
+        priority=tasks.PRIORITY_NEW_BOOKMARK if has_url_changed else None,
+    )
 
     if has_url_changed:
         # Update web archive snapshot, if URL changed
@@ -94,7 +117,8 @@ def update_bookmark(bookmark: Bookmark, tag_string, current_user: User):
 
 
 def enhance_with_website_metadata(bookmark: Bookmark):
-    metadata = website_loader.load_website_metadata(bookmark.url)
+    username = bookmark.owner.username if bookmark.owner else ""
+    metadata = website_loader.load_website_metadata(bookmark.url, username=username)
     update_fields = []
 
     if not bookmark.title:
@@ -268,7 +292,9 @@ def refresh_bookmarks_metadata(bookmark_ids: [int | str], current_user: User):
 
     for bookmark in owned_bookmarks:
         tasks.refresh_metadata(bookmark)
-        tasks.load_preview_image(current_user, bookmark)
+        tasks.load_preview_image(
+            current_user, bookmark, force=True, priority=tasks.PRIORITY_CORE
+        )
         tasks.refresh_favicon(current_user, bookmark)
 
 
@@ -283,7 +309,11 @@ def refresh_bookmarks_favicons(bookmark_ids: list[int | str], current_user: User
     domains_seen = set()
     for bookmark in owned_bookmarks:
         domain = _resolve_favicon_domain(bookmark.url, domain_config)
-        if domain and domain not in domains_seen:
+        if (
+            domain
+            and domain not in domains_seen
+            and tasks._set_favicon_pending_for_enqueue(domain, force=True)
+        ):
             domains_seen.add(domain)
             tasks._enqueue_favicon_task(current_user.id, domain)
 

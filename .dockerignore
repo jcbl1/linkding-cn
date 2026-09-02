@@ -3,6 +3,7 @@
 
 # Include files required for build or at runtime
 !/bookmarks
+!/site_adapters
 !/locale
 
 !/bootstrap.sh
@@ -14,6 +15,8 @@
 !/pyproject.toml
 !/rollup.config.mjs
 !/esbuild.config.mjs
+!/scripts
+!/scripts/generate-site-adapters-etc.sh
 !/supervisord.conf
 !/uv.lock
 !/uwsgi.ini

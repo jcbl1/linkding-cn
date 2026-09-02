@@ -3,6 +3,8 @@
 <html lang="{{ LANGUAGE_CODE|default:'en' }}" class="reader-mode" data-api-base-url="{{ api_base_url }}/">
 <head>
   <meta charset="UTF-8">
+  <link rel="icon" href="{% static 'favicon.ico' %}" sizes="48x48">
+  <link rel="icon" href="{% static 'favicon.svg' %}" sizes="any" type="image/svg+xml">
   <meta name="csrfmiddlewaretoken" content="{{ csrf_token }}">
   <title>{% translate "Reader view" %}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimal-ui">

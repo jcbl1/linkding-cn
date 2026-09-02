@@ -18,12 +18,37 @@
       <h1 id="main-heading">{% translate "Login" %}</h1>
     </div>
     {% if not disable_login %}
-      <form method="post" action="{% url 'login' %}">
+      <form method="post" action="{% url 'login' %}" data-turbo="false">
         {% csrf_token %}
         {% if form.errors %}
-          <div class="form-group has-error">
+          <div class="form-group has-error" id="login-error">
             <p class="form-input-hint">{% translate "Your username and password didn't match. Please try again." %}</p>
           </div>
+          <script>
+            (function() {
+              function showLoginError() {
+                var errorEl = document.getElementById('login-error');
+                if (!errorEl) return;
+                var msg = errorEl.textContent.trim();
+                errorEl.remove();
+                if (typeof window.showToast === 'function') {
+                  window.showToast(msg, { tone: 'error' });
+                } else {
+                  // fallback: 显示为普通错误提示
+                  var fallback = document.createElement('div');
+                  fallback.className = 'toast toast-error';
+                  fallback.setAttribute('role', 'alert');
+                  fallback.textContent = msg;
+                  document.body.appendChild(fallback);
+                }
+              }
+              if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', showLoginError);
+              } else {
+                showLoginError();
+              }
+            })();
+          </script>
         {% endif %}
         <div class="form-group">
           <label class="form-label" for="{{ form.username.id_for_label }}">{% translate "Username" %}</label>

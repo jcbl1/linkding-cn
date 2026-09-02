@@ -1,0 +1,243 @@
+// ==========================================================================
+//  Site Adapters — Complete Field Reference
+//  Auto-generated from fields.py (single source of truth)  |  2026-08-25 17:19:34
+//
+//  Re-generate: python scripts/generate-adapters-reference.py
+//  Guide:       docs/site-adapters.md
+// ==========================================================================
+
+// Priority & merge rules
+//  - Across subscriptions: adapters listed earlier in config.jsonc._adapters have higher priority.
+//  - Within one subscription:
+//  - defaults: ( _builtin < _builtin_overrides < ) adapter-level defaults < domain-level defaults < metadata/snapshot/reader
+//  - auth: auth < defaults.auth < section.auth; http.Cookie < auth.cookie
+//  - Merge strategy: objects deep-merge (higher priority inherits, overrides and merges lower priority); scalar and array values replace; `null` deletes the key.
+//  - routes: when a domain has a 'routes' object, the URL path is matched against regex patterns in document order. The first matching route's config deep-merges over the domain-level config. Unmatched URLs fall back to the domain-level config. Routes are optional; domains without 'routes' behave exactly as before.
+
+{
+
+  // ======================================================================
+  //  _meta — adapter metadata (top-level)
+  // ======================================================================
+  "_meta": {
+    // Required fields
+    "id": "local",                                         // [required] Publisher/author namespace, e.g. "com.rsshub". Directory name: {id}.{name}.
+    "name": "my-adapter",                                  // [required] Adapter display name, also part of directory name.
+    "version": 1,                                          // [required] Monotonically increasing version number. Increment whenever this config or its associated scripts change.
+    // Optional fields
+    "description": "",                                     // [optional] Human-readable description.
+    "updateUrl": "",                                       // [optional] Full download URL (for remote subscriptions).
+    "checkUpdateUrl": "",                                  // [optional] Lightweight version-check URL (returns {id, version}).
+  },
+
+  // ======================================================================
+  //  _builtin — defaults adapter only. System-wide baseline config, merged as the lowest-priority layer for every domain. Do not edit; use _builtin_overrides.
+  // ======================================================================
+//   "_builtin": {
+//     "defaults": {
+//       "timeout": 30,                                       // Request timeout in seconds.
+//       "proxy": null,                                       // HTTP proxy URL, e.g. "http://127.0.0.1:8080".
+//       "rewrite_url": ["^https://m\\.example\\.com/(.*)", "https://www.example.com/\\1"], // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Changes the URL saved/displayed for the bookmark.
+//       "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Changes the URL used for the actual request.
+//       "http": {},                                          // Custom HTTP request headers. Every key-value pair is passed as a header.
+//       "auth": null,                                        // Authentication config.
+//     },
+//     // metadata / snapshot / reader sections have the same structure as the domain config below
+//   },
+
+  // ======================================================================
+  //  _builtin_overrides — defaults adapter only. Deep-merged over _builtin; use this to override system defaults.
+  // ======================================================================
+//   "_builtin_overrides": {
+//     // Same structure as _builtin. Leave empty unless you need to override a system default.
+//   },
+
+  // ======================================================================
+  //  defaults — adapter-wide defaults, merged into every domain config before domain-specific overrides
+  // ======================================================================
+  "defaults": {
+    "timeout": 30,                                         // Request timeout in seconds.
+    "proxy": null,                                         // HTTP proxy URL, e.g. "http://127.0.0.1:8080".
+    "rewrite_url": ["^https://m\\.example\\.com/(.*)", "https://www.example.com/\\1"], // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Changes the URL saved/displayed for the bookmark.
+    "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Changes the URL used for the actual request.
+    "http": {},                                            // Custom HTTP request headers. Every key-value pair is passed as a header.
+    "auth": null,                                          // Authentication config.
+  },
+
+  // ======================================================================
+  //  domains — per-domain configuration
+  // ======================================================================
+  "domains": {
+
+    // Alias — share config with another domain
+    "www.example_mobile.com": { "type": "alias", "target": "example.com" },
+
+    // Full domain config — with all available sections
+    "example.com": {
+
+      // auth — authentication config
+      "auth": {
+        // Cookie authentication
+        "cookie": {
+          "enabled": true,                                 // Whether cookie handling is enabled. Defaults to true.
+          "type": "auto",                                  // "auto": system-managed cookies; "login": user provides cookie manually.
+          "verify": {
+            "http_head_probe": {
+              "enabled": true,                             // Enable L1 HTTP HEAD probe. Defaults to true.
+              "url": "",                                   // Override probe URL. Defaults to bookmark URL.
+              "timeout": 5,                                // Probe timeout in seconds. Defaults to 5.
+              "invalid_status": [401, 403],                // HTTP status codes that mean invalid. Defaults to [401, 403].
+              "invalid_location_patterns": ["login", "signin"], // Flat array of regex strings matched against redirect Location. Any match means invalid.
+              "set_cookie_cleared": true,                  // Treat Set-Cookie clearing an existing cookie as invalidation. Defaults to true.
+            },
+            "content_check": {
+              "enabled": true,                             // Enable L2 page content check. Defaults to true.
+              "url": "",                                   // Override verification URL. Defaults to bookmark URL.
+              "check_selectors": ["title", "body"],        // Which page parts to scan. Defaults to ["title", "body"].
+              "valid_patterns": ["dashboard", "logged.?in"], // Flat array of regex strings. Any match means valid (short-circuit).
+              "valid_selectors": [],                       // CSS selectors. Any element existing means valid (short-circuit).
+              "invalid_patterns": ["log in", "captcha"],   // Flat array of regex strings. Any match against title/body means invalid.
+              "invalid_selectors": [],                     // CSS selectors. Any element existing means invalid.
+            },
+          },
+          "refresh": {
+            "url": "",                                     // Refresh URL. Defaults to bookmark URL.
+            "wait_cookie": [],                             // Cookie name(s) to wait for after page load.
+            "timeout": 30,                                 // Browser refresh timeout in seconds. Defaults to 30.
+            "interval": 14400,                             // Minimum seconds between refresh attempts. Defaults to 14400 (4 hours).
+            "user_data_dir": "default",                    // Persistent browser profile directory for cookie refresh. "default" uses the project Chromium profile (shared with SingleFile snapshots), which helps bypass bot detection on sites like Reddit. Absolute or BASE_DIR-relative paths are also accepted. Omit to use a fresh ephemeral context.
+          },
+        },
+
+        // OAuth2 token auto-refresh
+        "oauth2": {
+          "enabled": true,                                 // Whether OAuth2 token handling is enabled. Defaults to true.
+          "endpoint": "",                                  // [required] OAuth2 token endpoint URL.
+          "client_id": "",                                 // OAuth2 client_id.
+          "client_secret": "",                             // OAuth2 client_secret.
+          "grant_type": "refresh_token",                   // Grant type. Defaults to "refresh_token".
+          "format": "form",                                // Request body format. Defaults to "form".
+          "access_token_path": "$.access_token",           // Standard JSONPath to access_token in response. Defaults to "$.access_token".
+          "refresh_token_path": "$.refresh_token",         // Standard JSONPath to refresh_token in response. Defaults to "$.refresh_token".
+          "expires_in_path": "$.expires_in",               // Standard JSONPath to expires_in in response. Defaults to "$.expires_in".
+          "header": "Authorization",                       // HTTP header name to inject token into. Defaults to "Authorization".
+          "header_format": "Bearer {token}",               // Header value template. {token} is replaced. Defaults to "Bearer {token}".
+          "extra_params": {},                              // Extra key-value pairs included in the token request body.
+        },
+
+        // Custom HTTP headers
+        "headers": {
+          "X-API-Key": "",                                 // Custom HTTP request headers. Two forms: flat {"X-API-Key": ""} where keys are header names and values are string defaults; or structured {"enabled": true, "help": "...", "values": {"X-API-Key": ""}} when you need special fields. Reserved keys in flat form: enabled, help, values. To declare a header literally named 'enabled' or 'help', use the structured form with a 'values' sub-key.
+        },
+
+        // HTTP Basic Auth
+        "basic_auth": {
+          "username": "",                                  // HTTP Basic Auth username.
+          "password": "",                                  // HTTP Basic Auth password.
+        }
+      },
+
+      // defaults — domain-level baseline, inherited by metadata / snapshot / reader
+      "defaults": {
+        "timeout": 30,                                     // Request timeout in seconds.
+        "proxy": null,                                     // HTTP proxy URL, e.g. "http://127.0.0.1:8080".
+        "rewrite_url": ["^https://m\\.example\\.com/(.*)", "https://www.example.com/\\1"], // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Changes the URL saved/displayed for the bookmark.
+        "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Changes the URL used for the actual request.
+        "http": {},                                        // Custom HTTP request headers. Every key-value pair is passed as a header.
+        "auth": null,                                      // Authentication config.
+      },
+
+      // metadata — title, description, preview image extraction
+      "metadata": {
+        "auth": null,                                      // Authentication config.
+        "http": {},                                        // Custom HTTP request headers. Every key-value pair is passed as a header.
+        "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Changes the URL used for the actual request.
+        "rewrite_url": ["^https://m\\.example\\.com/(.*)", "https://www.example.com/\\1"], // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Changes the URL saved/displayed for the bookmark.
+        "content_type": "html",                            // Response format for declarative extraction. "html" uses CSS selectors and JSON-LD fallback; "xml" uses standard XPath; "json" uses standard JSONPath such as $.data.items[0].title.
+        "xmlns": {"atom": "http://www.w3.org/2005/Atom"},  // Optional namespace prefixes for XML XPath expressions. Atom/RSS use automatic aliases atom/rss; prefixes declared anywhere in the document are auto-registered; unprefixed element names bind to the document default namespace; this overrides or adds custom prefixes.
+        "select_title": [],                                // Selectors for the title, tried in order. HTML uses standard CSS, including the ::json(path) pseudo-element extension to extract fields from JSON-LD script tags (e.g. 'script[type="application/ld+json"]::json(description)'); XML uses standard XPath; JSON uses standard JSONPath.
+        "select_description": [],                          // Selectors for the description, tried in order. HTML uses standard CSS, including the ::json(path) pseudo-element extension to extract fields from JSON-LD script tags (e.g. 'script[type="application/ld+json"]::json(description)'); XML uses standard XPath; JSON uses standard JSONPath.
+        "select_image": [],                                // Selectors for the preview image, tried in order. HTML uses standard CSS, including the ::json(path) pseudo-element extension to extract fields from JSON-LD script tags (e.g. 'script[type="application/ld+json"]::json(image.url)'); XML uses standard XPath; JSON uses standard JSONPath.
+        "rewrite_title": ["\\s*- Example$", ""],           // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Applied to the extracted title.
+        "rewrite_description": ["\\[read more\\]", ""],    // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Applied to the extracted description.
+        "rewrite_image": ["^http://", "https://"],         // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Applied to the extracted image URL.
+        "load_full_page": true,                            // Whether to load the full page content. Defaults to true.
+        "max_content_limit": 5120000,                      // Maximum content size in bytes to load. Defaults to 5120000 (5 MB).
+        "use_browser": {},                                 // Use a browser engine instead of requests for page loading. When enabled, launches a headless browser (Chromium or CloakBrowser) to load the page, which handles JavaScript-rendered content. On browser failure, falls back to requests with a warning log. Set to null to explicitly disable/remove browser config inherited from defaults.
+        "scripts": [
+//           {"path": "example_before.py", "hook": "before"},
+//           {"path": "example_replace.py", "hook": "replace"},
+//           {"path": "example_after.py", "hook": "after", "timeout": 120}
+        ],                                                 // Script hooks. hook: "before" | "replace" | "after". before runs inside the built-in engine; after modifies the saved snapshot HTML; replace bypasses the engine. Optional per-script timeout (seconds) overrides the section-level timeout for this script only; when omitted, the section-level timeout is used.
+        "timeout": 30,                                     // Request timeout in seconds. Also serves as the fallback timeout for script hooks that do not declare their own.
+        "proxy": null,                                     // HTTP proxy URL.
+      },
+
+      // snapshot — HTML snapshot via SingleFile, or raw XML/JSON capture
+      // A snapshot script with hook "replace" bypasses SingleFile and the declarative fields keep_elements / remove_elements / remove_classes / set_styles / singlefile_args. HTML cleanup fields only apply to html snapshots. before/after hooks can coexist with those fields.
+      "snapshot": {
+        "enabled": true,                                   // Whether snapshot creation is allowed for this domain/route. Defaults to true. When false, no snapshot asset is created. This is a subtractive control: it can only disable snapshots, never force-enable them against the global or user-level toggle.
+        "content_type": "html",                            // Snapshot format. "html" uses SingleFile; "xml" and "json" save the raw response.
+        "auth": null,                                      // Authentication config.
+        "http": {},                                        // Custom HTTP request headers. Every key-value pair is passed as a header.
+        "request_url": ["^https://www\\.example\\.com/article/", "https://api.example.com/item/"], // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Changes the URL used for the actual request.
+        "keep_elements": [],                               // CSS selectors of elements to KEEP in the snapshot. Everything else is removed.
+        "remove_elements": [],                             // CSS selectors of elements to REMOVE from the snapshot.
+        "process_lazy_images": true,                       // Fix lazy-loaded images. true = built-in attr list; ["data-actualsrc"] = custom attrs (merged with built-in list). false disables.
+        "process_carousels": ["faceplate-carousel"],       // CSS selectors of carousel containers to replace with a horizontal media list. Carousel conversion is opt-in.
+        "remove_classes": {},                              // Remove CSS classes from elements. Format: {"selector": ["class1", "class2"]}.
+        "set_styles": {},                                  // Set inline styles on elements. Format: {"selector": {"prop": "value"}}. Supports !important and CSS custom properties (--var). ":root" selector targets documentElement.
+        "wait_elements": [".notion-scroller"],             // CSS selectors to wait for before capture. Each entry is a selector; "|" separates OR alternatives. e.g. [".a | .b", ".c"] waits until (".a" OR ".b") AND ".c" are present. Non-matching selectors time out gracefully (capture proceeds with whatever is present).
+        "wait_elements_timeout": 10,                       // Timeout (seconds) for wait_elements. When omitted, defaults to min(timeout, 30).
+        "singlefile_args": {},                             // SingleFile CLI arguments, e.g. {"--browser-wait-delay": 2000}.
+        "toggles": {},                                     // User-toggleable element removal. {"toggle-id": {"selector": "...", "label": "...", "default": true}}.
+        "scripts": [
+//           {"path": "example_before.py", "hook": "before"},
+//           {"path": "example_replace.py", "hook": "replace"},
+//           {"path": "example_after.py", "hook": "after", "timeout": 120}
+        ],                                                 // Script hooks. hook: "before" | "replace" | "after". before runs inside SingleFile; after modifies the saved snapshot file; replace bypasses SingleFile and declarative fields. Optional per-script timeout (seconds) overrides the section-level timeout for this script only; when omitted, the section-level timeout is used.
+        "timeout": 30,                                     // Snapshot timeout in seconds. Also serves as the fallback timeout for script hooks that do not declare their own.
+        "proxy": null,                                     // HTTP proxy URL.
+      },
+
+      // reader — article extraction via defuddle
+      "reader": {
+        "timeout": 30,                                     // Request timeout in seconds.
+        "proxy": null,                                     // HTTP proxy URL.
+        "http": {},                                        // Custom HTTP request headers. Every key-value pair is passed as a header.
+        "auth": null,                                      // Authentication config.
+      // Defuddle options; only contentSelector is shown, all other options are commented out
+        "defuddle_args": {
+          "contentSelector": [".article"],                 // Main content selector. HTML/XML snapshots support CSS and XPath; JSON snapshots support CSS and JSONPath. An array is tried in order and the first matching selector wins. Bypasses automatic content detection.
+//           "markdown": true,                                // Convert extracted content to Markdown. Defaults to false.
+//           "separateMarkdown": false,                       // Include Markdown in the response alongside HTML. Defaults to false.
+//           "includeReplies": "extractors",                  // Include replies. "extractors" includes replies from site-specific extractors; true includes all replies; false excludes all replies.
+//           "language": "en",                                // Preferred language, as a BCP 47 tag such as en, fr, or ja.
+//           "profile": false,                                // Enable per-step profiling. Timings are returned in result.profile.
+//           "debug": false,                                  // Enable debug logging. Defaults to false.
+//           "removeExactSelectors": true,                    // Remove elements matching built-in exact selectors such as ads and social buttons. Defaults to true.
+//           "removePartialSelectors": true,                  // Remove elements matching built-in partial selectors such as ads and social buttons. Defaults to true.
+//           "removeImages": false,                           // Remove images from extracted content. Defaults to false.
+//           "useAsync": true,                                // Allow async extractors to fetch content from third-party APIs when local HTML has no content. Defaults to true.
+//           "removeHiddenElements": true,                    // Remove hidden elements. Defaults to true.
+//           "removeLowScoring": true,                        // Remove low-scoring content blocks. Defaults to true.
+//           "removeSmallImages": true,                       // Remove small images. Defaults to true.
+//           "standardize": true,                             // Standardize footnotes, headings, code blocks, and similar HTML. Defaults to true.
+//           "removeContentPatterns": true,                   // Remove content-based boilerplate such as reading-time hints and article cards. Defaults to true.
+//           "fetch": null,                                   // [reserved] Reserved for future script-like support. Upstream Defuddle accepts a custom fetch function used for all HTTP requests during extraction, including async extractor requests such as YouTube transcripts or Reddit comments. A function cannot be expressed as a JSONC value.
+        },
+      },
+
+      // routes — path-based config overrides (optional, first-match-wins)
+      "routes": {
+            "^/article/": {
+                  "metadata": { "select_title": [".article-title"] },
+            },
+            "^/video/": {
+                  "snapshot": { "keep_elements": [".video-player"] }
+            }
+      },
+
+    }
+  }
+}

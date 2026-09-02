@@ -16,7 +16,8 @@ from django.db.models import Q
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.http import QueryDict
-from django.utils.translation import gettext_lazy as _, pgettext_lazy
+from django.utils.translation import gettext_lazy as _
+from django.utils.translation import pgettext_lazy
 
 from bookmarks.utils import normalize_url, unique
 from bookmarks.validators import BookmarkURLValidator
@@ -69,6 +70,8 @@ class Bookmark(models.Model):
     website_description = models.TextField(blank=True, null=True)
     web_archive_snapshot_url = models.CharField(max_length=2048, blank=True)
     preview_image_file = models.CharField(max_length=512, blank=True)
+    preview_image_retry_count = models.PositiveSmallIntegerField(default=0)
+    preview_image_next_retry_at = models.DateTimeField(null=True, blank=True)
     unread = models.BooleanField(default=False)
     is_archived = models.BooleanField(default=False)
     shared = models.BooleanField(default=False)
@@ -196,6 +199,8 @@ class BookmarkAsset(models.Model):
 
     CONTENT_TYPE_HTML = "text/html"
     CONTENT_TYPE_PDF = "application/pdf"
+    CONTENT_TYPE_JSON = "application/json"
+    CONTENT_TYPE_XML = "application/xml"
 
     STATUS_PENDING = "pending"
     STATUS_COMPLETE = "complete"
@@ -212,12 +217,17 @@ class BookmarkAsset(models.Model):
     gzip = models.BooleanField(default=False, null=False)
     retry_count = models.IntegerField(default=0)
     next_retry_at = models.DateTimeField(null=True, blank=True)
+    scheduling_priority = models.IntegerField(default=0)
 
     @property
     def download_name(self):
         if self.asset_type == BookmarkAsset.TYPE_SNAPSHOT:
             if self.content_type == BookmarkAsset.CONTENT_TYPE_PDF:
                 return f"{self.display_name}.pdf"
+            if self.content_type == BookmarkAsset.CONTENT_TYPE_JSON:
+                return f"{self.display_name}.json"
+            if self.content_type == BookmarkAsset.CONTENT_TYPE_XML:
+                return f"{self.display_name}.xml"
             return f"{self.display_name}.html"
         return self.display_name
 
@@ -376,6 +386,8 @@ class BookmarkBundle(models.Model):
 class BookmarkSearch:
     SORT_ADDED_ASC = "added_asc"
     SORT_ADDED_DESC = "added_desc"
+    SORT_MODIFIED_ASC = "modified_asc"
+    SORT_MODIFIED_DESC = "modified_desc"
     SORT_TITLE_ASC = "title_asc"
     SORT_TITLE_DESC = "title_desc"
     SORT_RANDOM = "random"
@@ -732,6 +744,8 @@ class BookmarkSearchForm(forms.Form):
     SORT_CHOICES = [
         (BookmarkSearch.SORT_ADDED_ASC, _("Added ↑")),
         (BookmarkSearch.SORT_ADDED_DESC, _("Added ↓")),
+        (BookmarkSearch.SORT_MODIFIED_ASC, _("Modified ↑")),
+        (BookmarkSearch.SORT_MODIFIED_DESC, _("Modified ↓")),
         (BookmarkSearch.SORT_TITLE_ASC, _("Title ↑")),
         (BookmarkSearch.SORT_TITLE_DESC, _("Title ↓")),
         (BookmarkSearch.SORT_RANDOM, _("Random")),
@@ -743,8 +757,8 @@ class BookmarkSearchForm(forms.Form):
     ]
     FILTER_UNREAD_CHOICES = [
         (BookmarkSearch.FILTER_UNREAD_OFF, _("Off")),
-        (BookmarkSearch.FILTER_UNREAD_YES, pgettext_lazy("bookmark filter", "Unread")),
-        (BookmarkSearch.FILTER_UNREAD_NO, pgettext_lazy("bookmark filter", "Read")),
+        (BookmarkSearch.FILTER_UNREAD_YES, pgettext_lazy("bookmark_status", "Unread")),
+        (BookmarkSearch.FILTER_UNREAD_NO, pgettext_lazy("bookmark_status", "Read")),
     ]
     FILTER_TAGGED_CHOICES = [
         (BookmarkSearch.FILTER_TAGGED_OFF, _("Off")),
@@ -982,7 +996,7 @@ class UserProfile(models.Model):
     ACTION_REMOVE = "remove"
     ACTION_KEYS = [ACTION_READ, ACTION_VIEW, ACTION_HIGHLIGHT, ACTION_EDIT, ACTION_ARCHIVE, ACTION_REMOVE]
     ACTION_LABELS = {
-        ACTION_READ: pgettext_lazy("bookmark action", "Read"),
+        ACTION_READ: pgettext_lazy("bookmark_action", "Read"),
         ACTION_VIEW: _("View"),
         ACTION_HIGHLIGHT: _("Highlights"),
         ACTION_EDIT: _("Edit"),
@@ -1010,9 +1024,9 @@ class UserProfile(models.Model):
     STATUS_UNREAD = "unread"
     STATUS_KEYS = [STATUS_NOTES, STATUS_SHARE, STATUS_UNREAD]
     STATUS_LABELS = {
-        STATUS_NOTES: pgettext_lazy("bookmark status", "Notes"),
-        STATUS_SHARE: pgettext_lazy("bookmark status", "Share"),
-        STATUS_UNREAD: pgettext_lazy("bookmark status", "Unread"),
+        STATUS_NOTES: pgettext_lazy("bookmark_status", "Notes"),
+        STATUS_SHARE: pgettext_lazy("bookmark_status", "Share"),
+        STATUS_UNREAD: pgettext_lazy("bookmark_status", "Unread"),
     }
     STATUS_ICONS = {
         STATUS_NOTES: "ld-icon-note",
@@ -1162,6 +1176,7 @@ class UserProfile(models.Model):
     reader_settings = models.JSONField(default=dict, null=False)
     bookmark_quick_tags = models.JSONField(default=list, blank=True, null=False)
     bookmark_toolbar_modules = models.JSONField(default=list, blank=True, null=False)
+    bookmark_toolbar_auto_hide = models.BooleanField(default=False, null=False)
 
     # 随机按钮设置
     RANDOM_MODE_LIST = "list"
@@ -1650,6 +1665,7 @@ class UserProfileForm(forms.ModelForm):
             "bookmark_quick_edits",
             "bookmark_quick_tags",
             "bookmark_toolbar_modules",
+            "bookmark_toolbar_auto_hide",
             "bookmark_action_display_mode",
             "bookmark_status_display_mode",
             "bookmark_quick_edit_display_mode",
@@ -1713,6 +1729,7 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
             "bookmark_action_display_mode",
             "bookmark_status_display_mode",
             "bookmark_quick_edit_display_mode",
+            "bookmark_toolbar_auto_hide",
             "permanent_notes",
             "default_mark_unread",
             "default_mark_shared",

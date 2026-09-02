@@ -1,140 +1,353 @@
 import logging
-import os
+import re
 
-from django.conf import settings
-
-from bookmarks.utils import load_module, search_config_for_domain
+from bookmarks.services.structured_reader import (
+    html_xpath_to_html,
+    json_path_to_html,
+    json_to_html,
+    xml_to_html,
+    xml_xpath_to_html,
+)
+from site_adapters.services.config.resolver import get_reader_config
 
 logger = logging.getLogger(__name__)
 
-# 缓存规则设置与解析规则（function）
-_settings_cache = None
-_processors_module_cache = {}  # {processor_path: (module, mtime)}
-
-# DefuddleOptions 中可通过 Node.js 包装脚本传递的选项
-_DEFUDDLE_OPTION_KEYS = {
-    "contentSelector",
-    "removeExactSelectors",
-    "removePartialSelectors",
-    "removeHiddenElements",
-    "removeLowScoring",
-    "removeSmallImages",
-    "removeImages",
-    "standardize",
-    "removeContentPatterns",
-    "includeReplies",
-    "useAsync",
-}
-
-
-def _resolve_config(url: str):
-    """查找域名配置，返回 (config, settings_path) 或 (None, settings_path)。"""
-    settings_path = settings.LD_CUSTOM_READER_PROCESSOR_SETTINGS
-    config = search_config_for_domain(url, settings_path, _settings_cache)
-    return config, settings_path
-
-
-def _try_custom_processor(config: dict, settings_path: str, func_name: str, *args):
-    """
-    尝试加载自定义 processor 模块并调用指定函数。
-    返回结果 dict，或 None（未配置 processor 或文件不存在）。
-    """
-    processor_file = config.get("processor")
-    if not processor_file:
-        return None
-
-    processor_path = os.path.join(os.path.dirname(settings_path), processor_file)
-    if not os.path.exists(processor_path):
-        logger.error(f"Custom reader processor not found: {processor_path}")
-        return None
-
-    module = load_module(processor_path, _processors_module_cache)
-    func = getattr(module, func_name, None)
-    if func is None:
-        logger.error(f"Custom reader processor missing function: {func_name}")
-        return None
-
-    return func(*args, config)
-
 
 def _extract_defuddle_options(config: dict) -> dict:
-    """从配置中提取 defuddle 选项。"""
-    return {k: v for k, v in config.items() if k in _DEFUDDLE_OPTION_KEYS}
+    """Extract defuddle options from config."""
+    from site_adapters.services.config.validator import is_known_defuddle_param
+    args = config.get("defuddle_args", {})
+    return {k: v for k, v in args.items() if is_known_defuddle_param(k)}
 
 
-def parse_html(html_content: str, url: str = "") -> dict:
-    """
-    从 HTML 内容中提取正文。
+def _selector_list(value) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item.strip()]
 
-    调度逻辑：
-    1. 有 processor 字段 → 自定义 Python 模块
-    2. 有 defuddle 选项（如 contentSelector）→ Node.js 包装脚本
-    3. 无配置 → defuddle CLI（默认，行为不变）
-    """
-    from bookmarks.services import defuddle
 
-    config, settings_path = _resolve_config(url)
-
-    if config:
-        # 1. 自定义 processor 模块
-        result = _try_custom_processor(
-            config, settings_path, "_parse_html", html_content, url
+def _is_xpath_selector(selector: str) -> bool:
+    value = selector.strip()
+    if value.startswith(("/", "(", "./", ".//")):
+        return True
+    if re.match(
+        r"^(?:string|boolean|number|concat|normalize-space|substring|contains)\s*\(",
+        value,
+    ):
+        return True
+    return bool(
+        re.match(
+            r"^(?:ancestor|ancestor-or-self|attribute|child|descendant|"
+            r"descendant-or-self|following|following-sibling|namespace|parent|"
+            r"preceding|preceding-sibling|self)::",
+            value,
         )
-        if result is not None:
-            return result
-
-        # 2. 有 defuddle 选项 → Node.js 包装脚本
-        defuddle_opts = _extract_defuddle_options(config)
-        if defuddle_opts:
-            return _parse_html_with_options(html_content, url, defuddle_opts)
-
-    # 3. 默认：defuddle CLI
-    return defuddle.parse_html(html_content, url=url)
+    )
 
 
-def parse_url(url: str) -> dict:
+def _is_json_path_selector(selector: str) -> bool:
+    value = selector.strip()
+    if value.startswith("$"):
+        return True
+    if re.match(r"^\[\s*(?:\d+|['\"])", value):
+        return True
+    return bool(
+        re.match(r"^[A-Za-z_][\w-]*\s*\[\s*(?:\d+|['\"])", value)
+    )
+
+
+def _resolve_html_content_selector(
+    html_content: str, options: dict
+) -> tuple[str, dict]:
+    """Resolve XPath content selectors before handing HTML to defuddle."""
+    selector_value = options.get("contentSelector")
+    if not selector_value:
+        return html_content, options
+
+    if isinstance(selector_value, str):
+        if not _is_xpath_selector(selector_value):
+            return html_content, options
+        selected = html_xpath_to_html(html_content, [selector_value])
+        if selected:
+            return selected, {**options, "contentSelector": "article"}
+        resolved = dict(options)
+        resolved.pop("contentSelector", None)
+        return html_content, resolved
+
+    selectors = _selector_list(selector_value)
+    xpath_selectors = [
+        selector for selector in selectors if _is_xpath_selector(selector)
+    ]
+    if not xpath_selectors:
+        return html_content, options
+
+    selected = html_xpath_to_html(html_content, xpath_selectors)
+    if selected:
+        return selected, {**options, "contentSelector": "article"}
+
+    css_selectors = [
+        selector for selector in selectors if not _is_xpath_selector(selector)
+    ]
+    if css_selectors:
+        content_selector = (
+            css_selectors[0] if len(css_selectors) == 1 else css_selectors
+        )
+        return html_content, {**options, "contentSelector": content_selector}
+
+    resolved = dict(options)
+    resolved.pop("contentSelector", None)
+    return html_content, resolved
+
+
+def _resolve_structured_content_selector(
+    content: str, content_type: str, options: dict
+) -> tuple[str | None, dict]:
+    """Resolve JSONPath/XPath content selectors against raw JSON/XML."""
+    selector_value = options.get("contentSelector")
+    if not selector_value:
+        return None, options
+
+    if isinstance(selector_value, str):
+        selectors = [selector_value]
+    else:
+        selectors = _selector_list(selector_value)
+
+    if content_type == "json":
+        path_selectors = [
+            selector
+            for selector in selectors
+            if _is_json_path_selector(selector)
+        ]
+    elif content_type == "xml":
+        path_selectors = [
+            selector for selector in selectors if _is_xpath_selector(selector)
+        ]
+    else:
+        path_selectors = []
+
+    if not path_selectors:
+        return None, options
+
+    if content_type == "json":
+        selected = json_path_to_html(content, path_selectors)
+    else:
+        selected = xml_xpath_to_html(content, path_selectors)
+    if selected:
+        return selected, {**options, "contentSelector": "article"}
+
+    css_selectors = [
+        selector for selector in selectors if selector not in path_selectors
+    ]
+    if css_selectors:
+        content_selector = (
+            css_selectors[0] if len(css_selectors) == 1 else css_selectors
+        )
+        return None, {**options, "contentSelector": content_selector}
+
+    resolved = dict(options)
+    resolved.pop("contentSelector", None)
+    return None, resolved
+
+
+def _normalize_html_for_reader(html_content: str) -> str:
+    """Unwrap serialized shadow DOM templates for reader extraction.
+
+    The original snapshot is not modified; this function returns a temporary
+    normalized copy that Defuddle can parse as ordinary HTML.
     """
-    从 URL 直接提取正文。
+    if not html_content:
+        return html_content
 
-    调度逻辑同 parse_html。
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html_content, "html.parser")
+    for template in soup.find_all("template", attrs={"shadowrootmode": True}):
+        for child in list(template.contents):
+            template.insert_before(child)
+        template.decompose()
+    return str(soup)
+
+
+def _collect_carousels(html_content: str) -> list[str]:
+    """Extract processed carousels from normalized snapshot HTML."""
+    if not html_content or "ld-carousel" not in html_content:
+        return []
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html_content, "html.parser")
+    return [
+        str(figure)
+        for figure in soup.find_all("figure", attrs={"aria-label": "ld-carousel"})
+    ]
+
+
+def _carousel_is_before_text(html_content: str) -> bool:
+    """Return whether a carousel appears before the first paragraph in the source."""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html_content, "html.parser")
+    carousel = soup.find("figure", attrs={"aria-label": "ld-carousel"})
+    paragraph = next(
+        (
+            item
+            for item in soup.find_all("p")
+            if len(item.get_text(" ", strip=True)) >= 80
+        ),
+        None,
+    ) or soup.find("p")
+    if not carousel or not paragraph:
+        return False
+
+    serialized = str(soup)
+    carousel_index = serialized.find('aria-label="ld-carousel"')
+    paragraph_index = serialized.find(str(paragraph))
+    return (
+        carousel_index >= 0
+        and paragraph_index >= 0
+        and carousel_index < paragraph_index
+    )
+
+
+def _restore_missing_carousels(
+    html_content: str, extracted_content: str, carousels: list[str]
+) -> str:
+    """Restore processed carousels that site-specific defuddle extractors omit."""
+    if not carousels or "ld-carousel" in extracted_content:
+        return extracted_content
+
+    before = [
+        carousel
+        for carousel in carousels
+        if _carousel_is_before_text(html_content)
+    ]
+    after = [
+        carousel for carousel in carousels if carousel not in before
+    ]
+
+    if before:
+        fragment = "".join(before)
+        article_match = re.search(r"<article\b[^>]*>", extracted_content, re.I)
+        if article_match:
+            extracted_content = (
+                extracted_content[: article_match.end()]
+                + fragment
+                + extracted_content[article_match.end() :]
+            )
+        else:
+            extracted_content = fragment + extracted_content
+
+    if after:
+        fragment = "".join(after)
+        article_close = re.search(r"</article>", extracted_content, re.I)
+        if article_close:
+            extracted_content = (
+                extracted_content[: article_close.start()]
+                + fragment
+                + extracted_content[article_close.start() :]
+            )
+        else:
+            extracted_content = extracted_content + fragment
+
+    return extracted_content
+
+
+def parse_html(html_content: str, url: str = "", username: str = "") -> dict:
+    """
+    Extract content from HTML.
+
+    Dispatch logic:
+    1. defuddle_args defined -> defuddle with options
+    2. No config -> default defuddle
+    """
+    config = get_reader_config(url, username=username)
+
+    defuddle_opts = _extract_defuddle_options(config) if config else {}
+
+    return _parse_html(
+        html_content,
+        url=url,
+        username=username,
+        defuddle_opts=defuddle_opts,
+    )
+
+
+def _parse_html(
+    html_content: str,
+    url: str,
+    username: str,
+    defuddle_opts: dict,
+) -> dict:
+    from bookmarks.services import defuddle
+
+    html_content = _normalize_html_for_reader(html_content)
+    html_content, defuddle_opts = _resolve_html_content_selector(
+        html_content, defuddle_opts
+    )
+    carousels = _collect_carousels(html_content)
+
+    result = defuddle.parse_html(
+        html_content, url=url, options=defuddle_opts or None
+    )
+    if result.get("content"):
+        result["content"] = _restore_missing_carousels(
+            html_content, result["content"], carousels
+        )
+    return result
+
+
+def parse_url(url: str, username: str = "") -> dict:
+    """
+    Extract content from URL.
+
+    Dispatch logic:
+    1. defuddle_args defined -> defuddle with options
+    2. No config -> default defuddle
     """
     from bookmarks.services import defuddle
 
-    config, settings_path = _resolve_config(url)
+    config = get_reader_config(url, username=username)
 
-    if config:
-        result = _try_custom_processor(config, settings_path, "_parse_url", url)
-        if result is not None:
-            return result
+    defuddle_opts = _extract_defuddle_options(config) if config else {}
 
-        defuddle_opts = _extract_defuddle_options(config)
-        if defuddle_opts:
-            return _parse_url_with_options(url, defuddle_opts)
-
-    return defuddle.parse_url(url)
+    return defuddle.parse_url(url, options=defuddle_opts or None)
 
 
-def _parse_html_with_options(html_content: str, url: str, options: dict) -> dict:
-    """通过 Node.js 包装脚本调用 defuddle 模块 API（支持 contentSelector 等）。"""
-    from bookmarks.services.defuddle import _inject_base_tag, _run_defuddle
-    import tempfile
+def parse_content(
+    content: str,
+    content_type: str,
+    url: str = "",
+    username: str = "",
+) -> dict:
+    """Extract article content from an HTML, XML, or JSON snapshot.
 
-    html_content = _inject_base_tag(html_content, url)
+    Defuddle itself only accepts HTML documents, so XML/JSON snapshots are
+    converted to a semantic HTML document before being passed to defuddle.
+    """
+    normalized_type = (content_type or "").split(";", 1)[0].strip().lower()
+    config = get_reader_config(url, username=username)
+    defuddle_opts = _extract_defuddle_options(config) if config else {}
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".html", delete=False, encoding="utf-8"
-    ) as tmp:
-        tmp.write(html_content)
-        tmp_path = tmp.name
-
-    try:
-        return _run_defuddle({"htmlPath": tmp_path, "url": url}, options=options, timeout=30)
-    finally:
-        os.unlink(tmp_path)
-
-
-def _parse_url_with_options(url: str, options: dict) -> dict:
-    """通过 Node.js 包装脚本直接解析 URL（支持 contentSelector 等）。"""
-    from bookmarks.services.defuddle import _run_defuddle
-
-    return _run_defuddle({"url": url}, options=options)
+    if normalized_type in (
+        "xml",
+        "application/xml",
+        "text/xml",
+        "application/rss+xml",
+        "application/atom+xml",
+    ):
+        selected, defuddle_opts = _resolve_structured_content_selector(
+            content, "xml", defuddle_opts
+        )
+        content = selected or xml_to_html(content)
+    elif normalized_type in ("json", "application/json"):
+        selected, defuddle_opts = _resolve_structured_content_selector(
+            content, "json", defuddle_opts
+        )
+        content = selected or json_to_html(content)
+    return _parse_html(
+        content,
+        url=url,
+        username=username,
+        defuddle_opts=defuddle_opts,
+    )

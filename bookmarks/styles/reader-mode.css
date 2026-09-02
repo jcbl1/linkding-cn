@@ -93,9 +93,77 @@ html.reader-mode {
     margin-bottom: 20px;
   }
 
-  img {
+  /* Article media: keep embedded media within the reading viewport */
+  img,
+  video {
     max-width: 100%;
+    max-height: 80vh;
     height: auto;
+  }
+
+  iframe,
+  object,
+  embed {
+    max-width: 100%;
+    max-height: 80vh;
+  }
+
+  /* Processed carousels: compact horizontal media list */
+  figure.ld-carousel {
+    all: initial;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 12px;
+    max-width: 100%;
+    max-height: 80vh;
+    margin: 1em 0;
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
+    scrollbar-color: var(--secondary-border-color) transparent;
+    align-items: center;
+  }
+
+  figure.ld-carousel::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    display: block;
+  }
+
+  figure.ld-carousel::-webkit-scrollbar-thumb {
+    background: var(--secondary-border-color);
+    border-radius: 4px;
+  }
+
+  figure.ld-carousel::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  figure.ld-carousel img,
+  figure.ld-carousel video,
+  figure.ld-carousel iframe {
+    all: initial;
+    box-sizing: border-box;
+    display: block;
+    flex: 0 0 auto;
+    max-width: none;
+    max-height: 80vh;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+  }
+
+  /* Wide tables: horizontal scroll wrapper */
+  .table-scroll-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0.5em 0;
+  }
+
+  .table-scroll-wrapper > .table {
+    min-width: 0;
   }
 
   /* ---- Layout ---- */
@@ -111,6 +179,8 @@ html.reader-mode {
     overflow-y: auto;
     display: flex;
     justify-content: center;
+    padding: 0;
+    scrollbar-gutter: auto;
   }
 
   #reader-content .container {
@@ -1016,6 +1086,7 @@ html.reader-mode {
     display: block;
     height: 100%;
     align-self: stretch;
+    min-width: 0;
   }
 
   #reader-sidebar {
@@ -1408,13 +1479,6 @@ html.reader-mode {
     gap: var(--unit-2);
   }
 
-  /* Copy toast */
-  .copy-toast {
-    font-size: var(--font-size-sm);
-    color: var(--success-color);
-    white-space: nowrap;
-  }
-
   /* contenteditable styling for info fields */
   .info-editable[contenteditable="true"] {
     box-shadow: 0 0 0 1px var(--primary-color-shade);
@@ -1728,6 +1792,10 @@ html.reader-mode {
   .info-tag {
     font-size: 14px;
     color: var(--alternative-color);
+  }
+
+  .info-tag::before {
+    content: "#";
   }
 
   /* Info title (bold) */

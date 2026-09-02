@@ -122,6 +122,7 @@ class BookmarkSerializer(serializers.ModelSerializer):
 
     def get_favicon_url(self, obj: Bookmark):
         from bookmarks.utils import extract_hostname
+        from django.urls import reverse
         hostname = extract_hostname(obj.url)
         if not hostname:
             return None
@@ -136,13 +137,10 @@ class BookmarkSerializer(serializers.ModelSerializer):
             )
             favicon_lookup = FaviconLookup(domain_config)
             self.context["_favicon_lookup"] = favicon_lookup
-        favicon_file = favicon_lookup.get(hostname)
-        if not favicon_file:
-            return None
+        domain = favicon_lookup.get_domain(hostname)
         request = self.context.get("request")
-        favicon_file_path = static(favicon_file)
-        favicon_url = request.build_absolute_uri(favicon_file_path)
-        return favicon_url
+        favicon_path = reverse("linkding:favicon_image", kwargs={"domain": domain})
+        return request.build_absolute_uri(favicon_path)
 
     def get_preview_image_url(self, obj: Bookmark):
         if not obj.preview_image_file:

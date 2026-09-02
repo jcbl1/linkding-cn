@@ -1,4 +1,5 @@
 import { Behavior, registerBehavior } from "./runtime.js";
+import { showToast } from "./toast.js";
 import { gettext } from "../utils/i18n.js";
 import { hashIconSvg } from "../utils/svg.js";
 import {
@@ -120,9 +121,7 @@ class SettingsPageBehavior extends Behavior {
   constructor(element) {
     super(element);
 
-    this.feedbackElement =
-      element.querySelector("[data-settings-feedback]") || null;
-    this.directoryLinks = Array.from(
+this.directoryLinks = Array.from(
       element.querySelectorAll(
         "[data-settings-directory] [data-settings-section-target]",
       ),
@@ -257,6 +256,7 @@ class SettingsPageBehavior extends Behavior {
         });
         this.sortableInstances.push(sortable);
       }
+      this.applyAutoHideDateLock(form);
       this.syncBookmarkToolbarModules(form);
       this.syncToolbarConfigPanels(form);
 
@@ -431,7 +431,6 @@ class SettingsPageBehavior extends Behavior {
     }
     this.nativeResizeState = null;
 
-    clearTimeout(this.feedbackTimeout);
   }
 
   // 事件处理：草稿恢复按钮点击。
@@ -525,6 +524,7 @@ class SettingsPageBehavior extends Behavior {
     }
 
     if (form.matches("[data-bookmark-toolbar-form]")) {
+      this.applyAutoHideDateLock(form);
       this.syncBookmarkToolbarModules(form);
       this.syncToolbarConfigPanels(form);
       this.syncBookmarkActions(form);
@@ -573,6 +573,7 @@ class SettingsPageBehavior extends Behavior {
     }
 
     if (form.matches("[data-bookmark-toolbar-form]")) {
+      this.applyAutoHideDateLock(form);
       this.syncBookmarkToolbarModules(form);
       this.syncBookmarkActions(form);
       this.syncBookmarkStatuses(form);
@@ -760,7 +761,7 @@ class SettingsPageBehavior extends Behavior {
       if (showInlineStatus) {
         this.setFormStatus(form, gettext("Saved"), "success");
       } else if (showSuccessToast) {
-        this.showToast(gettext("Saved"), "success");
+        showToast(gettext("Saved"), { tone: "success" });
       }
     } catch (_error) {
       if (showInlineStatus) {
@@ -770,10 +771,7 @@ class SettingsPageBehavior extends Behavior {
           "error",
         );
       } else {
-        this.showToast(
-          gettext("Couldn't save settings. Please try again."),
-          "error",
-        );
+        showToast(gettext("Couldn't save settings. Please try again."), { tone: "error" });
       }
     } finally {
       submitState.saveInFlight = false;
@@ -816,7 +814,7 @@ class SettingsPageBehavior extends Behavior {
     });
 
     if (hasUnhandledErrors) {
-      this.showToast(gettext("Please review the highlighted fields."), "error");
+      showToast(gettext("Please review the highlighted fields."), { tone: "error" });
     }
   }
 
@@ -1517,7 +1515,7 @@ class SettingsPageBehavior extends Behavior {
   syncSidebarModules(form) {
     // Scope to THIS form — avoids cross-contamination when both
     // bookmarks and highlights sidebar forms exist on the same page.
-    const hiddenInput = form.querySelector('input[name$="_sidebar_modules"]');
+    const hiddenInput = form.querySelector('input[name="sidebar_modules"], input[name="highlights_sidebar_modules"]');
     const items = Array.from(
       form.querySelectorAll("[data-sidebar-modules-list] .settings-module-item"),
     ).map((item) => ({
@@ -1542,6 +1540,25 @@ class SettingsPageBehavior extends Behavior {
 
     if (hiddenInput) {
       hiddenInput.value = JSON.stringify(items);
+    }
+  }
+
+  // Auto-hide toolbar: force-enable "date" module when auto-hide is on.
+  applyAutoHideDateLock(form) {
+    const autoHide = form.querySelector("[data-toolbar-auto-hide]");
+    if (!autoHide) return;
+    const dateToggle = form.querySelector(
+      '[data-toolbar-module-key="date"] [data-toolbar-module-enabled]',
+    );
+    if (!dateToggle) return;
+
+    if (autoHide.checked) {
+      dateToggle.checked = true;
+      dateToggle.disabled = true;
+      dateToggle.closest(".settings-switch")?.classList.add("is-disabled");
+    } else {
+      dateToggle.disabled = false;
+      dateToggle.closest(".settings-switch")?.classList.remove("is-disabled");
     }
   }
 
@@ -2528,26 +2545,6 @@ class SettingsPageBehavior extends Behavior {
     );
   }
 
-  // 反馈提示：跨表单保存结果的轻量 toast。
-  showToast(message, tone) {
-    if (!this.feedbackElement) {
-      return;
-    }
-
-    this.feedbackElement.innerHTML = "";
-    const toast = document.createElement("div");
-    toast.className = `toast toast-${tone}`;
-    toast.setAttribute("role", tone === "error" ? "alert" : "status");
-    toast.textContent = message;
-    this.feedbackElement.appendChild(toast);
-
-    clearTimeout(this.feedbackTimeout);
-    this.feedbackTimeout = setTimeout(() => {
-      if (toast.isConnected) {
-        toast.remove();
-      }
-    }, 2400);
-  }
 }
 
 registerBehavior("ld-settings-page", SettingsPageBehavior);

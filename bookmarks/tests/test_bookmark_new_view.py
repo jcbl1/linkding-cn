@@ -245,90 +245,43 @@ class BookmarkNewViewTestCase(TestCase, BookmarkFactoryMixin):
             count=1,
         )
 
-    def test_prefetch_favicon_should_use_cached_favicon(self):
-        """FaviconCache 有成功记录且磁盘文件存在时直接返回。"""
+    def test_favicon_image_should_serve_cached_favicon(self):
+        """FaviconCache 有成功记录且磁盘文件存在时返回图片。"""
+        import tempfile
         self.user.profile.enable_favicons = True
         self.user.profile.save()
         from bookmarks.models import FaviconCache
-        FaviconCache.objects.create(
-            domain="example.com", favicon_file="example_com.png", status="success"
-        )
-        with mock.patch.object(
-            favicon_loader, "_find_cached_favicon_file", return_value="example_com.png"
-        ):
-            response = self.client.get(
-                reverse("linkding:bookmarks.prefetch_favicon")
-                + "?url=https://example.com"
-            )
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["status"], "success")
-        self.assertEqual(payload["favicon_file"], "example_com.png")
+        from bookmarks.services import favicon_loader
 
-    def test_prefetch_favicon_should_fetch_when_cache_is_missing(self):
-        """FaviconCache 无记录时应尝试获取。"""
+        # 使用临时目录隔离，避免污染真实 data/favicons
+        temp_dir = tempfile.TemporaryDirectory()
+        override = self.settings(LD_FAVICON_FOLDER=temp_dir.name)
+        override.enable()
+        try:
+            favicon_path = favicon_loader.get_favicon_path('example_com.png')
+            favicon_path.parent.mkdir(parents=True, exist_ok=True)
+            favicon_path.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
+
+            FaviconCache.objects.create(
+                domain="example.com", favicon_file="example_com.png", status="success"
+            )
+            response = self.client.get(reverse("linkding:favicon_image", args=["example.com"]))
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('Cache-Control', response)
+            self.assertIn('max-age=86400', response['Cache-Control'])
+        finally:
+            override.disable()
+            temp_dir.cleanup()
+
+    def test_favicon_image_should_return_default_when_missing(self):
+        """FaviconCache 无记录时返回默认 favicon.svg。"""
         self.user.profile.enable_favicons = True
         self.user.profile.save()
-        with mock.patch.object(
-            favicon_loader, "fetch_and_save_favicon", return_value="example_com.png"
-        ) as mock_fetch:
-            response = self.client.get(
-                reverse("linkding:bookmarks.prefetch_favicon")
-                + "?url=https://example.com"
-            )
+        response = self.client.get(reverse("linkding:favicon_image", args=["nonexistent.com"]))
         self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["status"], "success")
-        self.assertEqual(payload["favicon_file"], "example_com.png")
-        mock_fetch.assert_called_with("example.com", scheme="https")
-
-    def test_prefetch_favicon_updates_bookmark_for_domain(self):
-        """获取成功后应更新该域名下的书签 favicon_file。"""
-        self.user.profile.enable_favicons = True
-        self.user.profile.save()
-
-        bookmark = self.setup_bookmark(url="https://example.com/page")
-
-        with mock.patch.object(
-            favicon_loader, "fetch_and_save_favicon", return_value="example_com.png"
-        ):
-            response = self.client.get(
-                reverse("linkding:bookmarks.prefetch_favicon")
-                + "?url=https://example.com"
-            )
-
-        self.assertEqual(response.status_code, 200)
-        from bookmarks.models import FaviconCache
-        cache = FaviconCache.objects.filter(domain="example.com").first()
-        self.assertIsNotNone(cache)
-        self.assertEqual(cache.favicon_file, "example_com.png")
-
-    def test_prefetch_favicon_updates_alias_bookmark(self):
-        """通过别名域名获取 favicon 时，应能更新该别名域名的书签"""
-        self.user.profile.enable_favicons = True
-        self.user.profile.custom_domain_root = "m.okjike.com -> xiaohongshu.com"
-        self.user.profile.save()
-
-        bookmark = self.setup_bookmark(
-            url="https://m.okjike.com/path"
-        )
-
-        with mock.patch.object(
-            favicon_loader, "fetch_and_save_favicon", return_value="xiaohongshu_com.svg"
-        ):
-            response = self.client.get(
-                reverse("linkding:bookmarks.prefetch_favicon")
-                + "?url=https://m.okjike.com"
-            )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["status"], "success")
-        self.assertEqual(payload["favicon_file"], "xiaohongshu_com.svg")
-        from bookmarks.models import FaviconCache
-        cache = FaviconCache.objects.filter(domain="xiaohongshu.com").first()
-        self.assertIsNotNone(cache)
-        self.assertEqual(cache.favicon_file, "xiaohongshu_com.svg")
+        self.assertIn('Cache-Control', response)
+        # 兜底图标使用 no-cache，确保后台任务完成后浏览器能立即拉取真实图标
+        self.assertIn('no-cache', response['Cache-Control'])
 
     def test_should_show_respective_share_hint(self):
         self.user.profile.enable_sharing = True

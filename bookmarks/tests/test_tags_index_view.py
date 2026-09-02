@@ -166,7 +166,7 @@ class TagsIndexViewTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
 
         self.assertInHTML(
             """
-            <div class="toast toast-success" role="alert">
+            <div data-toast-message data-toast-tone="success">
                 Tag "tag_to_delete" deleted successfully.
             </div>
         """,

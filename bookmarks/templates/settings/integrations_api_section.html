@@ -24,7 +24,7 @@
     </div>
 
     {% if api_success_message %}
-      <div class="toast toast-success mb-2">{{ api_success_message }}</div>
+      <div hidden><div data-toast-message data-toast-tone="success">{{ api_success_message }}</div></div>
     {% endif %}
 
     {% if api_token_name and api_token_key %}

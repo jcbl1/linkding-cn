@@ -8,9 +8,9 @@
       <a href="{{ node.path_query_string }}" class="tag-tree-link" data-is-tag-item>
         <span class="tag-tree-name">{{ node.name }}</span>
         {% if node.co_count > 0 %}
-          <span class="tag-tree-co-count">({{ node.co_count }})</span>
+          <span class="tag-tree-count">{{ node.co_count }}</span>
         {% else %}
-          <span class="tag-tree-count">({{ node.count }})</span>
+          <span class="tag-tree-count">{{ node.count }}</span>
         {% endif %}
       </a>
     </div>

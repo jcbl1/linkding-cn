@@ -33,6 +33,7 @@ ALLOWED_HOSTS = ["*"]
 
 INSTALLED_APPS = [
     "bookmarks.apps.BookmarksConfig",
+    "site_adapters.apps.SiteAdaptersConfig",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -110,6 +111,14 @@ LOGIN_URL = "/" + LD_CONTEXT_PATH + "login"
 LOGIN_REDIRECT_URL = "/" + LD_CONTEXT_PATH + "bookmarks"
 LOGOUT_REDIRECT_URL = "/" + LD_CONTEXT_PATH + "login"
 
+CSRF_COOKIE_PATH = "/" + LD_CONTEXT_PATH
+LANGUAGE_COOKIE_PATH = "/" + LD_CONTEXT_PATH
+SESSION_COOKIE_PATH = "/" + LD_CONTEXT_PATH
+
+CSRF_COOKIE_NAME = "ld_csrftoken"
+LANGUAGE_COOKIE_NAME = "ld_language"
+SESSION_COOKIE_NAME = "ld_sessionid"
+
 # Internationalization
 # https://docs.djangoproject.com/en/2.2/topics/i18n/
 
@@ -127,6 +136,12 @@ TIME_ZONE = os.getenv("TZ", "Asia/Shanghai")
 USE_I18N = True
 
 USE_TZ = True
+
+# 同步系统时区与 Django TIME_ZONE，确保 huey crontab (utc=False) 使用正确时区
+import os as _os; _os.environ["TZ"] = TIME_ZONE
+import time as _time
+try: _time.tzset()
+except AttributeError: pass
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/2.2/howto/static-files/
@@ -170,9 +185,9 @@ HUEY = {
     "immediate": False,
     "results": False,
     "store_none": False,
-    "utc": True,
+    "utc": False,
     "consumer": {
-        "workers": 3,
+        "workers": 4,
         "worker_type": "thread",
         "initial_delay": 5,
         "backoff": 1.15,
@@ -183,6 +198,9 @@ HUEY = {
         "health_check_interval": 10,
     },
 }
+
+# Allow override of the session cookie length, provided in seconds.
+SESSION_COOKIE_AGE = int(os.getenv("LD_SESSION_COOKIE_AGE", 1209600))  # 2 weeks
 
 # Disable login form if configured
 LD_DISABLE_LOGIN_FORM = os.getenv("LD_DISABLE_LOGIN_FORM", False) in (
@@ -292,7 +310,7 @@ USE_SQLITE_ICU_EXTENSION = USE_SQLITE and os.path.exists(SQLITE_ICU_EXTENSION_PA
 
 # Favicons
 LD_DEFAULT_FAVICON_PROVIDERS = [
-    "https://favicon.im/{domain}?large=true&throw-error-on-404=true",
+    "https://twenty-icons.com/{domain}/32",
     "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url={url}&size=32",
 ]
 LD_FAVICON_PROVIDERS = LD_DEFAULT_FAVICON_PROVIDERS
@@ -306,6 +324,13 @@ LD_ENABLE_REFRESH_FAVICONS = os.getenv("LD_ENABLE_REFRESH_FAVICONS", True) in (
     "True",
     "true",
     "1",
+)
+
+# Favicon 定时刷新计划（标准 cron 五字段：分钟 小时 日 月 星期）
+# 默认为每 7 天凌晨 0:00 执行
+# 设为空字符串或 "off" 可禁用定时刷新
+LD_FAVICON_REFRESH_SCHEDULE = os.getenv(
+"LD_FAVICON_REFRESH_SCHEDULE", "0 0 */7 * *"
 )
 
 # Quick tags icon cache
@@ -327,19 +352,11 @@ LD_PREVIEW_MAX_SIZE = int(os.getenv("LD_PREVIEW_MAX_SIZE", 5242880))
 LD_PREVIEW_ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp"]
 
 # Website loader / snapshot settings
-LD_DEFAULT_USER_AGENT = os.getenv(
-    "LD_DEFAULT_USER_AGENT",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0",
-)
-LD_CUSTOM_WEBSITE_LOADER_SETTINGS = os.getenv(
-    "LD_CUSTOM_WEBSITE_LOADER_SETTINGS", "data/website_loader/settings.json"
-)
-LD_CUSTOM_SNAPSHOT_PROCESSOR_SETTINGS = os.getenv(
-    "LD_CUSTOM_SNAPSHOT_PROCESSOR_SETTINGS", "data/snapshot_processor/settings.json"
-)
-LD_CUSTOM_READER_PROCESSOR_SETTINGS = os.getenv(
-    "LD_CUSTOM_READER_PROCESSOR_SETTINGS", "data/reader_processor/settings.json"
-)
+
+# Recommended: configure at `_builtin_overrides.defaults.http.User-Agent`
+# in data/site-adapters/adapters/defaults/adapters.jsonc.
+LD_DEFAULT_USER_AGENT = os.getenv("LD_DEFAULT_USER_AGENT","",)
+
 
 # Asset / snapshot settings
 LD_ASSET_FOLDER = os.path.join(BASE_DIR, "data", "assets")
@@ -355,6 +372,12 @@ LD_DISABLE_ASSET_UPLOAD = os.getenv("LD_DISABLE_ASSET_UPLOAD", False) in (
     "true",
     "1",
 )
+
+# Browser engine: chromium (default) or cloakbrowser
+LD_BROWSER_ENGINE = os.getenv("LD_BROWSER_ENGINE", "chromium")
+# CloakBrowser license key for premium features
+CLOAKBROWSER_LICENSE_KEY = os.getenv("CLOAKBROWSER_LICENSE_KEY", "")
+
 LD_SINGLEFILE_PATH = os.getenv("LD_SINGLEFILE_PATH", "single-file")
 LD_SINGLEFILE_UBLOCK_OPTIONS = os.getenv(
     "LD_SINGLEFILE_UBLOCK_OPTIONS",
@@ -377,6 +400,14 @@ LD_SNAPSHOT_DOMAIN_COOLDOWN_MAX_SEC = int(
     os.getenv("LD_SNAPSHOT_DOMAIN_COOLDOWN_MAX_SEC", 10)
 )
 LD_SNAPSHOT_DISPATCHER_TICK_SEC = int(os.getenv("LD_SNAPSHOT_DISPATCHER_TICK_SEC", 1))
+LD_METADATA_DOMAIN_COOLDOWN_SEC = int(
+    os.getenv("LD_METADATA_DOMAIN_COOLDOWN_SEC", 0)
+)
+
+# Site adapters base directory
+LD_SITE_ADAPTERS_DIR = os.getenv(
+    "LD_SITE_ADAPTERS_DIR", os.path.join(BASE_DIR, "data", "site_adapters")
+)
 
 # Snapshot retry delays in seconds (comma-separated).
 # The number of retries equals the length of this array.

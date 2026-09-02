@@ -11,26 +11,28 @@ class SettingsImportViewTestCase(TestCase, BookmarkFactoryMixin):
         self.client.force_login(user)
 
     def assertSuccessMessage(self, response, message: str):
+        # Django messages render as hidden [data-toast-message] placeholders that the
+        # frontend bootstrap converts into floating toasts after page load.
         self.assertInHTML(
             f"""
-            <div class="toast toast-success mb-4">{message}</div>
+            <div data-toast-message data-toast-tone="success">{message}</div>
         """,
             response.content.decode("utf-8"),
         )
 
     def assertNoSuccessMessage(self, response):
-        self.assertNotContains(response, '<div class="toast toast-success mb-4">')
+        self.assertNotContains(response, '<div data-toast-message data-toast-tone="success">')
 
     def assertErrorMessage(self, response, message: str):
         self.assertInHTML(
             f"""
-            <div class="toast toast-error mb-4">{message}</div>
+            <div data-toast-message data-toast-tone="error">{message}</div>
         """,
             response.content.decode("utf-8"),
         )
 
     def assertNoErrorMessage(self, response):
-        self.assertNotContains(response, '<div class="toast toast-error mb-4">')
+        self.assertNotContains(response, '<div data-toast-message data-toast-tone="error">')
 
     def test_should_import_successfully(self):
         with open(

@@ -1,5 +1,5 @@
 (function () {
-  var bookmarkUrl = window.location;
+  var bookmarkUrl = window.location.href;
   var applicationUrl = '{{ application_url }}';
 
   applicationUrl += '?url=' + encodeURIComponent(bookmarkUrl);

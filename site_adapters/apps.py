@@ -1,0 +1,24 @@
+import logging
+
+from django.apps import AppConfig
+
+logger = logging.getLogger(__name__)
+
+
+class SiteAdaptersConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "site_adapters"
+    verbose_name = "Site Adapters"
+
+    def ready(self):
+        try:
+            from site_adapters.services.config.bootstrap import ensure_base_dirs
+            ensure_base_dirs()
+        except Exception:
+            logger.exception("Failed to ensure site adapters base directories")
+
+        # 注册 huey periodic task
+        try:
+            import site_adapters.tasks  # noqa: F401
+        except Exception:
+            logger.exception("Failed to register site adapters periodic tasks")

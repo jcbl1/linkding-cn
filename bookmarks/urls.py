@@ -4,7 +4,7 @@ from django.urls import include, path, re_path
 from django.views.i18n import JavaScriptCatalog, set_language
 
 from bookmarks import feeds, views
-from bookmarks.views import tag_tree
+from bookmarks.views import tag_tree, domain_tree, sidebar_content
 from bookmarks.admin import linkding_admin_site
 from bookmarks.api import routes as api_routes
 
@@ -37,9 +37,6 @@ urlpatterns = [
         "bookmarks/<int:bookmark_id>/read", views.reader.read, name="bookmarks.read"
     ),
     path(
-        "bookmarks/<int:bookmark_id>/reparse", views.reader.reparse, name="bookmarks.reparse"
-    ),
-    path(
         "bookmarks/<int:bookmark_id>/export", views.reader.export, name="bookmarks.export"
     ),
     path(
@@ -54,9 +51,9 @@ urlpatterns = [
         name="bookmarks.trashed.action",
     ),
     path(
-        "bookmarks/prefetch-favicon",
-        views.bookmarks.prefetch_favicon,
-        name="bookmarks.prefetch_favicon",
+        "favicon/<str:domain>",
+        views.bookmarks.favicon_image,
+        name="favicon_image",
     ),
     path(
         "bookmarks/load_temporary_preview_image",
@@ -79,6 +76,8 @@ urlpatterns = [
     path("tags", views.tags.tags_index, name="tags.index"),
     # Tag tree AJAX
     path("tag-tree/children", tag_tree.tag_tree_children, name="tag_tree.children"),
+    path("domain-tree/children", domain_tree.domain_tree_children, name="domain_tree.children"),
+    path("sidebar-content", sidebar_content.sidebar_content, name="sidebar.content"),
     # Highlights
     path(
         "bookmarks/highlights",
@@ -110,6 +109,31 @@ urlpatterns = [
     ),
     path("settings/import", views.settings.bookmark_import, name="settings.import"),
     path("settings/export", views.settings.bookmark_export, name="settings.export"),
+
+    # Site Adapters
+    path("admin/site-adapters", views.site_adapters, name="settings.site_adapters"),
+    path("admin/site-adapters/action", views.site_adapters_action, name="settings.site_adapters.action"),
+    path("admin/site-adapters/save-cookie", views.save_cookie, name="settings.site_adapters.save_cookie"),
+    path("admin/site-adapters/credentials/list", views.shared_credential_list, name="settings.site_adapters.shared_credential_list"),
+    path("admin/site-adapters/credentials/save", views.shared_credential_save, name="settings.site_adapters.shared_credential_save"),
+    path("admin/site-adapters/credentials/delete", views.shared_credential_delete, name="settings.site_adapters.shared_credential_delete"),
+    path("admin/site-adapters/domain/read", views.domain_read, name="settings.site_adapters.domain_read"),
+    path("admin/site-adapters/domain/save", views.domain_save, name="settings.site_adapters.domain_save"),
+    path("admin/site-adapters/domain/create", views.domain_create, name="settings.site_adapters.domain_create"),
+    path("admin/site-adapters/domain/rename", views.domain_rename, name="settings.site_adapters.domain_rename"),
+    path("admin/site-adapters/domain/delete", views.domain_delete, name="settings.site_adapters.domain_delete"),
+    path("admin/site-adapters/domains/all", views.all_domains, name="settings.site_adapters.all_domains"),
+    path("admin/site-adapters/local-domain-toggle", views.local_domain_toggle, name="settings.site_adapters.local_domain_toggle"),
+    path("admin/site-adapters/preview-image", views.preview_image_proxy, name="settings.site_adapters.preview_image"),
+    path("admin/site-adapters/subscription/domain-read", views.subscription_domain_read, name="settings.site_adapters.subscription_domain_read"),
+    path("admin/site-adapters/subscription/domain-toggle", views.subscription_domain_toggle, name="settings.site_adapters.subscription_domain_toggle"),
+    path("admin/site-adapters/subscription/manage", views.subscription_manage, name="settings.site_adapters.subscription_manage"),
+    path("admin/site-adapters/view-snapshot", views.view_snapshot, name="settings.site_adapters.view_snapshot"),
+    path("admin/site-adapters/view-reader", views.view_reader, name="settings.site_adapters.view_reader"),
+    path("settings/adapters", views.adapters_page, name="settings.adapters"),
+    path("settings/adapters/credentials/api", views.user_credentials, name="settings.credentials_api"),
+    path("settings/adapters/credentials/match-domain", views.match_domain_config, name="settings.match_domain_config"),
+    path("settings/adapters/snapshot_toggles", views.snapshot_toggles, name="settings.snapshot_toggles"),
     # Toasts
     path("toasts/acknowledge", views.toasts.acknowledge, name="toasts.acknowledge"),
     # API

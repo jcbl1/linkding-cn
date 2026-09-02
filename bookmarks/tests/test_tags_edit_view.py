@@ -105,7 +105,7 @@ class TagsEditViewTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
 
         self.assertInHTML(
             """
-            <div class="toast toast-success" role="alert">
+            <div data-toast-message data-toast-tone="success">
                 Tag "new_name" updated successfully.
             </div>
         """,

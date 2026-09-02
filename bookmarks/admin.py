@@ -46,6 +46,10 @@ class TaskPaginator(Paginator):
 
     # Copied from Huey's SqliteStorage with some modifications to allow pagination
     def enqueued_items(self, limit, offset):
+        # MemoryStorage (immediate mode / tests) has no sql() method
+        if not hasattr(huey.storage, "sql"):
+            return []
+
         def to_bytes(b):
             return bytes(b) if not isinstance(b, bytes) else b
 
@@ -81,7 +85,11 @@ class LinkdingAdminSite(AdminSite):
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [
-            path("tasks/", background_task_view, name="background_tasks"),
+            path(
+                "tasks/",
+                self.admin_view(background_task_view),
+                name="background_tasks",
+            ),
         ]
         return custom_urls + urls
 
@@ -89,6 +97,18 @@ class LinkdingAdminSite(AdminSite):
         app_list = super().get_app_list(request, app_label)
         context_path = os.getenv("LD_CONTEXT_PATH", "")
         app_list += [
+            {
+                "name": "Domain",
+                "app_label": "domain_app",
+                "models": [
+                    {
+                        "name": "Site Adapters",
+                        "object_name": "site_adapters",
+                        "admin_url": f"/{context_path}admin/site-adapters",
+                        "view_only": True,
+                    }
+                ],
+            },
             {
                 "name": "Huey",
                 "app_label": "huey_app",

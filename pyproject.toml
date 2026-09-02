@@ -6,11 +6,12 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "beautifulsoup4>=4.14.3",
-    "bleach>=6.3.0",
+    "bleach>=6.4.0",
     "bleach-allowlist>=1.0.3",
-    "django>=6.0",
-    "djangorestframework>=3.17.1",
-    "drissionpage>=4.1.1.2",
+    "django>=6.0.7",
+    # DRF PyPI 发布版 (3.18.0) 仍引用 Django 6.0 已移除的 cc_delim_re，
+    # 使用主分支修复版本，待 PyPI 发布新版本后可改回普通版本约束
+    "djangorestframework @ git+https://github.com/encode/django-rest-framework.git",
     "huey>=3.0.0",
     "markdown>=3.10.2",
     "mozilla-django-oidc>=5.0.2",
@@ -20,18 +21,31 @@ dependencies = [
     "supervisor>=4.3.0",
     "uwsgi>=2.0.31",
     "waybackpy>=3.0.6",
+    "cryptography>=41.0.0",
+    "publicsuffixlist>=1.0.2.20260726",
+    "elementpath>=5.1.4",
+    "lxml>=6.1.1",
+    "jsonpath-rfc9535>=1.0.0",
 ]
 
 [dependency-groups]
 dev = [
     "coverage>=7.13.5",
     "django-debug-toolbar>=6.3.0",
-    "playwright>=1.59.0",
+    "playwright>=1.62.0",
     "psycopg[binary]>=3.3.4",
     "pytest>=9.0.3",
     "pytest-django>=4.12.0",
     "pytest-xdist>=3.8.0",
     "ruff>=0.15.12",
+]
+
+# CloakBrowser (stealth Chromium) — 可选，非 Docker 环境安装:
+#   uv sync --group cloakbrowser
+#   python -m cloakbrowser install
+cloakbrowser = [
+    "cloakbrowser>=0.5.3",
+    "playwright>=1.59.0",
 ]
 # For PostgreSQL support, use the binary release for development so that not
 # everyone needs to build from source. For production, use a separate dependency

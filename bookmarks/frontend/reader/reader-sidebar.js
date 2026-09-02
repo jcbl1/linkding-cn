@@ -4,13 +4,8 @@ import { HIGHLIGHT_COLORS } from "./anchoring/highlighter";
 import { READER_ICONS } from "./reader-icons";
 import { gettext, ngettext, interpolate } from "../utils/i18n.js";
 import { loadReaderSettings, saveReaderSettings } from "./reader-settings.js";
-
-function getCSRFToken() {
-  const m = document.cookie.match(/csrftoken=([^;]+)/);
-  if (m) return m[1];
-  const meta = document.querySelector('meta[name="csrfmiddlewaretoken"]');
-  return meta ? meta.content : "";
-}
+import { showToast } from "../components/toast.js";
+import { getCSRFToken } from "../utils/csrf.js";
 
 function normalizeBaseUrl(baseUrl) {
   const value = String(baseUrl || "").trim();
@@ -33,7 +28,6 @@ export class ReaderSidebar extends LitElement {
     _allTags: { type: Array, state: true }, _colorPickerId: { type: String, state: true },
     _confirmDelAnnId: { type: String, state: true },
     _renameAssetId: { type: String, state: true }, _renameValue: { type: String, state: true }, _renameOriginal: { type: String, state: true },
-    _copyToastId: { type: String, state: true },
     _buttonMode: { type: String, state: true }, _activeAnnId: { type: String, state: true },
     _tagsEditing: { type: Boolean, state: true },
   };
@@ -48,7 +42,6 @@ export class ReaderSidebar extends LitElement {
     this.bookmarksIndexUrl = "/bookmarks";
     this._allTags = []; this._colorPickerId = null; this._colorPickerLeaveTimer = null; this._confirmDelAnnId = null;
     this._renameAssetId = null; this._renameValue = ""; this._renameOriginal = "";
-    this._copyToastId = null;
     this._buttonMode = loadReaderSettings().buttonMode || "float";
     this._activeAnnId = null;
     this._tagsEditing = false;
@@ -205,7 +198,7 @@ export class ReaderSidebar extends LitElement {
 
   _reloadAssets() { this.dispatchEvent(new CustomEvent("reload-assets", { bubbles: true, composed: true, detail: { bookmarkId: this.bookmarkData?.id } })); }
   _emitAnn(id, action, extra = {}) { this.dispatchEvent(new CustomEvent("annotation-action", { bubbles: true, composed: true, detail: { id, action, ...extra } })); }
-  _handleAnnCopy(annId) { this._emitAnn(annId, "copy"); this._copyToastId = String(annId); setTimeout(() => this._copyToastId = null, 1500); }
+  _handleAnnCopy(annId) { this._emitAnn(annId, "copy"); showToast(gettext("Copied"), { tone: "success", duration: 1500 }); }
   /** 显示确认弹窗（追加到 body，fixed 定位） */
   _showPopup(btn, onConfirm) {
     document.querySelectorAll(".reader-confirm-popup").forEach(el => el.remove());
@@ -384,7 +377,7 @@ export class ReaderSidebar extends LitElement {
             ` : html``}
           </span>
           <button class="annotation-action-btn" title=${gettext("Copy")} @click=${() => this._handleAnnCopy(ann.id)} .innerHTML=${READER_ICONS["copy"]}></button>
-          ${this._copyToastId === String(ann.id) ? html`<span class="copy-toast">${gettext("Copied")}</span>` : html``}
+          
         </div>
       </div>
     `;
@@ -460,7 +453,7 @@ export class ReaderSidebar extends LitElement {
                 input-placeholder="${gettext('Click to edit tags')}"
               ></ld-tag-autocomplete>`
             : html`<div class="info-tags-view" @click=${() => this._clickTags()}>
-                ${bm.tag_names?.length ? html`<span class="info-tags">${bm.tag_names.map(t => html`<span class="info-tag">#${t}</span>`)}</span>` : html`<span class="info-placeholder">${gettext("Click to edit tags")}</span>`}
+                ${bm.tag_names?.length ? html`<span class="info-tags">${bm.tag_names.map(t => html`<span class="info-tag">${t}</span>`)}</span>` : html`<span class="info-placeholder">${gettext("Click to edit tags")}</span>`}
               </div>`
           }
         </div>
@@ -494,7 +487,7 @@ export class ReaderSidebar extends LitElement {
           return html`<div class="info-file-item">
             ${isRen ? html`<input class="info-input info-file-rename-input" type="text" .value=${this._renameValue} @input=${e => this._renameValue = e.target.value} @keydown=${e => { if (e.key === "Enter") this._saveRename(a.id); if (e.key === "Escape") { this._renameAssetId = null; this._renameValue = ""; } }} @blur=${() => this._saveRename(a.id)} />`
             : html`<span class="info-file-name" title="${name}" @click=${() => { if (fileUrl) window.open(fileUrl, "_blank"); }}>
-              <span class="truncate">${fileUrl ? html`<a href="${fileUrl}" target="_blank" class="info-file-link" @click=${(e) => e.stopPropagation()}>${name}</a>` : html`<span>${name}</span>`}${a.status === "pending" ? html`<span class="info-file-status"> (${gettext("queued")})</span>` : html``}${a.status === "failure" ? html`<span class="info-file-status info-file-failed"> (${gettext("failed")})</span>` : html``}</span>
+              <span class="truncate">${fileUrl ? html`<a href="${fileUrl}" target="_blank" data-turbo="false" class="info-file-link" @click=${(e) => e.stopPropagation()}>${name}</a>` : html`<span>${name}</span>`}${a.status === "pending" ? html`<span class="info-file-status"> (${gettext("queued")})</span>` : html``}${a.status === "failure" ? html`<span class="info-file-status info-file-failed"> (${gettext("failed")})</span>` : html``}</span>
               ${a.file_size ? html`<span class="info-file-size">${this._fmtSize(a.file_size)}</span>` : html``}
             </span>`}
             <div class="info-file-actions">
@@ -589,7 +582,7 @@ export class ReaderSidebar extends LitElement {
       </div>
 
       <div class="info-section">
-        ${bm.tag_names?.length ? html`<span class="info-tags">${bm.tag_names.map(t => html`<span class="info-tag">#${t}</span>`)}</span>` : html`<span class="info-placeholder">${gettext("No tags")}</span>`}
+        ${bm.tag_names?.length ? html`<span class="info-tags">${bm.tag_names.map(t => html`<span class="info-tag">${t}</span>`)}</span>` : html`<span class="info-placeholder">${gettext("No tags")}</span>`}
       </div>
 
       ${bm.description ? html`

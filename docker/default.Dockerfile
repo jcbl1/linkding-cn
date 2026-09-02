@@ -1,13 +1,17 @@
-FROM node:22-alpine AS node-build
+# Run on the native build platform, the JS/CSS output is architecture-independent.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS node-build
 WORKDIR /etc/linkding
 # install build dependencies
 COPY rollup.config.mjs postcss.config.js esbuild.config.mjs package.json package-lock.json ./
-# Disable npm cache and install dependencies
-RUN npm ci --no-cache
+# install dependencies
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-cache
 # copy files needed for JS build
 COPY bookmarks/frontend ./bookmarks/frontend
 COPY bookmarks/styles ./bookmarks/styles
 COPY bookmarks/services/vendor/defuddle_entry.js ./bookmarks/services/vendor/defuddle_entry.js
+COPY site_adapters/frontend ./site_adapters/frontend
+COPY site_adapters/styles ./site_adapters/styles
 # Disable PostCSS cache and run build
 ENV POSTCSS_DISABLE_CACHE=true
 ENV NODE_ENV=production
@@ -16,13 +20,20 @@ RUN npm run build
 
 FROM python:3.13.7-slim-bookworm AS build-deps
 # Add required packages
-# build-essential pkg-config: build Python packages from source
+# build-essential pkg-config: build Python packages from source (e.g. uwsgi)
 # libpq-dev: build Postgres client from source
 # libicu-dev libsqlite3-dev: build Sqlite ICU extension
-# llibffi-dev libssl-dev curl rustup: build Python cryptography from source
-RUN apt-get update && apt-get -y install build-essential pkg-config libpq-dev libicu-dev libsqlite3-dev wget unzip libffi-dev libssl-dev curl
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
+# libffi-dev libssl-dev: fallback for C extension builds (cryptography/cffi have aarch64 wheels)
+# Optional: replace Debian apt mirror for faster downloads.
+# Domestic (China): --build-arg APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+# Overseas or unspecified: leave APT_MIRROR empty to use the official Debian source.
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+    fi
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get -y install build-essential pkg-config libpq-dev libicu-dev libsqlite3-dev wget unzip libffi-dev libssl-dev curl git
 WORKDIR /etc/linkding
 # install uv, use installer script for now as distroless images are not availabe for armv7
 ADD https://astral.sh/uv/0.8.13/install.sh /uv-installer.sh
@@ -32,7 +43,8 @@ ARG UV_INDEX_URL=https://pypi.org/simple
 ENV UV_INDEX_URL=${UV_INDEX_URL}
 # install python dependencies
 COPY pyproject.toml uv.lock ./
-RUN /root/.local/bin/uv sync --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /root/.local/bin/uv sync --no-dev
 
 
 FROM build-deps AS compile-icu
@@ -58,8 +70,17 @@ RUN wget https://www.sqlite.org/${SQLITE_RELEASE_YEAR}/sqlite-amalgamation-${SQL
 
 FROM python:3.13.7-slim-bookworm AS linkding
 LABEL org.opencontainers.image.source="https://github.com/sissbruecker/linkding"
+# Optional: replace Debian apt mirror for faster downloads.
+# Domestic (China): --build-arg APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+# Overseas or unspecified: leave APT_MIRROR empty to use the official Debian source.
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+    fi
 # install runtime dependencies
-RUN apt-get update && apt-get -y install mime-support libpq-dev libicu-dev libssl3 curl gettext
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get -y install mime-support libpq-dev libicu-dev libssl3 curl gettext
 WORKDIR /etc/linkding
 # copy python dependencies
 COPY --from=build-deps /etc/linkding/.venv /etc/linkding/.venv
@@ -71,11 +92,13 @@ COPY . .
 COPY --from=node-build /etc/linkding/bookmarks/static bookmarks/static/
 # copy bundled defuddle for server-side reader processing
 COPY --from=node-build /etc/linkding/bookmarks/services/vendor/defuddle.js bookmarks/services/vendor/defuddle.js
+COPY --from=node-build /etc/linkding/node_modules/defuddle/README.md /tmp/defuddle-README.md
 # Activate virtual env
 ENV VIRTUAL_ENV=/etc/linkding/.venv
 ENV PATH="/etc/linkding/.venv/bin:$PATH"
 # Generate static files
-RUN mkdir data && \
+RUN \
+    mkdir -p data && \
     python manage.py compilemessages && \
     python manage.py collectstatic
 
@@ -93,28 +116,38 @@ CMD curl -f http://localhost:${LD_SERVER_PORT:-9090}/${LD_CONTEXT_PATH}health ||
 CMD ["./bootstrap.sh"]
 
 
-FROM node:22-alpine AS ublock-build
+# Run on the native build platform, the downloaded extension is architecture-independent
+FROM --platform=$BUILDPLATFORM node:22-alpine AS ublock-build
 WORKDIR /etc/linkding
-# Install necessary tools
-# Download and unzip the latest uBlock Origin Lite release
-# Patch manifest to enable annoyances by default
+COPY scripts/setup-ublock.sh .
+# Download and unzip uBlock Origin Lite, patch manifest to enable annoyances by default
 RUN apk add --no-cache curl jq unzip && \
-    TAG=$(curl -sL https://api.github.com/repos/uBlockOrigin/uBOL-home/releases\?per_page\=20 | \
-    jq -r '.[] | select(.assets[].name | contains("chromium.zip")) | .tag_name' | head -n 1) && \
-    DOWNLOAD_URL=https://github.com/uBlockOrigin/uBOL-home/releases/download/$TAG/uBOLite_$TAG.chromium.zip && \
-    echo "Downloading $DOWNLOAD_URL" && \
-    curl -L -o uBOLite.zip $DOWNLOAD_URL && \
-    unzip uBOLite.zip -d uBOLite.chromium.mv3 && \
-    rm uBOLite.zip && \
-    jq '.declarative_net_request.rule_resources |= map(if .id == "annoyances-overlays" or .id == "annoyances-cookies" or .id == "annoyances-social" or .id == "annoyances-widgets" or .id == "annoyances-others" then .enabled = true else . end)' \
-        uBOLite.chromium.mv3/manifest.json > temp.json && \
-    mv temp.json uBOLite.chromium.mv3/manifest.json && \
-    sed -i 's/const out = \[ '\''default'\'' \];/const out = await dnr.getEnabledRulesets();/' uBOLite.chromium.mv3/js/ruleset-manager.js
+    sh setup-ublock.sh
+
+# Install runtime node_modules (playwright-core) in parallel with linkding-plus apt/npm steps
+FROM --platform=$BUILDPLATFORM node:22-alpine AS node-runtime
+WORKDIR /tmp/npm-runtime
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev && mkdir -p /opt/node-runtime && mv node_modules /opt/node-runtime/
+
+# Install playwright Python package into venv in parallel with linkding-plus apt/npm steps
+FROM build-deps AS playwright-install
+ENV VIRTUAL_ENV=/etc/linkding/.venv
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /root/.local/bin/uv pip install 'playwright>=1.59.0'
 
 
 FROM linkding AS linkding-plus
+# Optional: replace Debian apt mirror for faster downloads.
+# Domestic (China): --build-arg APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+# Overseas or unspecified: leave APT_MIRROR empty to use the official Debian source.
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+    fi
 # install chromium and node dependencies
-ENV NODE_MAJOR=20
+ENV NODE_MAJOR=24
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
@@ -127,9 +160,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
     apt-get update && \
     apt-get -y install nodejs
-# install single-file from fork for now, which contains several hotfixes
+# install single-file from upstream
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install -g https://github.com/sissbruecker/single-file-cli/tarball/4c54b3bc704cfb3e96cec2d24854caca3df0b3b6
+    npm install -g single-file-cli@2.1.3
+# copy playwright Python package from parallel build stage
+COPY --from=playwright-install /etc/linkding/.venv /etc/linkding/.venv
+# copy runtime node_modules from parallel build stage
+COPY --from=node-runtime /opt/node-runtime /opt/node-runtime
+ENV NODE_PATH=/opt/node-runtime/node_modules
 # copy uBlock
 COPY --from=ublock-build /etc/linkding/uBOLite.chromium.mv3 uBOLite.chromium.mv3/
 # create chromium profile folder for user running background tasks and set permissions
@@ -138,6 +176,7 @@ RUN mkdir -p chromium-profile &&  \
     chown -R www-data:www-data uBOLite.chromium.mv3
 # enable snapshot support
 ENV LD_ENABLE_SNAPSHOTS=True
+ENV LD_BROWSER_ENGINE=chromium
 # 确保chromium可以运行
 # 参考[这个issue](https://github.com/hardkoded/puppeteer-sharp/issues/2633)
 ENV XDG_CONFIG_HOME=/tmp/.chromium

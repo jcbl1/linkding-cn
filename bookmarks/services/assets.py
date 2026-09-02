@@ -15,9 +15,10 @@ from bookmarks.services.website_loader import (
     build_request_cookies,
     build_request_headers,
     detect_content_type,
-    get_request_config,
     is_pdf_content_type,
+    normalize_content_type,
 )
+from site_adapters.services.config.resolver import get_snapshot_config
 
 MAX_ASSET_FILENAME_LENGTH = 192
 
@@ -48,27 +49,42 @@ def create_snapshot_asset(bookmark: Bookmark) -> BookmarkAsset:
     return asset
 
 
-def create_snapshot(asset: BookmarkAsset):
+def create_snapshot(asset: BookmarkAsset, username: str = ''):
     try:
         url = asset.bookmark.url
-        request_config = get_request_config(url)
-        content_type = detect_content_type(url, config=request_config)
+        username = username or (asset.bookmark.owner.username if asset.bookmark.owner else '')
+        config = get_snapshot_config(url, username=username)
+        declared = normalize_content_type((config or {}).get("content_type"))
 
-        if is_pdf_content_type(content_type):
-            _create_pdf_snapshot(asset, request_config)
+        if declared == "json":
+            _create_data_snapshot(asset, username=username, content_type="json")
+            return
+        elif declared == "xml":
+            _create_data_snapshot(asset, username=username, content_type="xml")
+            return
+        elif declared == "html":
+            _create_html_snapshot(asset, username=username)
+            return
+
+        detected = detect_content_type(url, config)
+        if is_pdf_content_type(detected):
+            _create_pdf_snapshot(asset)
         else:
-            _create_html_snapshot(asset)
-    except Exception as error:
+            format_type = normalize_content_type(detected)
+            if format_type in ("json", "xml"):
+                _create_data_snapshot(asset, username=username, content_type=format_type)
+            else:
+                _create_html_snapshot(asset, username=username)
+    except Exception:
         asset.status = BookmarkAsset.STATUS_FAILURE
         asset.save()
-        raise error
+        raise
 
-
-def _create_html_snapshot(asset: BookmarkAsset):
+def _create_html_snapshot(asset: BookmarkAsset, username: str = ''):
     # Create snapshot into temporary file
     temp_filename = _generate_asset_filename(asset, asset.bookmark.url, "tmp")
     temp_filepath = os.path.join(settings.LD_ASSET_FOLDER, temp_filename)
-    snapshot_processor.create_snapshot(asset.bookmark.url, temp_filepath)
+    snapshot_processor.create_snapshot(asset.bookmark.url, temp_filepath, username=username)
 
     # Store as gzip in asset folder
     filename = _generate_asset_filename(asset, asset.bookmark.url, "html.gz")
@@ -95,8 +111,9 @@ def _create_html_snapshot(asset: BookmarkAsset):
     _save_bookmark_updates(asset.bookmark, ["latest_snapshot", "date_modified"])
 
 
-def _create_pdf_snapshot(asset: BookmarkAsset, request_config: dict | None = None):
+def _create_pdf_snapshot(asset: BookmarkAsset):
     url = asset.bookmark.url
+    request_config = get_snapshot_config(url)
     max_size = settings.LD_SNAPSHOT_PDF_MAX_SIZE
 
     temp_filename = _generate_asset_filename(asset, url, "tmp")
@@ -161,6 +178,52 @@ def _create_pdf_snapshot(asset: BookmarkAsset, request_config: dict | None = Non
     finally:
         if os.path.exists(temp_filepath):
             os.remove(temp_filepath)
+
+
+def _create_data_snapshot(
+    asset: BookmarkAsset,
+    username: str,
+    content_type: str,
+):
+    url = asset.bookmark.url
+    extension = "json" if content_type == "json" else "xml"
+    mime_type = (
+        BookmarkAsset.CONTENT_TYPE_JSON
+        if content_type == "json"
+        else BookmarkAsset.CONTENT_TYPE_XML
+    )
+
+    temp_filename = _generate_asset_filename(asset, url, "tmp")
+    temp_filepath = os.path.join(settings.LD_ASSET_FOLDER, temp_filename)
+    snapshot_processor.create_snapshot(
+        url,
+        temp_filepath,
+        username=username,
+        content_type=content_type,
+    )
+
+    filename = _generate_asset_filename(asset, url, f"{extension}.gz")
+    filepath = os.path.join(settings.LD_ASSET_FOLDER, filename)
+    with open(temp_filepath, "rb") as temp_file, gzip.open(filepath, "wb") as gz_file:
+        shutil.copyfileobj(temp_file, gz_file)
+    os.remove(temp_filepath)
+
+    timestamp = _format_asset_timestamp(asset.date_created)
+    label = "JSON" if content_type == "json" else "XML"
+
+    asset.status = BookmarkAsset.STATUS_COMPLETE
+    asset.content_type = mime_type
+    asset.display_name = _("%(label)s snapshot from %(timestamp)s") % {
+        "label": label,
+        "timestamp": timestamp,
+    }
+    asset.file = filename
+    asset.gzip = True
+    asset.save()
+
+    asset.bookmark.latest_snapshot = asset
+    asset.bookmark.date_modified = timezone.now()
+    _save_bookmark_updates(asset.bookmark, ["latest_snapshot", "date_modified"])
 
 
 def upload_snapshot(bookmark: Bookmark, html: bytes):
@@ -230,15 +293,17 @@ def upload_asset(bookmark: Bookmark, upload_file: UploadedFile):
         _save_bookmark_updates(asset.bookmark, ["date_modified"])
 
         logger.info(
-            f"Successfully uploaded asset file. bookmark={bookmark} file={upload_file.name}"
+            "Successfully uploaded asset file. bookmark=%s file=%s",
+            bookmark, upload_file.name,
         )
         return asset
     except Exception as e:
         logger.error(
-            f"Failed to upload asset file. bookmark={bookmark} file={upload_file.name}",
+            "Failed to upload asset file. bookmark=%s file=%s",
+            bookmark, upload_file.name,
             exc_info=e,
         )
-        raise e
+        raise
 
 
 def remove_asset(asset: BookmarkAsset):
@@ -275,7 +340,8 @@ def rename_asset(asset: BookmarkAsset, new_display_name: str):
     _save_bookmark_updates(asset.bookmark, ["date_modified"])
 
     logger.info(
-        f"Successfully renamed asset. asset_id={asset.id} new_name={new_display_name}"
+        "Successfully renamed asset. asset_id=%s new_name=%s",
+        asset.id, new_display_name,
     )
 
 

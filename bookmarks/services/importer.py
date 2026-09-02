@@ -71,7 +71,7 @@ def import_netscape_html(
         raise
 
     parse_end = timezone.now()
-    logger.debug(f"Parse duration: {parse_end - import_start}")
+    logger.debug("Parse duration: %s", parse_end - import_start)
 
     # Create and cache all tags beforehand
     _create_missing_tags(netscape_bookmarks, user)
@@ -88,7 +88,7 @@ def import_netscape_html(
     tasks.schedule_bookmarks_without_previews(user)
 
     end = timezone.now()
-    logger.debug(f"Import duration: {end - import_start}")
+    logger.debug("Import duration: %s", end - import_start)
 
     return result
 
@@ -143,38 +143,35 @@ def _import_batch(
     existing_bookmarks = Bookmark.objects.filter(
         owner=user, url_normalized__in=batch_normalized_urls
     )
+    bookmark_map = {
+        bookmark.url_normalized: bookmark for bookmark in existing_bookmarks
+    }
 
     # Create or update bookmarks from parsed Netscape bookmarks
     bookmarks_to_create = []
     bookmarks_to_update = []
+    updated_urls = set()
 
     for netscape_bookmark in netscape_bookmarks:
         result.total = result.total + 1
         try:
-            # Lookup existing bookmark by normalized URL
             normalized_url = normalize_url(netscape_bookmark.href)
-            bookmark = next(
-                (
-                    bookmark
-                    for bookmark in existing_bookmarks
-                    if bookmark.url_normalized == normalized_url
-                ),
-                None,
-            )
-            if not bookmark:
+            bookmark = bookmark_map.get(normalized_url)
+            is_create = bookmark is None
+            if is_create:
                 bookmark = Bookmark(owner=user)
-                is_update = False
-            else:
-                is_update = True
+                bookmark_map[normalized_url] = bookmark
+            elif bookmark.pk is not None and normalized_url not in updated_urls:
+                bookmarks_to_update.append(bookmark)
+                updated_urls.add(normalized_url)
+
             # Copy data from parsed bookmark
             _copy_bookmark_data(netscape_bookmark, bookmark, options)
             # Validate bookmark fields, exclude owner to prevent n+1 database query,
             # also there is no specific validation on owner
             bookmark.clean_fields(exclude=["owner"])
-            # Schedule for update or insert
-            if is_update:
-                bookmarks_to_update.append(bookmark)
-            else:
+
+            if is_create:
                 bookmarks_to_create.append(bookmark)
 
             result.success = result.success + 1

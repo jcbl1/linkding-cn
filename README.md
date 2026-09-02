@@ -17,7 +17,7 @@ linkding-cn 是一款开源、自托管的网页管理&阅读工具（书签管�
 
 ## 核心特性
 
-- 🌍 多语言：内置 **简体中文🇨🇳**、English，支持[增加更多其他语言](./docs/i18n-maintenance.md)
+- 🌍 多语言：内置 **简体中文🇨🇳**、English，支持[增加更多其他语言](./docs/i18n-guide.md)
 - 📦 快照存档：自动获取网页的 Favicon、元数据、HTML 快照，支持[自定义元数据/快照获取脚本](https://github.com/WooHooDai/linkding-cn/wiki/%E8%87%AA%E5%AE%9A%E4%B9%89%E8%84%9A%E6%9C%AC)
 - 📚 阅读模式：提供统一、简洁、可定制、可高亮批注的阅读页面
     - 自动提取网页正文（使用 [Defuddle](https://github.com/kepano/defuddle)），支持[自定义正文提取规则](https://github.com/WooHooDai/linkding-cn/wiki/%E8%87%AA%E5%AE%9A%E4%B9%89%E8%84%9A%E6%9C%AC#%E9%98%85%E8%AF%BB%E9%A1%B5%E9%9D%A2%E6%AD%A3%E6%96%87%E6%8A%BD%E5%8F%96)。
@@ -83,7 +83,7 @@ docker compose pull && docker compose up -d
 
 | 功能 | linkding-cn  | linkding  |
 |:---:|:---:|:---:|
-|**语言**|_简体中文🇨🇳_ / English / [其他](./docs/i18n-maintenance.md)|English|
+|**语言**|_简体中文🇨🇳_ / English / [其他](./docs/i18n-guide.md)|English|
 |**阅读模式**|阅读页面 + _高亮批注_ |阅读页面|
 |**元数据&快照**|内置 + [_自定义获取脚本🐞_](https://github.com/WooHooDai/linkding-cn/wiki/%E8%87%AA%E5%AE%9A%E4%B9%89%E8%84%9A%E6%9C%AC)|内置|
 |**书签工具栏自定义**|_支持启用/禁用、排序、显示模式_|❌|

@@ -34,16 +34,7 @@
         {% if details.is_editable %}
           <div class="detail-url-wrapper">
             <div class="detail-url-view">
-              {% if details.favicon_file %}
-                <img class="favicon" src="{% static details.favicon_file %}"
-                     onerror="handleFaviconError(this,'{{ details.bookmark.url|escapejs }}')"
-                     alt="">
-              {% elif details.favicon_unavailable %}
-                <img class="favicon" src="{% static 'favicon.svg' %}" alt="">
-              {% else %}
-                <img class="favicon" src="{% static 'favicon.svg' %}"
-                     data-favicon-url="{{ details.bookmark.url|escape }}" alt="">
-              {% endif %}
+              <img class="favicon" src="{% url 'linkding:favicon_image' domain=details.favicon_domain %}" alt="">
               <a class="detail-url-link" href="{{ details.bookmark.url }}" rel="noopener"
                  target="{{ details.profile.bookmark_link_target }}">{{ details.bookmark.url }}</a>
               <button type="button" class="info-file-action-btn" id="edit-url-btn" title="{% translate 'Edit URL' %}">
@@ -61,16 +52,7 @@
           </div>
         {% else %}
           <div class="detail-url-view">
-            {% if details.favicon_file %}
-              <img class="favicon" src="{% static details.favicon_file %}"
-                   onerror="handleFaviconError(this,'{{ details.bookmark.url|escapejs }}')"
-                   alt="">
-            {% elif details.favicon_unavailable %}
-              <img class="favicon" src="{% static 'favicon.svg' %}" alt="">
-            {% else %}
-              <img class="favicon" src="{% static 'favicon.svg' %}"
-                   data-favicon-url="{{ details.bookmark.url|escape }}" alt="">
-            {% endif %}
+            <img class="favicon" src="{% url 'linkding:favicon_image' domain=details.favicon_domain %}" alt="">
             <a class="detail-url-link" href="{{ details.bookmark.url }}" rel="noopener"
                target="{{ details.profile.bookmark_link_target }}">{{ details.bookmark.url }}</a>
           </div>
@@ -80,7 +62,7 @@
         <div class="weblinks">
           {% if details.latest_snapshot %}
             <a class="weblink" href="{% url 'linkding:assets.view' details.latest_snapshot.id %}"
-               target="{{ details.profile.bookmark_link_target }}">
+               target="{{ details.profile.bookmark_link_target }}" data-turbo="false">
               <svg class="favicon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
               <span>{% translate "Latest snapshot" %}</span>
             </a>
@@ -152,7 +134,7 @@
                 {% if details.tags %}
                   <span class="info-tags">
                     {% for tag in details.tags %}
-                      <span class="info-tag">#{{ tag.name }}</span>
+                      <span class="info-tag">{{ tag.name }}</span>
                     {% endfor %}
                   </span>
                 {% else %}
@@ -163,7 +145,7 @@
           {% else %}
             <div>
               {% for tag in details.tags %}
-                <a href="{% url 'linkding:bookmarks.index' %}?{{ tag.query_string }}">#{{ tag.name }}</a>
+                <a href="{% url 'linkding:bookmarks.index' %}?{{ tag.query_string }}">{{ tag.name }}</a>
               {% endfor %}
             </div>
           {% endif %}
@@ -189,10 +171,10 @@
                     data-chip-value="{{ details.bookmark.unread|yesno:'true,false' }}"
                     data-chip-active-icon="#ld-icon-read-check"
                     data-chip-inactive-icon="#ld-icon-unread-x"
-                    data-chip-active-text="{% translate "Read" context "bookmark status" %}"
+                    data-chip-active-text="{% translate "Read" context "bookmark_status" %}"
                     data-chip-inactive-text="{% translate 'Unread' %}">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"><use xlink:href="{% if details.bookmark.unread %}#ld-icon-unread-x{% else %}#ld-icon-read-check{% endif %}"></use></svg>
-              <span>{% if details.bookmark.unread %}{% translate "Unread" %}{% else %}{% translate "Read" context "bookmark status" %}{% endif %}</span>
+              <span>{% if details.bookmark.unread %}{% translate "Unread" %}{% else %}{% translate "Read" context "bookmark_status" %}{% endif %}</span>
             </button>
             {% if details.profile.enable_sharing %}
               <button type="button"
@@ -219,7 +201,7 @@
                 <span class="detail-files-actions">
                   {% if details.snapshots_enabled %}
                     <button type="button" class="btn btn-link btn-sm" data-action="create-snapshot"
-                            {% if details.has_pending_assets %}disabled{% endif %}>{% translate "Create HTML snapshot" %}</button>
+                            {% if details.has_pending_assets %}disabled{% endif %}>{% translate "Create snapshot" %}</button>
                   {% endif %}
                   {% if details.uploads_enabled %}
                     <button type="button" class="btn btn-link btn-sm" data-action="upload-asset">{% translate "Upload file" %}</button>
@@ -277,7 +259,7 @@
               {% if details.bookmark.preview_image_file %}
                 <img class="info-preview-image" src="{% static details.bookmark.preview_image_file %}" alt=""/>
               {% elif details.bookmark.preview_image_remote_url %}
-                <img class="info-preview-image" src="{{ details.bookmark.preview_image_remote_url }}" referrerpolicy="unsafe-url" alt="" onerror="this.closest('.detail-section').style.display='none'"/>
+                <img class="info-preview-image" src="{{ details.bookmark.preview_image_remote_url }}" referrerpolicy="strict-origin-when-cross-origin" alt="" onerror="this.closest('.detail-section').style.display='none'"/>
               {% endif %}
             </div>
           {% endif %}

@@ -3,13 +3,7 @@
  * reading progress, bookmark data, and asset lists.
  */
 import { describeRange } from "./anchoring/index.js";
-
-export function getCSRFToken() {
-  const match = document.cookie.match(/csrftoken=([^;]+)/);
-  if (match) return match[1];
-  const meta = document.querySelector('meta[name="csrfmiddlewaretoken"]');
-  return meta ? meta.content : "";
-}
+import { getCSRFToken } from "../utils/csrf.js";
 
 export function normalizeBaseUrl(baseUrl) {
   const value = String(baseUrl || "").trim();

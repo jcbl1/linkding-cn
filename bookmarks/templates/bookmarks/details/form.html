@@ -9,16 +9,7 @@
   <div class="weblinks">
     <a class="weblink" href="{{ details.bookmark.url }}" rel="noopener"
        target="{{ details.profile.bookmark_link_target }}">
-      {% if details.favicon_file %}
-        <img class="favicon" src="{% static details.favicon_file %}"
-             onerror="handleFaviconError(this,'{{ details.bookmark.url|escapejs }}')"
-             alt="">
-      {% elif details.favicon_unavailable %}
-        <img class="favicon" src="{% static 'favicon.svg' %}" alt="">
-      {% else %}
-        <img class="favicon" src="{% static 'favicon.svg' %}"
-             data-favicon-url="{{ details.bookmark.url|escape }}" alt="">
-      {% endif %}
+      <img class="favicon" src="{% url 'linkding:favicon_image' domain=details.favicon_domain %}" alt="">
       <span>{% translate "Original URL" %}</span>
     </a>
     <a class="weblink" href="{% url 'linkding:bookmarks.read' details.bookmark.id %}"
@@ -82,7 +73,7 @@
         <h3 id="details-modal-tags-title">{% translate "Tags" %}</h3>
         <div>
           {% for tag in details.tags %}
-            <a href="{% url 'linkding:bookmarks.index' %}?{{ tag.query_string }}">#{{ tag.name }}</a>
+            <a href="{% url 'linkding:bookmarks.index' %}?{{ tag.query_string }}">{{ tag.name }}</a>
           {% endfor %}
         </div>
       </section>
@@ -129,7 +120,7 @@
         {% if details.bookmark.preview_image_file %}
           <img src="{% static details.bookmark.preview_image_file %}" alt=""/>
         {% elif details.bookmark.preview_image_remote_url %}
-          <img src="{{ details.bookmark.preview_image_remote_url }}" referrerpolicy="unsafe-url" alt="" onerror="this.style.display='none'"/>
+          <img src="{{ details.bookmark.preview_image_remote_url }}" referrerpolicy="strict-origin-when-cross-origin" alt="" onerror="this.style.display='none'"/>
         {% endif %}
       </section>
     {% endif %}

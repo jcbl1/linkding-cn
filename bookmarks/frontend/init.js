@@ -22,9 +22,28 @@ function initSidebarState() {
   page.classList.remove("sidebar-open", "sidebar-closed", "sidebar-visible");
   if (shouldOpen) {
     page.classList.add("sidebar-open", "sidebar-visible");
+    // 如果侧边栏内容是懒加载的占位符，立即加载
+    const sidebar = page.querySelector(".sidebar");
+    if (sidebar && sidebar.querySelector("[data-sidebar-lazy-placeholder]")) {
+      let retries = 0;
+      const tryLoad = () => {
+        if (typeof window.loadSidebarContent === "function") {
+          window.loadSidebarContent(page);
+        } else if (++retries < 100) {
+          setTimeout(tryLoad, 10);
+        }
+      };
+      tryLoad();
+    }
   } else {
     page.classList.add("sidebar-closed");
   }
+  
+  // 同步侧边栏状态到 Cookie，让服务端判断是否需要懒加载
+  try {
+    const cookieName = isHighlights ? "ld_sidebar_highlights" : "ld_sidebar_bookmarks";
+    document.cookie = `${cookieName}=${shouldOpen ? "1" : "0"}; path=/; max-age=31536000; SameSite=Lax`;
+  } catch {}
 }
 
 document.addEventListener("turbo:load", initSidebarState);

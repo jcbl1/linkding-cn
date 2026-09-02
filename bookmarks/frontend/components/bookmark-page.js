@@ -1,14 +1,11 @@
 import { Behavior, registerBehavior } from "./runtime.js";
 import { sanitizeSvgBody } from "../utils/svg.js";
 import { handleBookmarkAction } from "../utils/bookmark-action.js";
+import { getCSRFToken } from "../utils/csrf.js";
 
 // ==========================================
 // 书签列表
 // ==========================================
-
-function getCSRFToken() {
-  return document.cookie.match(/csrftoken=([^;]+)/)?.[1] || "";
-}
 
 function gettext(s) {
   return window.gettext ? window.gettext(s) : s;
@@ -298,17 +295,19 @@ class BookmarkItem extends Behavior {
   onQuickEdit(event) {
     event.preventDefault();
     event.stopPropagation();
-    const btn = event.currentTarget;
-    const type = btn.dataset.quickEdit;
+    const type = event.currentTarget.dataset.quickEdit;
+    this.startQuickEdit(type);
+  }
 
-    if (isActiveEditor(this.bookmarkId, type)) {
+  startQuickEdit(fieldType) {
+    if (isActiveEditor(this.bookmarkId, fieldType)) {
       closeActiveEditor();
       return;
     }
 
     closeActiveEditor();
 
-    switch (type) {
+    switch (fieldType) {
       case "title":
         this._startEditTitle();
         break;
@@ -528,6 +527,7 @@ class BookmarkItem extends Behavior {
           }
 
           this._syncInlineDescriptionSeparator();
+          this._reinitDescriptionToggle();
         })
         .catch((error) => {
           console.error("Failed to save description:", error);
@@ -735,12 +735,13 @@ class BookmarkItem extends Behavior {
 
     tagsContainer._editing = true;
     const currentTags = Array.from(tagsContainer.querySelectorAll("a")).map(
-      (tag) => tag.textContent.replace("#", ""),
+      (tag) => tag.textContent,
     );
 
     tagsContainer.style.display = "none";
 
     const autocomplete = document.createElement("ld-tag-autocomplete");
+    autocomplete.classList.add("quick-edit-tags-container");
     autocomplete.setAttribute("input-value", currentTags.join(" "));
     autocomplete.setAttribute("input-placeholder", gettext("Enter tags"));
     tagsContainer.parentNode.insertBefore(
@@ -845,7 +846,7 @@ class BookmarkItem extends Behavior {
     const tagsContainer = this.element.querySelector(".tags");
     if (!tagsContainer) return [];
     return Array.from(tagsContainer.querySelectorAll("a"))
-      .map((a) => a.textContent.replace(/^#/, "").trim())
+      .map((a) => a.textContent.trim())
       .filter(Boolean);
   }
 
@@ -1011,7 +1012,7 @@ class BookmarkItem extends Behavior {
 
       const link = document.createElement("a");
       link.href = `?q=%23${encodeURIComponent(tag)}`;
-      link.textContent = `#${tag}`;
+      link.textContent = tag;
       tagsContainer.appendChild(link);
     });
     tagsContainer.style.display = "";
@@ -1183,6 +1184,32 @@ class BookmarkItem extends Behavior {
         );
       }
     });
+  }
+
+  /**
+   * 清除旧的描述 toggle 监听，重新检测截断并绑定点击展开。
+   * 供内联编辑保存后调用。
+   */
+  _reinitDescriptionToggle() {
+    // 移除旧 handler
+    if (this.onToggleDescription) {
+      const target = this._descriptionToggleTarget || this.descriptionContainer;
+      target.removeEventListener("click", this.onToggleDescription);
+      this.onToggleDescription = null;
+      this._descriptionToggleTarget = null;
+    }
+    // 重置展开态和 cursor
+    if (this.descriptionContainer) {
+      this.descriptionContainer.classList.remove("expanded");
+      this.descriptionContainer.style.cursor = "";
+    }
+    if (this.descriptionElement) {
+      this.descriptionElement.classList.remove("expanded");
+    }
+    const dt = this.descriptionContainer?.querySelector(".description-text");
+    if (dt) dt.style.cursor = "";
+
+    this.initDescriptionToggle();
   }
 
   // ==========================================
@@ -1423,20 +1450,107 @@ class DomainTreeBehavior extends Behavior {
     }
   }
 
-  toggleTreeItem(item, event) {
+  async toggleTreeItem(item, event) {
     if (!item) return;
-    const childList = item.querySelector(":scope > ul.domain-children");
     const button = item.querySelector(":scope > .domain-row .folder-toggle");
-
-    if (!childList || !button) return;
+    if (!button) return;
     if (event) event.preventDefault();
+
+    // P0: guard against rapid clicks while loading
+    if (item.dataset.loading === "true") return;
 
     const expanded = button.getAttribute("aria-expanded") === "true";
     const newState = !expanded;
 
     button.setAttribute("aria-expanded", newState);
-    childList.style.display = newState ? "" : "none";
-    this.setNodeState(item.dataset.domainNodeId, newState);
+    
+    const nodeId = item.dataset.domainNodeId;
+    
+    if (newState && item.dataset.loaded !== "true") {
+      // Children not yet loaded — fetch from server.
+      await this.loadChildren(item, nodeId);
+    } else {
+      // Already loaded — just show/hide.
+      const childList = item.querySelector(":scope > ul.domain-children");
+      if (childList) childList.style.display = newState ? "" : "none";
+    }
+    
+    this.setNodeState(nodeId, newState);
+  }
+
+  _buildSearchParams(nodeId) {
+    // Forward all search/filter params that affect bookmark querying (and thus domain counts).
+    // Exclude pure UI state params that don't affect data: sort, details.
+    const SKIP = new Set(["node_id", "ctx", "sort", "details", "view_mode"]);
+    const sp = new URLSearchParams();
+    sp.set("node_id", nodeId);
+    const page = document.querySelector("[data-ctx]");
+    sp.set("ctx", page?.dataset.ctx || "active");
+    // Include view_mode so browser HTTP cache differentiates icon/full mode responses
+    const viewMode = this.element?.dataset.domainViewMode || "full";
+    sp.set("view_mode", viewMode);
+    // Include domain config fingerprint to bust sessionStorage cache when
+    // custom domain normalization rules change
+    const fingerprint = this.element?.dataset.domainConfigFingerprint;
+    if (fingerprint) sp.set("fp", fingerprint);
+    for (const [key, val] of new URLSearchParams(window.location.search)) {
+      if (!SKIP.has(key) && val) sp.set(key, val);
+    }
+    return sp;
+  }
+
+  async loadChildren(item, nodeId) {
+    // P0: loading guard
+    if (item.dataset.loading === "true") return;
+    item.dataset.loading = "true";
+
+    const sp = this._buildSearchParams(nodeId);
+    // sessionStorage cache key matches the URL params (which now include view_mode)
+    const cacheKey = `domain-tree:${sp.toString()}`;
+    const button = item.querySelector(":scope > .domain-row .folder-toggle");
+
+    // 1. Check sessionStorage cache first
+    let html = null;
+    try { html = sessionStorage.getItem(cacheKey); } catch {}
+
+    if (html === null) {
+      // 2. Cache miss — fetch from server
+      try {
+        const resp = await fetch(`/domain-tree/children?${sp.toString()}`);
+        if (!resp.ok) {
+          this._loadChildrenFailed(item, button);
+          return;
+        }
+        html = await resp.text();
+        try { sessionStorage.setItem(cacheKey, html); } catch {}
+      } catch {
+        this._loadChildrenFailed(item, button);
+        return;
+      }
+    }
+
+    item.dataset.loading = "false";
+
+    // 3. Insert into DOM
+    if (html && html.trim()) {
+      const ul = document.createElement("ul");
+      // Match icon mode: if the domain tree is in icon mode, add grid layout class
+      const menu = item.closest(".domain-menu");
+      const isIconMode = menu?.dataset.domainViewMode === "icon";
+      ul.className = isIconMode ? "domain-children domain-children-icon" : "domain-children";
+      ul.innerHTML = html;
+      item.appendChild(ul);
+      item.dataset.loaded = "true";
+    } else {
+      item.dataset.domainHasChildren = "false";
+      if (button) button.remove();
+    }
+  }
+
+  _loadChildrenFailed(item, button) {
+    item.dataset.loading = "false";
+    // Revert aria-expanded to collapsed state
+    if (button) button.setAttribute("aria-expanded", "false");
   }
 
   setNodeState(nodeId, expanded) {
@@ -1459,17 +1573,24 @@ class DomainTreeBehavior extends Behavior {
         const button = item.querySelector(
           ":scope > .domain-row .folder-toggle",
         );
-        const childList = item.querySelector(":scope > ul.domain-children");
-        if (!button || !childList) return;
+        if (!button) return;
 
         const nodeId = item.dataset.domainNodeId;
-        const hasSelectedDescendant = childList.querySelector(
+        const hasSelectedDescendant = item.querySelector(
           ".domain-menu-item.selected",
         );
         const expanded = hasSelectedDescendant ? true : state[nodeId] === true;
 
         button.setAttribute("aria-expanded", expanded);
-        childList.style.display = expanded ? "" : "none";
+        
+        if (item.dataset.loaded === "true") {
+          // Already loaded (server-rendered group nodes) — toggle display
+          const childList = item.querySelector(":scope > ul.domain-children");
+          if (childList) childList.style.display = expanded ? "" : "none";
+        } else if (expanded) {
+          // Not loaded yet but should be expanded — fetch from server
+          this.loadChildren(item, nodeId);
+        }
       });
   }
 }
@@ -1565,14 +1686,13 @@ class TagTreeBehavior extends Behavior {
 
     if (html === null) {
       // 2. Cache miss — fetch from server
-      if (button) button.classList.add("loading");
       try {
         const resp = await fetch(`/tag-tree/children?${sp.toString()}`);
         if (!resp.ok) return;
         html = await resp.text();
         try { sessionStorage.setItem(cacheKey, html); } catch {}
       } finally {
-        if (button) button.classList.remove("loading");
+        // no-op
       }
     }
 
@@ -1686,12 +1806,12 @@ function applyScrollPosition(key, selector) {
   const data = readScrollData(key);
   if (!data) return;
 
-  // 精确匹配当前 scrollHeight 的记忆位置
-  // 无匹配则用最近一次
-  const target = data.slots?.[el.scrollHeight] ?? data.s;
-
+  // 双重 rAF：第一帧绘制完成后再读 scrollHeight，此时布局已算完，无强制重排
   requestAnimationFrame(() => {
-    el.scrollTop = Math.min(target, el.scrollHeight - el.clientHeight);
+    requestAnimationFrame(() => {
+      const target = data.slots?.[el.scrollHeight] ?? data.s;
+      el.scrollTop = Math.min(target, el.scrollHeight - el.clientHeight);
+    });
   });
 }
 
@@ -1804,11 +1924,65 @@ let sidebarJustToggled = false;
 
 function saveSidebarState(isOpen) {
   try { localStorage.setItem(getSidebarStateKey(), isOpen ? "1" : "0"); } catch {}
+  // 同步到 Cookie，让服务端判断是否需要懒加载
+  try {
+    const page = getSidebarPage();
+    const isHighlights = page && page.classList.contains("highlights-page");
+    const cookieName = isHighlights ? "ld_sidebar_highlights" : "ld_sidebar_bookmarks";
+    document.cookie = `${cookieName}=${isOpen ? "1" : "0"}; path=/; max-age=31536000; SameSite=Lax`;
+  } catch {}
 }
+
+let sidebarLazyLoaded = false;
+
+async function loadSidebarContent(page) {
+  const sidebar = page.querySelector(".sidebar");
+  if (!sidebar || sidebarLazyLoaded) return;
+
+  const placeholder = sidebar.querySelector("[data-sidebar-lazy-placeholder]");
+  if (!placeholder) return;
+
+  sidebarLazyLoaded = true;
+
+  const ctxEl = document.querySelector("[data-ctx]");
+  const ctx = ctxEl?.dataset.ctx || "active";
+
+  const modules = placeholder.dataset.sidebarLazyModules || "domains,tags,bundles,summary";
+  const fingerprint = placeholder.dataset.domainConfigFingerprint || "";
+  const cacheKey = `sidebar-content:${ctx}:${modules}` + (fingerprint ? `:${fingerprint}` : "");
+
+  let html = null;
+  try { html = sessionStorage.getItem(cacheKey); } catch {}
+
+  if (html === null) {
+    const sp = new URLSearchParams();
+    sp.set("ctx", ctx);
+    sp.set("modules", modules);
+    try {
+      const resp = await fetch(`/sidebar-content?${sp.toString()}`);
+      if (!resp.ok) return;
+      html = await resp.text();
+      try { sessionStorage.setItem(cacheKey, html); } catch {}
+    } catch (e) {
+      console.error("Failed to load sidebar content:", e);
+      return;
+    }
+  }
+
+  if (html && html.trim()) {
+    placeholder.outerHTML = html;
+    document.querySelectorAll("[ld-domain-tree]").forEach(el => {
+      el.behaviors?.forEach(b => b instanceof DomainTreeBehavior && b.restoreTreeState());
+    });
+  }
+}
+
+window.loadSidebarContent = loadSidebarContent;
 
 function openSidebar(page) {
   page.classList.remove("sidebar-closed");
   page.classList.add("sidebar-open");
+  loadSidebarContent(page);
   restoreSidebar();
   if (isMobile()) {
     document.body.classList.add("sidebar-overlay-active");
