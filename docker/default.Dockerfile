@@ -40,7 +40,8 @@ ADD https://astral.sh/uv/0.8.13/install.sh /uv-installer.sh
 RUN chmod +x /uv-installer.sh && /uv-installer.sh
 # install python dependencies
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
+ARG TARGETARCH
+RUN --mount=type=cache,id=uv-${TARGETARCH},target=/root/.cache/uv \
     /root/.local/bin/uv sync --no-dev
 
 
@@ -131,7 +132,8 @@ RUN --mount=type=cache,target=/root/.npm \
 # Install playwright Python package into venv in parallel with linkding-plus apt/npm steps
 FROM build-deps AS playwright-install
 ENV VIRTUAL_ENV=/etc/linkding/.venv
-RUN --mount=type=cache,target=/root/.cache/uv \
+ARG TARGETARCH
+RUN --mount=type=cache,id=uv-${TARGETARCH},target=/root/.cache/uv \
     /root/.local/bin/uv pip install 'playwright>=1.59.0'
 
 
