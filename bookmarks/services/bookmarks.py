@@ -90,10 +90,16 @@ def update_bookmark(bookmark: Bookmark, tag_string, current_user: User):
     # Detect URL change
     original_bookmark = Bookmark.objects.get(id=bookmark.id)
     has_url_changed = original_bookmark.url != bookmark.url
+    has_preview_image_changed = (
+        original_bookmark.preview_image_remote_url != bookmark.preview_image_remote_url
+    )
     # Update tag list
     _update_bookmark_tags(bookmark, tag_string, current_user)
     # Update dates
     bookmark.date_modified = timezone.now()
+    if has_preview_image_changed:
+        # 让新远程图先展示，本地文件由下载任务完成后写回
+        bookmark.preview_image_file = ""
     bookmark.save()
     # Update favicon
     tasks.load_favicon(
@@ -105,7 +111,7 @@ def update_bookmark(bookmark: Bookmark, tag_string, current_user: User):
     tasks.load_preview_image(
         current_user,
         bookmark,
-        force=has_url_changed,
+        force=has_url_changed or has_preview_image_changed,
         priority=tasks.PRIORITY_NEW_BOOKMARK if has_url_changed else None,
     )
 
@@ -292,9 +298,6 @@ def refresh_bookmarks_metadata(bookmark_ids: [int | str], current_user: User):
 
     for bookmark in owned_bookmarks:
         tasks.refresh_metadata(bookmark)
-        tasks.load_preview_image(
-            current_user, bookmark, force=True, priority=tasks.PRIORITY_CORE
-        )
         tasks.refresh_favicon(current_user, bookmark)
 
 

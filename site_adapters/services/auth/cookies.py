@@ -113,6 +113,34 @@ def _cookie_data_to_string(data) -> str | None:
     return None
 
 
+def _filter_cookies_for_domain(cookies: list, domain_key: str) -> list:
+    """Keep only cookies that apply to the adapter's target domain.
+
+    Browser contexts are shared across sites, so a full ``context.cookies()``
+    dump can contain credentials for unrelated domains. Persist only cookies
+    whose domain matches the target host or its wildcard parent.
+    """
+    if not cookies or not domain_key:
+        return cookies or []
+
+    host = domain_key.removeprefix('*.').lower()
+    wildcard = domain_key.startswith('*.')
+    filtered = []
+    for cookie in cookies:
+        if not isinstance(cookie, dict):
+            continue
+        raw_domain = cookie.get('domain')
+        if not isinstance(raw_domain, str):
+            continue
+        cookie_domain = raw_domain.lstrip('.').lower()
+        if wildcard:
+            if cookie_domain == host or cookie_domain.endswith('.' + host):
+                filtered.append(cookie)
+        elif cookie_domain == host or host.endswith('.' + cookie_domain):
+            filtered.append(cookie)
+    return filtered
+
+
 def _save_cookie_data(path: str, data):
     atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False))
 
@@ -559,6 +587,7 @@ def refresh_cookie_declarative(refresh_config: dict, url: str,
             data = _load_cookie_data(tmp_path)
             if data and isinstance(data, list):
                 data = _filter_expired(data)
+                data = _filter_cookies_for_domain(data, domain_key)
             logger.info("Cookie refresh succeeded: %s (%d cookies)", domain_key, len(data) if data else 0)
             return data if data else []
         else:
@@ -622,7 +651,7 @@ def _mark_login_cookie_expired(source: str | None, username: str,
 
 def verify_and_refresh(*, cookie_config: dict, url: str, domain_key: str,
                        verify_context: dict, username: str = '',
-                       scope: str = '') -> str | None:
+                       scope: str = '', force_refresh: bool = False) -> str | None:
     """
     完整的 cookie 验证 + 刷新流程。
 
@@ -631,11 +660,20 @@ def verify_and_refresh(*, cookie_config: dict, url: str, domain_key: str,
     cookie_config: 完整的 cookie 配置块（已合并）
     scope: effective scope ('' for domain-level, section name for section-level)
     返回 cookie 字符串（可能为 None）。
+
+    force_refresh: 即使已有 cookie，也先执行一次浏览器刷新（用于 replace
+    hook 返回空结果、现有 cookie 可能失效的场景）。
     """
     from site_adapters.services.auth.credentials import (
         get_best_cookie, save_user_cookie, save_shared_cookie,
         get_user_cookie, get_shared_cookie,
     )
+    from urllib.parse import urlparse
+
+    # Credentials are stored per concrete host (DNS fallback resolves wildcard
+    # directories), so lookup with the request hostname instead of the
+    # wildcard domain key which would otherwise never match.
+    lookup_hostname = (urlparse(url).hostname or domain_key).lower()
 
     # 判断凭据来源
     cookie_str = None
@@ -643,13 +681,13 @@ def verify_and_refresh(*, cookie_config: dict, url: str, domain_key: str,
 
     if username:
         cookie_str, status = get_user_cookie(
-            username=username, hostname=domain_key, scope=scope)
+            username=username, hostname=lookup_hostname, scope=scope)
         if cookie_str and status == 'ok':
             source = 'user'
 
     if not cookie_str:
         cookie_str, status = get_shared_cookie(
-            hostname=domain_key, scope=scope)
+            hostname=lookup_hostname, scope=scope)
         if cookie_str and status == 'ok':
             source = 'shared'
 
@@ -665,6 +703,22 @@ def verify_and_refresh(*, cookie_config: dict, url: str, domain_key: str,
                              cookie_str=cookie_str_save, scope=scope)
         else:
             save_shared_cookie(domain=domain_key, cookie_str=cookie_str_save, scope=scope)
+
+    # Force refresh: replace hooks may return empty metadata even though a
+    # cookie exists (e.g. the server rejected a just-acquired token).
+    if force_refresh and _should_refresh_cookie(cookie_config):
+        logger.info("Forcing cookie refresh for %s (scope=%s)",
+                    domain_key, scope or 'domain')
+        data = refresh_cookie_declarative(cookie_config['refresh'], url, domain_key)
+        if not data:
+            logger.warning("Forced cookie refresh failed for %s", domain_key)
+            return None
+        try:
+            _save_cookies(data)
+            return _cookie_data_to_string(data)
+        except Exception as e:
+            logger.error("Failed to save forced cookies for %s: %s", domain_key, e)
+            return None
 
     # 没有 cookie 且有 refresh 配置 → 尝试刷新
     if not cookie_str and _should_refresh_cookie(cookie_config):

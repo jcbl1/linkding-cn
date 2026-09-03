@@ -150,7 +150,9 @@ def load_temporary_preview_image(image_url: str) -> str | None:
     return None
 
 
-def load_preview_image(url: str, bookmark: Bookmark | None = None) -> str | None:
+def load_preview_image(
+    url: str, bookmark: Bookmark | None = None, force: bool = False
+) -> str | None:
     _ensure_preview_folder()
 
     image_url = (
@@ -172,19 +174,20 @@ def load_preview_image(url: str, bookmark: Bookmark | None = None) -> str | None
     image_file_name_without_ext = _url_to_filename(image_url)
 
     temporary_file_path = None
-    temp_dir = Path(settings.LD_PREVIEW_FOLDER).joinpath("tmp")
-    if temp_dir.exists():
-        for ext in settings.LD_PREVIEW_ALLOWED_EXTENSIONS:
-            potential_path = _get_temporary_image_path(
-                image_file_name_without_ext + ext
-            )
-            if potential_path.exists():
-                temporary_file_path = potential_path  # 优先使用缓存
-                break
+    if not force:
+        temp_dir = Path(settings.LD_PREVIEW_FOLDER).joinpath("tmp")
+        if temp_dir.exists():
+            for ext in settings.LD_PREVIEW_ALLOWED_EXTENSIONS:
+                potential_path = _get_temporary_image_path(
+                    image_file_name_without_ext + ext
+                )
+                if potential_path.exists():
+                    temporary_file_path = potential_path  # 优先使用缓存
+                    break
     if not temporary_file_path:
         temporary_file_name = _download_and_save_image(
             image_url, referer_url=url
-        )  # 没有缓存再下载
+        )  # 没有缓存或强制刷新时重新下载
         if temporary_file_name:
             temporary_file_path = _get_temporary_image_path(temporary_file_name)
 

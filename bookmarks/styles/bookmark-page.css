@@ -1191,6 +1191,7 @@ ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .toolbar
   width: 100%;
   justify-content: center;
   padding: var(--unit-2) calc(var(--unit-4) + 6px) var(--unit-2) var(--unit-1);
+  position: relative;
 }
 
 .domain-row-icon {
@@ -1198,6 +1199,13 @@ ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .toolbar
   display: block;
   padding-left: 0;
   margin-bottom: 0;
+}
+
+.domain-row-icon .domain-selection-prefix {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .domain-root-icon-summary {

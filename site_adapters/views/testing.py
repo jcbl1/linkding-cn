@@ -179,6 +179,7 @@ def _snapshot_credential_state(config: dict, username: str, hostname: str) -> di
     Only captures credential types that are configured for the domain.
     """
     from site_adapters.services.auth.credentials import (
+        _extract_auth_block,
         get_user_cookie, get_shared_cookie, get_best_cookie,
         get_user_headers, get_shared_headers, get_best_header, get_best_headers,
         get_user_token, get_shared_token, get_best_token,
@@ -186,8 +187,12 @@ def _snapshot_credential_state(config: dict, username: str, hostname: str) -> di
     )
 
     state = {}
-    auth_req = get_auth_requirements_for_domain(hostname)
     scope = config.get('_effective_cookie_scope', '') if config else ''
+    # Use the resolved section auth first so section-level credentials (e.g.
+    # metadata.auth.cookie) are shown instead of only domain-level auth.
+    auth_req = _extract_auth_block((config or {}).get('auth') or {})
+    if not auth_req.get('cookie') and not auth_req.get('headers_active') and not auth_req.get('oauth2'):
+        auth_req = get_auth_requirements_for_domain(hostname)
 
     # Cookie
     if auth_req.get('cookie'):

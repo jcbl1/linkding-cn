@@ -67,7 +67,12 @@ function findChromium() {
 }
 
 /**
- * 根据 LD_BROWSER_ENGINE 启动浏览器（运行时选择，不再 try-catch 回退）
+ * 根据 LD_BROWSER_ENGINE 启动浏览器（运行时选择，不再 try-catch 回退）。
+ *
+ * 返回两种启动方式之一：
+ *   - launch: 启动普通浏览器实例，由调用方 newContext()；
+ *   - persistentContext: 仅当显式声明 user_data_dir 时提供，直接以该
+ *      profile 启动持久化上下文。
  */
 async function getLauncher() {
   const engine = process.env.LD_BROWSER_ENGINE || "cloakbrowser";
@@ -76,7 +81,17 @@ async function getLauncher() {
     const cb = await import("cloakbrowser");
     const opts = {};
     const key = process.env.CLOAKBROWSER_LICENSE_KEY || licenseKey;
-    if (key) opts.license_key = key;
+    if (key) opts.licenseKey = key;
+    if (user_data_dir) {
+      return {
+        persistentContext: (launchOpts) => cb.launchPersistentContext({
+          userDataDir: user_data_dir,
+          headless: true,
+          ...opts,
+          ...launchOpts,
+        }),
+      };
+    }
     return { launch: cb.launch, opts };
   }
 
@@ -89,10 +104,12 @@ async function getLauncher() {
   // is required for sites that detect fresh headless contexts (e.g. Reddit).
   if (user_data_dir) {
     return {
-      launch: null, // signal: caller uses launchPersistentContext directly
-      opts: {},
-      userDataDir: user_data_dir,
-      execPath,
+      persistentContext: (launchOpts) => pw.chromium.launchPersistentContext(user_data_dir, {
+        headless: true,
+        executablePath: execPath,
+        args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+        ...launchOpts,
+      }),
     };
   }
 
@@ -112,14 +129,9 @@ async function getLauncher() {
   const { launch, opts } = launcher;
 
   let browser, context;
-  if (launcher.userDataDir) {
-    // Persistent context: browser and context are the same object
-    const pw = require("playwright-core");
-    context = await pw.chromium.launchPersistentContext(launcher.userDataDir, {
-      headless: true,
-      executablePath: launcher.execPath,
-      args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-    });
+  if (launcher.persistentContext) {
+    // Persistent context: browser and context are the same object.
+    context = await launcher.persistentContext();
   } else {
     browser = await launch(opts);
     context = await browser.newContext();

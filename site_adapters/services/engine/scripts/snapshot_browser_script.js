@@ -390,7 +390,15 @@
 
     // Keep the original container as the layout host and isolate the media
     // list inside an open shadow root so page CSS cannot leak into it.
-    const mountCarousel = (container, figure) => {
+    const mountCarousel = (container, figure, capturedWidth = 0) => {
+      if (capturedWidth) {
+        // Keep shrink-wrapped containers (flex/grid items, inline-grid, etc.)
+        // from collapsing once their original children are removed.
+        setImportantStyles(container, {
+          "box-sizing": "border-box",
+          "min-width": `${capturedWidth}px`,
+        });
+      }
       const root = container.shadowRoot || container;
       while (root.firstChild) root.removeChild(root.firstChild);
       const host = container.ownerDocument.createElement("ld-carousel");
@@ -509,7 +517,7 @@
       items.forEach((item) => {
         figure.appendChild(item);
       });
-      mountCarousel(container, figure);
+      mountCarousel(container, figure, containerRect && containerRect.width);
       return items.length;
     };
 

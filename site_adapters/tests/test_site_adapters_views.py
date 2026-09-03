@@ -315,6 +315,27 @@ class SiteAdaptersViewsTestCase(TestCase):
         self.assertEqual(data["metadata_error"], "Non-retryable metadata response: 403")
         self.assertTrue(data["failed"])
 
+    def test_metadata_credential_sources_includes_section_cookie(self):
+        """Section-level metadata.auth.cookie shows up in credential_sources."""
+        from site_adapters.services.auth.credentials import save_shared_cookie
+        from site_adapters.views.testing import _snapshot_credential_state
+
+        config = {
+            "_domain_key": "*.xiaoheihe.cn",
+            "_effective_cookie_scope": "metadata",
+            "auth": {
+                "cookie": {"type": "auto", "enabled": True},
+            },
+        }
+        save_shared_cookie(domain="*.xiaoheihe.cn", cookie_str="x_xhh_tokenid=abc",
+                           scope="metadata")
+
+        state = _snapshot_credential_state(
+            config, "site-adapter-user", "api.xiaoheihe.cn")
+
+        self.assertIn("cookie", state)
+        self.assertEqual(state["cookie"]["source"], "shared")
+
     def test_credential_test_uses_snapshot_cookie_scripts_and_refreshes_status(self):
         cookie_config = {"type": "anon"}
         meta_config = {"_domain_key": "example.com", "cookie": cookie_config}

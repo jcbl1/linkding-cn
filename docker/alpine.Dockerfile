@@ -133,14 +133,15 @@ RUN apk add --no-cache curl jq unzip && \
 FROM --platform=$BUILDPLATFORM node:22-alpine AS node-runtime
 WORKDIR /tmp/npm-runtime
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm \
+ARG TARGETARCH
+RUN --mount=type=cache,id=npm-${TARGETARCH},target=/root/.npm \
     npm ci --omit=dev && mkdir -p /opt/node-runtime && mv node_modules /opt/node-runtime/
 
 # Install playwright Python package into venv in parallel with linkding-plus apk/npm steps
 FROM build-deps AS playwright-install
-ARG TARGETARCH
 ENV VIRTUAL_ENV=/etc/linkding/.venv
-RUN --mount=type=cache,target=/root/.cache/uv,id=uv-${TARGETARCH} \
+ARG TARGETARCH
+RUN --mount=type=cache,id=uv-${TARGETARCH},target=/root/.cache/uv \
     /root/.local/bin/uv pip install 'playwright>=1.59.0'
 
 

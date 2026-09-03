@@ -471,6 +471,155 @@ def replace(url, config):
             self.assertEqual(metadata.description, "My Description")
             self.assertEqual(metadata.preview_image, "https://example.com/img.png")
 
+    def test_replace_hook_refreshes_auto_cookie_before_running(self):
+        """Replace hooks still acquire an auto cookie before the script runs."""
+        self._write("adapters/defaults/scripts/replace_cookie.py", """
+def replace(url, config):
+    cookie = config.get("user_cookie") or ""
+    return {
+        "title": "Cookie-" + ("yes" if cookie else "no"),
+        "description": None,
+        "image": None,
+        "url": url,
+    }
+""")
+        self._write("adapters/config.jsonc", json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults",
+                          "source": "./defaults/adapters.jsonc"}]
+        }))
+        self._write("adapters/defaults/adapters.jsonc", json.dumps({
+            "domains": {
+                "example.com": {
+                    "metadata": {
+                        "auth": {"cookie": {"type": "auto"}},
+                        "scripts": [
+                            {"path": "replace_cookie.py", "hook": "replace"}
+                        ],
+                    }
+                }
+            }
+        }))
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            from bookmarks.services import website_loader
+
+            first_config = website_loader.get_metadata_config("https://example.com/page")
+            first_config["_user_cookie"] = None
+            refreshed_config = dict(first_config)
+            refreshed_config["_user_cookie"] = "session=abc"
+            with mock.patch.object(
+                website_loader, "get_metadata_config",
+                side_effect=[first_config, refreshed_config],
+            ), mock.patch.object(
+                website_loader, "verify_and_refresh",
+                return_value="session=abc",
+            ) as mock_refresh:
+                metadata = website_loader.load_website_metadata("https://example.com/page")
+
+            mock_refresh.assert_called_once()
+            self.assertEqual(metadata.title, "Cookie-yes")
+
+    def test_metadata_test_panel_refreshes_auto_cookie_before_hooks(self):
+        """Admin test panel path also refreshes auto cookies before hooks."""
+        self._write("adapters/defaults/scripts/replace_cookie.py", """
+def replace(url, config):
+    cookie = config.get("user_cookie") or ""
+    return {
+        "title": "Cookie-" + ("yes" if cookie else "no"),
+        "description": None,
+        "image": None,
+        "url": url,
+    }
+""")
+        self._write("adapters/config.jsonc", json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults",
+                          "source": "./defaults/adapters.jsonc"}]
+        }))
+        self._write("adapters/defaults/adapters.jsonc", json.dumps({
+            "domains": {
+                "example.com": {
+                    "metadata": {
+                        "auth": {"cookie": {"type": "auto"}},
+                        "scripts": [
+                            {"path": "replace_cookie.py", "hook": "replace"}
+                        ],
+                    }
+                }
+            }
+        }))
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            from bookmarks.services import website_loader
+
+            first_config = website_loader.get_metadata_config("https://example.com/page")
+            first_config["_user_cookie"] = None
+            refreshed_config = dict(first_config)
+            refreshed_config["_user_cookie"] = "session=abc"
+            with mock.patch.object(
+                website_loader, "get_metadata_config",
+                side_effect=[first_config, refreshed_config],
+            ), mock.patch.object(
+                website_loader, "verify_and_refresh",
+                return_value="session=abc",
+            ) as mock_refresh:
+                metadata, _, _ = website_loader.load_website_metadata_for_test(
+                    "https://example.com/page"
+                )
+
+            mock_refresh.assert_called_once()
+            self.assertEqual(metadata.title, "Cookie-yes")
+
+    def test_replace_hook_retries_after_forced_cookie_refresh_when_empty(self):
+        """Empty replace metadata triggers one forced refresh and retry."""
+        self._write("adapters/defaults/scripts/replace_cookie.py", """
+def replace(url, config):
+    cookie = config.get("user_cookie") or ""
+    if cookie == "session=new":
+        return {
+            "title": "Cookie-yes",
+            "description": None,
+            "image": None,
+            "url": url,
+        }
+    return {"title": None, "description": None, "image": None, "url": url}
+""")
+        self._write("adapters/config.jsonc", json.dumps({
+            "_adapters": [{"id": "defaults", "name": "defaults",
+                          "source": "./defaults/adapters.jsonc"}]
+        }))
+        self._write("adapters/defaults/adapters.jsonc", json.dumps({
+            "domains": {
+                "example.com": {
+                    "metadata": {
+                        "auth": {"cookie": {"type": "auto"}},
+                        "scripts": [
+                            {"path": "replace_cookie.py", "hook": "replace"}
+                        ],
+                    }
+                }
+            }
+        }))
+
+        with override_settings(LD_SITE_ADAPTERS_DIR=self.base_dir):
+            from bookmarks.services import website_loader
+
+            config = website_loader.get_metadata_config("https://example.com/page")
+            config["_user_cookie"] = "session=old"
+            with mock.patch.object(
+                website_loader, "get_metadata_config",
+                return_value=config,
+            ), mock.patch.object(
+                website_loader, "verify_and_refresh",
+                return_value="session=new",
+            ) as mock_refresh:
+                metadata = website_loader.load_website_metadata(
+                    "https://example.com/page"
+                )
+
+            mock_refresh.assert_called_once()
+            self.assertEqual(mock_refresh.call_args.kwargs["force_refresh"], True)
+            self.assertEqual(metadata.title, "Cookie-yes")
+
     def test_after_hook_modifies_result(self):
         """after hook can modify the metadata result dict."""
         self._write("adapters/defaults/scripts/replace_test.py", """

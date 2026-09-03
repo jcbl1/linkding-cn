@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — 完整字段参考
-//  由 fields.py 自动生成（单一信源）  |  2026-08-25 17:19:34
+//  由 fields.py 自动生成（单一信源）  |  2026-08-31 22:27:32
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -105,7 +105,7 @@
             "wait_cookie": [],                             // 页面加载后等待出现的 Cookie 名称（字符串或数组）。
             "timeout": 30,                                 // 浏览器刷新超时（秒）。默认为 30。
             "interval": 14400,                             // 最小刷新间隔（秒）。默认为 14400（4 小时）。
-            "user_data_dir": "default",                    // Cookie 刷新使用的持久化浏览器用户目录。"default" 使用项目内置 Chromium profile（与 SingleFile 快照共享），可绕过 Reddit 等站点的 bot 检测。也支持绝对路径或相对于 BASE_DIR 的路径。省略则使用临时无状态上下文。
+            "user_data_dir": "default",                    // 仅当显式声明时才使用的持久化浏览器用户目录，Chromium 与 CloakBrowser 都会以该 profile 启动持久化上下文。"default" 使用项目内置 Chromium profile（与 SingleFile 快照共享），可绕过 Reddit 等站点的 bot 检测。也支持绝对路径或相对于 BASE_DIR 的路径。同一 profile 无法被两个浏览器进程同时锁定，因此显式声明会在并发快照/Cookie 刷新冲突时更容易被察觉。省略则使用临时无状态上下文。
           },
         },
 
@@ -163,7 +163,7 @@
         "rewrite_image": ["^http://", "https://"],         // 正则重写。单个规则使用 ["pattern", "replacement"]；多个规则使用 [["pattern", "replacement"], ...]，按顺序应用。应用于提取到的预览图 URL。
         "load_full_page": true,                            // 是否加载完整页面内容。默认为 true。
         "max_content_limit": 5120000,                      // 最大加载字节数。默认为 5120000（5 MB）。
-        "use_browser": {},                                 // 使用浏览器引擎而非 requests 加载页面。启用后启动无头浏览器（Chromium 或 CloakBrowser）加载页面，可处理 JavaScript 渲染的内容。浏览器加载失败时回退到 requests 并记录警告日志。设为 null 可显式禁用/移除从 defaults 继承的浏览器配置。
+        "use_browser": {"wait_until": "domcontentloaded"}, // 使用浏览器引擎而非 requests 加载页面。启用后启动全新的临时无头浏览器上下文（Chromium 或 CloakBrowser），并注入已解析的 Cookie，可处理 JavaScript 渲染的内容。该模式不共享快照/Cookie 刷新使用的持久化 chromium-profile，避免并发元数据请求争用 profile 锁。支持选项：enabled（bool）、wait_until（domcontentloaded | load | networkidle）、wait_elements（字符串或字符串数组）、timeout（正整数或 null）。浏览器加载失败时回退到 requests 并记录警告日志。设为 null 可显式禁用/移除从 defaults 继承的浏览器配置。
         "scripts": [
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},

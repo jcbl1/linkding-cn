@@ -141,9 +141,9 @@ METADATA_FIELDS = {
     },
     "use_browser": {
         "type": "object|null",
-        "en": "Use a browser engine instead of requests for page loading. When enabled, launches a headless browser (Chromium or CloakBrowser) to load the page, which handles JavaScript-rendered content. On browser failure, falls back to requests with a warning log. Set to null to explicitly disable/remove browser config inherited from defaults.",
-        "zh": "使用浏览器引擎而非 requests 加载页面。启用后启动无头浏览器（Chromium 或 CloakBrowser）加载页面，可处理 JavaScript 渲染的内容。浏览器加载失败时回退到 requests 并记录警告日志。设为 null 可显式禁用/移除从 defaults 继承的浏览器配置。",
-        "example": {},
+        "en": "Use a browser engine instead of requests for page loading. When enabled, launches a fresh ephemeral headless browser context (Chromium or CloakBrowser) and injects the resolved cookies, which handles JavaScript-rendered content. It does not share the persistent chromium-profile used by snapshots/cookie refresh, so concurrent metadata requests cannot race on a profile lock. Supported options: enabled (bool), wait_until (domcontentloaded | load | networkidle), wait_elements (string or array of strings), timeout (positive int or null). On browser failure, falls back to requests with a warning log. Set to null to explicitly disable/remove browser config inherited from defaults.",
+        "zh": "使用浏览器引擎而非 requests 加载页面。启用后启动全新的临时无头浏览器上下文（Chromium 或 CloakBrowser），并注入已解析的 Cookie，可处理 JavaScript 渲染的内容。该模式不共享快照/Cookie 刷新使用的持久化 chromium-profile，避免并发元数据请求争用 profile 锁。支持选项：enabled（bool）、wait_until（domcontentloaded | load | networkidle）、wait_elements（字符串或字符串数组）、timeout（正整数或 null）。浏览器加载失败时回退到 requests 并记录警告日志。设为 null 可显式禁用/移除从 defaults 继承的浏览器配置。",
+        "example": {"wait_until": "domcontentloaded"},
     },
     "scripts": {
         "type": "array<{path, hook, timeout?}>",
@@ -445,8 +445,8 @@ AUTH_COOKIE_FIELDS = {
     },
     "refresh.user_data_dir": {
         "type": '"default" | str',
-        "en": 'Persistent browser profile directory for cookie refresh. "default" uses the project Chromium profile (shared with SingleFile snapshots), which helps bypass bot detection on sites like Reddit. Absolute or BASE_DIR-relative paths are also accepted. Omit to use a fresh ephemeral context.',
-        "zh": 'Cookie 刷新使用的持久化浏览器用户目录。"default" 使用项目内置 Chromium profile（与 SingleFile 快照共享），可绕过 Reddit 等站点的 bot 检测。也支持绝对路径或相对于 BASE_DIR 的路径。省略则使用临时无状态上下文。',
+        "en": 'Persistent browser profile directory used only when explicitly declared. Chromium and CloakBrowser both use a persistent context when this is set. "default" uses the project Chromium profile (shared with SingleFile snapshots), which helps bypass bot detection on sites like Reddit. Absolute or BASE_DIR-relative paths are also accepted. Because the same profile cannot be locked by two browser processes at once, explicit declarations make concurrent snapshot/cookie-refresh conflicts easy to notice. Omit to use a fresh ephemeral context.',
+        "zh": '仅当显式声明时才使用的持久化浏览器用户目录，Chromium 与 CloakBrowser 都会以该 profile 启动持久化上下文。"default" 使用项目内置 Chromium profile（与 SingleFile 快照共享），可绕过 Reddit 等站点的 bot 检测。也支持绝对路径或相对于 BASE_DIR 的路径。同一 profile 无法被两个浏览器进程同时锁定，因此显式声明会在并发快照/Cookie 刷新冲突时更容易被察觉。省略则使用临时无状态上下文。',
         "example": "default",
     },
 }

@@ -44,7 +44,7 @@ ENV UV_INDEX_URL=${UV_INDEX_URL}
 # install python dependencies
 COPY pyproject.toml uv.lock ./
 ARG TARGETARCH
-RUN --mount=type=cache,target=/root/.cache/uv,id=uv-${TARGETARCH} \
+RUN --mount=type=cache,id=uv-${TARGETARCH},target=/root/.cache/uv \
     /root/.local/bin/uv sync --no-dev
 
 
@@ -134,9 +134,9 @@ RUN --mount=type=cache,target=/root/.npm \
 
 # Install playwright Python package into venv in parallel with linkding-plus apt/npm steps
 FROM build-deps AS playwright-install
-ARG TARGETARCH
 ENV VIRTUAL_ENV=/etc/linkding/.venv
-RUN --mount=type=cache,target=/root/.cache/uv,id=uv-${TARGETARCH} \
+ARG TARGETARCH
+RUN --mount=type=cache,id=uv-${TARGETARCH},target=/root/.cache/uv \
     /root/.local/bin/uv pip install 'playwright>=1.59.0'
 
 

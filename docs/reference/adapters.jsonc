@@ -1,6 +1,6 @@
 // ==========================================================================
 //  Site Adapters — Complete Field Reference
-//  Auto-generated from fields.py (single source of truth)  |  2026-08-25 17:19:34
+//  Auto-generated from fields.py (single source of truth)  |  2026-08-31 22:27:32
 //
 //  Re-generate: python scripts/generate-adapters-reference.py
 //  Guide:       docs/site-adapters.md
@@ -105,7 +105,7 @@
             "wait_cookie": [],                             // Cookie name(s) to wait for after page load.
             "timeout": 30,                                 // Browser refresh timeout in seconds. Defaults to 30.
             "interval": 14400,                             // Minimum seconds between refresh attempts. Defaults to 14400 (4 hours).
-            "user_data_dir": "default",                    // Persistent browser profile directory for cookie refresh. "default" uses the project Chromium profile (shared with SingleFile snapshots), which helps bypass bot detection on sites like Reddit. Absolute or BASE_DIR-relative paths are also accepted. Omit to use a fresh ephemeral context.
+            "user_data_dir": "default",                    // Persistent browser profile directory used only when explicitly declared. Chromium and CloakBrowser both use a persistent context when this is set. "default" uses the project Chromium profile (shared with SingleFile snapshots), which helps bypass bot detection on sites like Reddit. Absolute or BASE_DIR-relative paths are also accepted. Because the same profile cannot be locked by two browser processes at once, explicit declarations make concurrent snapshot/cookie-refresh conflicts easy to notice. Omit to use a fresh ephemeral context.
           },
         },
 
@@ -163,7 +163,7 @@
         "rewrite_image": ["^http://", "https://"],         // Regex rewrite. Accepts ["pattern", "replacement"] for one rule, or [["pattern", "replacement"], ...] for multiple rules applied in order. Applied to the extracted image URL.
         "load_full_page": true,                            // Whether to load the full page content. Defaults to true.
         "max_content_limit": 5120000,                      // Maximum content size in bytes to load. Defaults to 5120000 (5 MB).
-        "use_browser": {},                                 // Use a browser engine instead of requests for page loading. When enabled, launches a headless browser (Chromium or CloakBrowser) to load the page, which handles JavaScript-rendered content. On browser failure, falls back to requests with a warning log. Set to null to explicitly disable/remove browser config inherited from defaults.
+        "use_browser": {"wait_until": "domcontentloaded"}, // Use a browser engine instead of requests for page loading. When enabled, launches a fresh ephemeral headless browser context (Chromium or CloakBrowser) and injects the resolved cookies, which handles JavaScript-rendered content. It does not share the persistent chromium-profile used by snapshots/cookie refresh, so concurrent metadata requests cannot race on a profile lock. Supported options: enabled (bool), wait_until (domcontentloaded | load | networkidle), wait_elements (string or array of strings), timeout (positive int or null). On browser failure, falls back to requests with a warning log. Set to null to explicitly disable/remove browser config inherited from defaults.
         "scripts": [
 //           {"path": "example_before.py", "hook": "before"},
 //           {"path": "example_replace.py", "hook": "replace"},
