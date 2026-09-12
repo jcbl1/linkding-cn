@@ -32,9 +32,6 @@ RUN --mount=type=cache,id=apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=
         libffi-dev libssl-dev curl git wget unzip gettext
 COPY --from=ghcr.io/astral-sh/uv:0.8.13@sha256:4de5495181a281bc744845b9579acf7b221d6791f99bcc211b9ec13f417c2853 /uv /usr/local/bin/uv
 WORKDIR /etc/linkding
-# PyPI index URL (can be overridden at build time)
-ARG UV_INDEX_URL=https://pypi.org/simple
-ENV UV_INDEX_URL=${UV_INDEX_URL}
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,id=uv-debian-${TARGETARCH},target=/root/.cache/uv \
     uv sync --locked --no-dev --group postgres

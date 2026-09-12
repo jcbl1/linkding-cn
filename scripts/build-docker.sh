@@ -90,8 +90,6 @@ else
     $mirror && args+=(--build-arg APT_MIRROR=mirrors.tuna.tsinghua.edu.cn)
 fi
 
-# PyPI index URL (can be overridden via the environment).
-args+=(--build-arg "UV_INDEX_URL=${UV_INDEX_URL:-https://pypi.org/simple}")
 if (("${#tags[@]}" == 0)); then
     if (("${#repositories[@]}" == 0)); then repositories=(woohoodai/linkding-cn); fi
     for repository in "${repositories[@]}"; do
