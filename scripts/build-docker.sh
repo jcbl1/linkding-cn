@@ -14,12 +14,13 @@ Usage: scripts/build-docker.sh [options] [-- additional buildx options]
   --tag IMAGE            Override generated tags; repeat for multiple tags
   --print-tags           Print tags without building (used to publish tested artifacts)
   --oci PATH             Also export compressed OCI layers for size checks
-  --no-mirror            Use the official Debian/Alpine package repositories
+  --mirror               Use the Tsinghua Debian/Alpine mirrors (default: official)
+  --no-mirror            Use the official Debian/Alpine repositories (default)
 EOF
 }
 base=false
 alpine=false
-mirror=true
+mirror=false
 mode=load
 print_tags=false
 platforms=""
@@ -31,6 +32,7 @@ while (($#)); do
     case "$1" in
         --base) base=true; shift ;;
         --alpine) alpine=true; shift ;;
+        --mirror) mirror=true; shift ;;
         --no-mirror) mirror=false; shift ;;
         --load|--push) mode=${1#--}; shift ;;
         --print-tags) print_tags=true; shift ;;
