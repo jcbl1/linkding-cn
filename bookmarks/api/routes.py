@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from django.conf import settings
-from django.db import IntegrityError, OperationalError, transaction
+from django.db import IntegrityError, OperationalError, models, transaction
 from django.http import Http404, StreamingHttpResponse
 from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext as _
@@ -139,6 +139,13 @@ class BookmarkViewSet(
         bookmarks.unarchive_bookmark(bookmark)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @action(methods=["post"], detail=True, url_path="refresh-preview-image")
+    def refresh_preview_image(self, request: HttpRequest, pk):
+        bookmark = self.get_object()
+        tasks.load_preview_image(request.user, bookmark, force=True)
+        bookmark.refresh_from_db()
+        return Response(self.get_serializer(bookmark).data)
+
     @action(methods=["post"], detail=True)
     def trash(self, request, pk):
         bookmark = self.get_object()
@@ -155,27 +162,40 @@ class BookmarkViewSet(
     def check(self, request: HttpRequest):
         url = request.GET.get("url")
         ignore_cache = request.GET.get("ignore_cache", False) in ["true"]
+        # 客户端 bookmarklet 会把浏览器捕获的元数据随请求发出，由服务器应用
+        # rewrite_* 规则后返回（不重新抓取网页）。
+        from_client = request.GET.get("from_client", False) == "1"
+        client_title = request.GET.get("title")
+        client_description = request.GET.get("description")
 
         bookmark = Bookmark.query_existing(request.user, url).first()
 
         # URL 可能会被自定义脚本改变
         # 当被改变时，进行二次检查
         normalized_url = normalize_url(url)
-        try:
-            metadata = website_loader.load_website_metadata(
-                url, ignore_cache=ignore_cache, username=request.user.username
+        if from_client:
+            metadata = website_loader.rewrite_website_metadata(
+                url,
+                title=client_title,
+                description=client_description,
+                username=request.user.username,
             )
-        except website_loader.RetryableMetadataError as exc:
-            logger.warning(
-                f"Retryable metadata failure during bookmark check. url={url}",
-                exc_info=exc,
-            )
-            metadata = website_loader.WebsiteMetadata(
-                url=url,
-                title=None,
-                description=None,
-                preview_image=None,
-            )
+        else:
+            try:
+                metadata = website_loader.load_website_metadata(
+                    url, ignore_cache=ignore_cache, username=request.user.username
+                )
+            except website_loader.RetryableMetadataError as exc:
+                logger.warning(
+                    f"Retryable metadata failure during bookmark check. url={url}",
+                    exc_info=exc,
+                )
+                metadata = website_loader.WebsiteMetadata(
+                    url=url,
+                    title=None,
+                    description=None,
+                    preview_image=None,
+                )
         if (
             not bookmark
             and metadata.url
@@ -362,7 +382,16 @@ class TagViewSet(
 
     def get_queryset(self):
         user = self.request.user
-        return Tag.objects.all().filter(owner=user)
+        return (
+            Tag.objects.all()
+            .filter(owner=user)
+            .annotate(
+                bookmark_count=models.Count(
+                    "bookmark", filter=models.Q(bookmark__is_deleted=False)
+                )
+            )
+            .order_by("-bookmark_count", "name")
+        )
 
     def get_serializer_context(self):
         return {"user": self.request.user}

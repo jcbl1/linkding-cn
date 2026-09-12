@@ -1,6 +1,6 @@
 [project]
 name = "linkding-cn"
-version = "1.2.0"
+version = "1.2.1"
 description = "Self-hosted bookmark manager - Chinese enhanced fork of linkding"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -29,6 +29,10 @@ dependencies = [
 ]
 
 [dependency-groups]
+browser = [
+    "playwright==1.62.0",
+]
+
 dev = [
     "coverage>=7.13.5",
     "django-debug-toolbar>=6.3.0",

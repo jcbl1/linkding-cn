@@ -246,6 +246,10 @@ class WebsiteLoaderTestCase(TestCase):
             ),
             mock.patch("os.path.exists", return_value=True),
             mock.patch(
+                "bookmarks.services.website_loader.load_page",
+                return_value="<html></html>",
+            ),
+            mock.patch(
                 "bookmarks.services.website_loader.run_script",
                 return_value=None,
             ),
@@ -579,6 +583,29 @@ class WebsiteLoaderTestCase(TestCase):
 
         self.assertEqual(metadata.description, "CSS description")
         self.assertEqual(metadata.preview_image, "https://example.com/cover.jpg")
+
+    def test_rewrite_website_metadata_applies_rewrite_plugins_to_client_metadata(self):
+        config = {
+            "_rewrite_url": "https://final.example.com/item",
+            "rewrite_title": [["^Client title$", "Rewritten title"]],
+            "rewrite_description": [["^Client desc$", "Rewritten desc"]],
+        }
+
+        with mock.patch(
+            "bookmarks.services.website_loader.get_metadata_config",
+            return_value=config,
+        ):
+            metadata = website_loader.rewrite_website_metadata(
+                "https://client.example.com/item",
+                title="Client title",
+                description="Client desc",
+            )
+
+        self.assertEqual(metadata.url, "https://final.example.com/item")
+        self.assertEqual(metadata.title, "Rewritten title")
+        self.assertEqual(metadata.description, "Rewritten desc")
+        # 预览图始终由服务器抓取处理，不参与客户端 rewrite 链路
+        self.assertIsNone(metadata.preview_image)
 
     def test_configured_xml_metadata_uses_selectors(self):
         xml = """<?xml version="1.0" encoding="UTF-8"?>
@@ -1290,6 +1317,78 @@ class MetadataFallbacksTestCase(TestCase):
         ):
             metadata = website_loader.load_website_metadata("https://example.com")
         self.assertEqual(metadata.preview_image, "https://example.com/img.png")
+
+    def test_attr_pseudo_selector_image(self):
+        """::attr() should read an explicit attribute on the selected element."""
+        html = '''
+        <html><body>
+        <img src="blob:https://example.com/placeholder" data-src="https://example.com/lazy.jpg">
+        </body></html>
+        '''
+        config = {
+            "select_image": ["img::attr(data-src)"],
+            "headers": {},
+        }
+        with (
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com/page")
+        self.assertEqual(metadata.preview_image, "https://example.com/lazy.jpg")
+
+    def test_attribute_fallback_skips_blob_src(self):
+        """A blob: src should not block the next select_image selector."""
+        html = '''
+        <html><body>
+        <img src="blob:https://example.com/placeholder" data-src="https://example.com/real.jpg">
+        </body></html>
+        '''
+        config = {
+            "select_image": ["img", "img::attr(data-src)"],
+            "headers": {},
+        }
+        with (
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com/page")
+        self.assertEqual(metadata.preview_image, "https://example.com/real.jpg")
+
+    def test_attribute_fallback_skips_base64_data_src(self):
+        """Any base64 data: image src should not block the next selector."""
+        html = '''
+        <html><body>
+        <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="https://example.com/real.jpg">
+        </body></html>
+        '''
+        config = {
+            "select_image": ["img", "img::attr(data-src)"],
+            "headers": {},
+        }
+        with (
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com/page")
+        self.assertEqual(metadata.preview_image, "https://example.com/real.jpg")
+
+    def test_attr_pseudo_selector_relative_image(self):
+        """::attr() image values should still be resolved to absolute URLs."""
+        html = '''
+        <html><body>
+        <img data-src="/images/lazy.jpg">
+        </body></html>
+        '''
+        config = {
+            "select_image": ["img::attr(data-src)"],
+            "headers": {},
+        }
+        with (
+            mock.patch("bookmarks.services.website_loader.get_metadata_config", return_value=config),
+            mock.patch.object(website_loader, "load_page", return_value=html),
+        ):
+            metadata = website_loader.load_website_metadata("https://example.com/a/page")
+        self.assertEqual(metadata.preview_image, "https://example.com/images/lazy.jpg")
 
 
 class MetadataRetryTestCase(TestCase):

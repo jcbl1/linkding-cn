@@ -15,15 +15,19 @@ echo "$version" > version.txt
 # Update pyproject.toml
 sed -i '' "s/^version = \".*\"/version = \"$version\"/" pyproject.toml
 
-# Update package.json
-sed -i '' "s/\"version\": \".*\"/\"version\": \"$version\"/" package.json
+# Regenerate uv.lock so the project version tracked by uv stays in sync.
+# Without --upgrade, uv keeps the existing dependency resolution intact.
+uv lock
 
-# Update package-lock.json (root entry + top-level packages entry)
-sed -i '' "1,5s/\"version\": \".*\"/\"version\": \"$version\"/" package-lock.json
-sed -i '' "/\"\": {/{n;s/\"version\": \".*\"/\"version\": \"$version\"/;}" package-lock.json
+# Update package.json and project versions in package-lock.json.
+npm version "$version" \
+  --no-git-tag-version \
+  --allow-same-version \
+  --ignore-scripts
 
 echo "Version updated to $version in:"
 echo "  - version.txt"
 echo "  - pyproject.toml"
+echo "  - uv.lock"
 echo "  - package.json"
 echo "  - package-lock.json"
