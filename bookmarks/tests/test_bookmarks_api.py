@@ -1044,6 +1044,27 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
         bookmark = Bookmark.objects.get(id=bookmark.id)
         self.assertFalse(bookmark.is_archived)
 
+    def test_refresh_preview_image_forces_download(self):
+        self.authenticate()
+        bookmark = self.setup_bookmark(
+            url="https://example.com/article",
+        )
+        bookmark.preview_image_remote_url = "https://example.com/preview.png"
+        bookmark.save(update_fields=["preview_image_remote_url"])
+
+        url = reverse(
+            "linkding:bookmark-refresh-preview-image", args=[bookmark.id]
+        )
+        with patch.object(tasks, "load_preview_image") as mock_load_preview_image:
+            response = self.post(
+                url, expected_status_code=status.HTTP_200_OK
+            )
+
+        mock_load_preview_image.assert_called_once_with(
+            self.user, bookmark, force=True
+        )
+        self.assertIsNone(response.data["preview_image_url"])
+
     def test_check_returns_no_bookmark_if_url_is_not_bookmarked(self):
         self.authenticate()
 
@@ -1082,6 +1103,40 @@ class BookmarksApiTestCase(LinkdingApiTestCase, BookmarkFactoryMixin):
             self.assertEqual(expected_metadata.title, metadata["title"])
             self.assertEqual(expected_metadata.description, metadata["description"])
             self.assertEqual(expected_metadata.preview_image, metadata["preview_image"])
+
+    def test_check_with_from_client_rewrites_browser_metadata(self):
+        self.authenticate()
+
+        with patch.object(
+            website_loader, "rewrite_website_metadata"
+        ) as mock_rewrite_metadata:
+            expected_metadata = WebsiteMetadata(
+                "https://example.com",
+                "Rewritten title",
+                "Rewritten description",
+                None,
+            )
+            mock_rewrite_metadata.return_value = expected_metadata
+
+            url = reverse("linkding:bookmark-check")
+            check_url = urllib.parse.quote_plus("https://example.com")
+            response = self.get(
+                f"{url}?url={check_url}&from_client=1"
+                "&title=Client%20title&description=Client%20description",
+                expected_status_code=status.HTTP_200_OK,
+            )
+            metadata = response.data["metadata"]
+
+            self.assertIsNotNone(metadata)
+            self.assertEqual(expected_metadata.url, metadata["url"])
+            self.assertEqual("Rewritten title", metadata["title"])
+            self.assertEqual("Rewritten description", metadata["description"])
+            mock_rewrite_metadata.assert_called_once_with(
+                "https://example.com",
+                title="Client title",
+                description="Client description",
+                username=self.user.username,
+            )
 
     def test_check_returns_bookmark_if_url_is_bookmarked(self):
         self.authenticate()

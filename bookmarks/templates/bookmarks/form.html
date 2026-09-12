@@ -100,10 +100,14 @@
           {% else %}
             <img id="preview-image-img"
                 class="preview-image"
-                src="{{ form.preview_image_remote_url.value }}"
-                referrerpolicy="strict-origin-when-cross-origin"
-                alt="{% translate 'Preview image' %}"
-                onerror="handlePreviewImageError(this)" />
+                {% if form.preview_image_remote_url.value %}
+                  src="{{ form.preview_image_remote_url.value }}"
+                  referrerpolicy="strict-origin-when-cross-origin"
+                  onerror="handlePreviewImageError(this)"
+                {% else %}
+                  hidden
+                {% endif %}
+                alt="{% translate 'Preview image' %}" />
           {% endif %}
         </div>
       </details>
@@ -148,6 +152,11 @@
     // 下载预览图用作临时展示：仅在遇到 CORS/CORP 错误时
     function handlePreviewImageError(img) {
       if (!img.src || img.src.startsWith('data:')) {
+        return;
+      }
+      // 空 src 被浏览器解析为当前页面 URL 时，不做无谓下载
+      if (img.src === window.location.href) {
+        img.style.display = 'none';
         return;
       }
       if (img.dataset.fallbackAttempted) {
@@ -215,8 +224,12 @@
       const bookmarkExistsHint = document.querySelector('.form-input-hint.bookmark-exists');
       const bookmarkExistsDeletedHint = document.querySelector('.form-input-hint.bookmark-exists-deleted');
       const editedBookmarkId = {{ form.instance.id|default:0 }};
-      let isTitleModified = !!titleInput.value;
-      let isDescriptionModified = !!descriptionInput.value;
+      // 客户端 bookmarklet 会带 from_client=1 并预填浏览器端元数据；此时应优先用
+      // 服务器 check 返回的（重写后的）元数据覆盖。未带该标记（server 版 / 手动
+      // 传参）时保持原有行为：预填值视为用户已修改，不覆盖。
+      const fromClientBookmarklet = new URLSearchParams(window.location.search).get('from_client') === '1';
+      let isTitleModified = fromClientBookmarklet ? false : !!titleInput.value;
+      let isDescriptionModified = fromClientBookmarklet ? false : !!descriptionInput.value;
 
       function toggleLoadingIcon(input, show) {
         const icon = input.parentNode.querySelector('i.form-icon');
@@ -245,7 +258,13 @@
         if (previewImageImg) {
           // Reset fallback attempt flag when src changes
           delete previewImageImg.dataset.fallbackAttempted;
-          previewImageImg.src = displaySrc;
+          if (displaySrc) {
+            previewImageImg.src = displaySrc;
+          } else {
+            // 空值时不设置 src，避免空 src 被浏览器解析为当前页面 URL，
+            // 触发 onerror 并对自身页面 URL 发起无谓的下载请求（返回 400）。
+            previewImageImg.removeAttribute('src');
+          }
           previewImageImg.style.display = displaySrc ? '' : 'none';
         }
         if (previewImageDetails) {
@@ -256,7 +275,7 @@
       let checkUrlTimer = null;
       let checkUrlRequestId = 0;
 
-      function checkUrl() {
+      function checkUrl(sendClientMetadata) {
         if (!urlInput.value) {
           return;
         }
@@ -267,8 +286,16 @@
 
         toggleLoadingIcon(urlInput, true);
 
-        const websiteUrl = encodeURIComponent(currentUrl);
-        const requestUrl = `{% url 'linkding:api-root' %}bookmarks/check?url=${websiteUrl}`;
+        // 客户端 bookmarklet 场景：把浏览器捕获的元数据发给服务器，由服务器应用
+        // rewrite_* 规则后返回；未带 from_client（server 版 / 手动打开）时仍由
+        // 服务器抓取网页元数据。
+        const params = new URLSearchParams({ url: currentUrl });
+        if (sendClientMetadata) {
+          params.set('from_client', '1');
+          params.set('title', titleInput.value || '');
+          params.set('description', descriptionInput.value || '');
+        }
+        const requestUrl = `{% url 'linkding:api-root' %}bookmarks/check?${params.toString()}`;
         fetch(requestUrl)
           .then(response => response.json())
           .then(data => {
@@ -320,9 +347,15 @@
               // Update title and description with website metadata, unless they have been modified
               if (!isTitleModified) {
                 updateInput(titleInput, metadata.title);
+                if (fromClientBookmarklet) {
+                  titleInput.classList.add("modified");
+                }
               }
               if (!isDescriptionModified) {
                 updateInput(descriptionInput, metadata.description);
+                if (fromClientBookmarklet) {
+                  descriptionInput.classList.add("modified");
+                }
                 document.querySelector('details.description').open = !!metadata.description;
               }
               // 更新预览图：如果有预览图则设置，如果没有则清空
@@ -402,10 +435,10 @@
 
       // Fetch website metadata when page loads and when URL changes, unless we are editing an existing bookmark
       if (!editedBookmarkId) {
-        checkUrl();
+        checkUrl(fromClientBookmarklet);
         urlInput.addEventListener('input', function() {
           clearTimeout(checkUrlTimer);
-          checkUrlTimer = setTimeout(checkUrl, 300);
+          checkUrlTimer = setTimeout(() => checkUrl(false), 300);
         });
         titleInput.addEventListener('input', () => {
           isTitleModified = true;
@@ -418,13 +451,16 @@
       }
     })();
 
-    // 输入框自动聚焦：新建书签页面聚焦URL输入框，编辑书签页面聚焦标签输入框
+    // 输入框自动聚焦：新建书签页面聚焦URL输入框，URL已预填（如 bookmarklet 打开）时聚焦标签输入框，编辑书签页面聚焦标签输入框
     function focusInput() {
       let input;
-      if (window.location.pathname === '/bookmarks/new') {
-        input = document.querySelector('input[name="url"]');
+      const isNewPage = window.location.pathname === '/bookmarks/new';
+      const urlInput = document.querySelector('input[name="url"]');
+      const tagInput = document.querySelector('input[name="tag_string"]');
+      if (isNewPage && urlInput && !urlInput.value) {
+        input = urlInput;
       } else {
-        input = document.querySelector('input[name="tag_string"]');
+        input = tagInput;
       }
       if (input) {
           setTimeout(function() {

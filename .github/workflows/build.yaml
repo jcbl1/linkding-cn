@@ -1,90 +1,78 @@
-name: build
+name: Publish Docker images
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish after every image passes validation
+        type: boolean
+        default: false
+      baseline:
+        description: Previous full image reference (prefer an immutable digest)
+        type: string
+        default: jcbl1/linkding-cn:latest
+      baseline_base:
+        description: Previous base image, after its first release
+        type: string
+        default: ""
+      baseline_alpine:
+        description: Previous Alpine base image, after its first release
+        type: string
+        default: ""
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  validate:
+    uses: ./.github/workflows/image-validation.yaml
+    with:
+      upload_oci: ${{ inputs.publish }}
+      baseline: ${{ inputs.baseline }}
+      baseline_base: ${{ inputs.baseline_base }}
+      baseline_alpine: ${{ inputs.baseline_alpine }}
+
+  publish:
+    needs: validate
+    if: inputs.publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        variant:
+          - { name: plus, flags: "" }
+          - { name: base, flags: "--base" }
+          - { name: base-alpine, flags: "--base --alpine" }
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Read version from file
-        id: get_version
-        run: echo "VERSION=$(cat version.txt)" >> $GITHUB_ENV
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: image-oci-${{ matrix.variant.name }}-*
+          path: images
+      - name: Install OCI copy tool
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build latest
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./docker/default.Dockerfile
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            jcbl1/linkding-cn:latest
-            jcbl1/linkding-cn:${{ env.VERSION }}
-          target: linkding
-          build-args: |
-            UV_INDEX_URL=https://pypi.org/simple
-          # cache-from: type=gha,scope=latest
-          # cache-to: type=gha,mode=max,scope=latest
-          push: true
-
-      # - name: Build latest-alpine
-      #   uses: docker/build-push-action@v6
-      #   with:
-      #     context: .
-      #     file: ./docker/alpine.Dockerfile
-      #     platforms: linux/amd64,linux/arm64
-      #     tags: |
-      #       jcbl1/linkding-cn:latest-alpine
-      #       jcbl1/linkding-cn:${{ env.VERSION }}-alpine
-      #     target: linkding
-      #     build-args: |
-      #       UV_INDEX_URL=https://pypi.org/simple
-      #     cache-from: type=gha,scope=latest-alpine
-      #     cache-to: type=gha,mode=max,scope=latest-alpine
-      #     push: true
-
-      - name: Build latest-plus
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./docker/default.Dockerfile
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            jcbl1/linkding-cn:latest-plus
-            jcbl1/linkding-cn:${{ env.VERSION }}-plus
-          target: linkding-plus
-          build-args: |
-            UV_INDEX_URL=https://pypi.org/simple
-          # cache-from: type=gha,scope=latest,mode=max
-          # cache-to: type=gha,mode=max,scope=latest-plus
-          push: true
-
-      # - name: Build latest-plus-alpine
-      #   uses: docker/build-push-action@v6
-      #   with:
-      #     context: .
-      #     file: ./docker/alpine.Dockerfile
-      #     platforms: linux/amd64,linux/arm64
-      #     tags: |
-      #       jcbl1/linkding-cn:latest-plus-alpine
-      #       jcbl1/linkding-cn:${{ env.VERSION }}-plus-alpine
-      #     target: linkding-plus
-      #     build-args: |
-      #       UV_INDEX_URL=https://pypi.org/simple
-      #     cache-from: type=gha,scope=latest-alpine,mode=max
-      #     cache-to: type=gha,mode=max,scope=latest-plus-alpine
-      #     push: true
+      - name: Publish the validated variants
+        env:
+          BUILD_FLAGS: ${{ matrix.variant.flags }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          read -r -a flags <<< "$BUILD_FLAGS"
+          for repository in jcbl1/linkding-cn; do
+            mapfile -t tags < <(scripts/build-docker.sh "${flags[@]}" --push --print-tags --repository "$repository")
+            sources=()
+            for arch in amd64 arm64; do
+              reference="${tags[1]}-$arch"
+              skopeo copy --all --preserve-digests --authfile "$HOME/.docker/config.json" \
+                "oci-archive:images/image-oci-${{ matrix.variant.name }}-$arch/linkding.oci.tar" "docker://$reference"
+              sources+=("$reference")
+            done
+            tag_args=()
+            for tag in "${tags[@]}"; do tag_args+=(--tag "$tag"); done
+            docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
+          done
