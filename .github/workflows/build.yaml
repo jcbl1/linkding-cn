@@ -10,7 +10,6 @@ on:
       baseline:
         description: Previous full image reference (prefer an immutable digest)
         type: string
-        default: jcbl1/linkding-cn:latest
       baseline_base:
         description: Previous base image, after its first release
         type: string
