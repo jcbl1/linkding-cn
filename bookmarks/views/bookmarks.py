@@ -1,11 +1,11 @@
 import hashlib
-import mimetypes
 import random as rng
 import time
 import urllib.parse
 from pathlib import Path
 
 from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import QuerySet
 from django.http import (
@@ -17,7 +17,7 @@ from django.http import (
     HttpResponseRedirect,
     JsonResponse,
 )
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
@@ -66,6 +66,10 @@ from bookmarks.services.bookmarks import (
 from bookmarks.type_defs import HttpRequest
 from bookmarks.utils import get_safe_return_url
 from bookmarks.views import access, contexts, partials, turbo
+from bookmarks.views.health_check import (
+    get_active_check_job,
+    start_ids_job,
+)
 
 SIDEBAR_MODULE_TEMPLATES = {
     UserProfile.SIDEBAR_MODULE_SUMMARY: "bookmarks/sidebar/modules/summary/index.html",
@@ -428,6 +432,13 @@ def render_bookmarks_view(request: HttpRequest, template_name, context):
     context["domain_config_fingerprint"] = hashlib.md5(raw.encode()).hexdigest()[:12] if raw else "default"
     
     context["sidebar_modules"] = _build_sidebar_modules(request, context)
+
+    # 活跃健康检查任务（供前端轮询、完成时 toast 通知）
+
+    context["active_check_job"] = None
+    if request.user.is_authenticated:
+        context["active_check_job"] = get_active_check_job(request.user)
+
     profile = request.user_profile
     context.setdefault("show_sidebar", profile.show_sidebar)
     context.setdefault("sticky_side_panel", profile.sticky_side_panel)
@@ -518,7 +529,7 @@ def _get_create_bundle_query_string(search: BookmarkSearch) -> str:
         if "date_filter_end" not in params and search.date_filter_end:
             params["date_filter_end"] = search.date_filter_end.isoformat()
 
-    return urllib.parse.urlencode(params)
+    return urllib.parse.urlencode(params, doseq=True)
 
 
 def search_action(request: HttpRequest):
@@ -590,7 +601,7 @@ def search_action(request: HttpRequest):
     )
     base_url = request.path
     query_params = search.query_params
-    query_string = urllib.parse.urlencode(query_params)
+    query_string = urllib.parse.urlencode(query_params, doseq=True)
     url = base_url if not query_string else base_url + "?" + query_string
     return HttpResponseRedirect(url)
 
@@ -627,6 +638,8 @@ def edit(request: HttpRequest, bookmark_id: int):
 
     if request.method == "POST" and form.is_valid():
         form.save()
+        if form.is_auto_close:
+            return HttpResponseRedirect(reverse("linkding:bookmarks.close"))
         return HttpResponseRedirect(return_url)
 
     status = 422 if request.method == "POST" and not form.is_valid() else 200
@@ -689,35 +702,72 @@ def share(request: HttpRequest, bookmark_id: int | str):
     bookmark.save()
 
 
-# 兜底 favicon.svg 内容的 ETag 组件，模块加载时计算一次
-_FALLBACK_FAVICON_HASH = None
+# 兜底 favicon.svg 的解析结果缓存（路径 + 内容指纹），进程内只解析一次。
+# 注意：uwsgi worker 常驻，部署后替换兜底图需重启 worker 才生效（可接受，见 docstring）。
+_FALLBACK_FAVICON_FILENAME = "favicon.svg"
+_FALLBACK_FAVICON_CACHE: tuple[str | None, str] | None = None
 
 
-def _get_fallback_favicon_hash() -> str:
-    global _FALLBACK_FAVICON_HASH
-    if _FALLBACK_FAVICON_HASH is not None:
-        return _FALLBACK_FAVICON_HASH
-    from django.contrib.staticfiles.finders import find
-    default_path = find('favicon.svg')
-    if default_path:
-        _FALLBACK_FAVICON_HASH = hashlib.md5(Path(default_path).read_bytes()).hexdigest()[:12]
+def _resolve_fallback_favicon() -> tuple[str | None, str]:
+    """解析兜底 favicon 的磁盘路径与内容指纹，模块级缓存。返回 (path, md5[:12])。
+
+    优先用 staticfiles finder（开发环境 bookmarks/static 存在时命中）；
+    生产镜像（docker/default.Dockerfile 在 collectstatic 后执行
+    `rm -rf bookmarks/static`，且 prod settings 的 STATICFILES_DIRS 为空）
+    下 find() 返回 None，此时回退到 STATIC_ROOT / BASE_DIR 下的 favicon.svg，
+    避免兜底图标 404 导致浏览器显示损坏图标。文件都缺失时返回 (None, "no-fallback")。
+    """
+    global _FALLBACK_FAVICON_CACHE
+    if _FALLBACK_FAVICON_CACHE is not None:
+        return _FALLBACK_FAVICON_CACHE
+
+    path = None
+    try:
+        from django.contrib.staticfiles.finders import find
+
+        found = find(_FALLBACK_FAVICON_FILENAME)
+        if found:
+            path = found
+    except Exception:
+        # 任何 finder 异常都降级到文件回退链，不阻断兜底解析
+        pass
+
+    if not path:
+        for candidate in (
+            Path(settings.STATIC_ROOT) / _FALLBACK_FAVICON_FILENAME,
+            Path(settings.BASE_DIR) / "bookmarks" / "static" / _FALLBACK_FAVICON_FILENAME,
+            Path(settings.BASE_DIR) / "static" / _FALLBACK_FAVICON_FILENAME,
+        ):
+            if candidate.is_file():
+                path = str(candidate)
+                break
+
+    if path:
+        digest = hashlib.md5(Path(path).read_bytes()).hexdigest()[:12]
     else:
-        _FALLBACK_FAVICON_HASH = "no-fallback"
-    return _FALLBACK_FAVICON_HASH
+        digest = "no-fallback"
+    _FALLBACK_FAVICON_CACHE = (path, digest)
+    return _FALLBACK_FAVICON_CACHE
 
 
-def _build_etag(domain: str, cache, has_file: bool) -> str:
+def _build_etag(domain: str, cache, has_file: bool, favicon_filepath: Path | None = None) -> str:
     """构建 ETag：domain + cache 状态 + 文件标识（或兜底图标 hash）。
 
-    真实图标：domain + favicon_file → 文件更换时 ETag 自动变化。
+    真实图标：domain + favicon_file + 文件大小/mtime → 文件内容被覆盖时 ETag 也能变化。
     兜底图标：domain + status + fallback_svg_hash → 状态变更或兜底图替换时 ETag 变化。
     """
     if has_file and cache:
         raw = f"{domain}|{cache.status}|{cache.favicon_file}"
+        if favicon_filepath is not None:
+            try:
+                st = favicon_filepath.stat()
+                raw += f"|{st.st_mtime_ns}|{st.st_size}"
+            except OSError:
+                pass  # 文件在 ETag 计算间隙被删除，退化为文件名指纹
     elif cache:
-        raw = f"{domain}|{cache.status}|{_get_fallback_favicon_hash()}"
+        raw = f"{domain}|{cache.status}|{_resolve_fallback_favicon()[1]}"
     else:
-        raw = f"{domain}|none|{_get_fallback_favicon_hash()}"
+        raw = f"{domain}|none|{_resolve_fallback_favicon()[1]}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 
@@ -747,35 +797,55 @@ def favicon_image(request: HttpRequest, domain: str):
         elif cache.status == FaviconCache.STATUS_PENDING:
             # 已有任务在队列中或正在执行，无需重复入队
             pass
-        elif cache.status == FaviconCache.STATUS_SUCCESS and cache.favicon_file:
-            # DB 说成功但磁盘文件丢失（不一致），重新获取
-            filepath = favicon_loader.get_favicon_path(cache.favicon_file)
-            if not filepath.is_file():
-                should_fetch = True
-        elif cache.status == FaviconCache.STATUS_FAILED or cache.status == FaviconCache.STATUS_MISSING:
-            if cache.next_retry_at and cache.next_retry_at <= timezone.now():
-                should_fetch = True
+        elif cache.status == FaviconCache.STATUS_SUCCESS and (
+            not cache.favicon_file
+            or not favicon_loader.get_favicon_path(cache.favicon_file).is_file()
+        ):
+            # DB 说成功但磁盘文件缺失（favicon_file 为空或文件丢失），重新获取
+            should_fetch = True
+        elif (
+            cache.status == FaviconCache.STATUS_FAILED
+            or cache.status == FaviconCache.STATUS_MISSING
+        ) and cache.next_retry_at and cache.next_retry_at <= timezone.now():
+            should_fetch = True
     if should_fetch:
+        from bookmarks.services.tasks import (
+            _enqueue_favicon_task,
+            _set_favicon_pending_for_enqueue,
+        )
+
         if not cache:
-            # 先创建 PENDING 记录，防止后续重复请求入队重复任务
-            FaviconCache.objects.create(domain=domain, status=FaviconCache.STATUS_PENDING)
-        from bookmarks.services.tasks import _enqueue_favicon_task
+            # 先创建 PENDING 记录作为跨进程入队去重标记。
+            # 复用任务系统的标准入口（内置 IntegrityError 竞态处理），避免两套逻辑漂移
+            _set_favicon_pending_for_enqueue(domain)
         _enqueue_favicon_task(request.user.id, domain)
 
     # 判断是否有真实图标文件可用
     real_file_available = False
     favicon_filepath = None
+    favicon_content_type = None
     if cache and cache.favicon_file:
         favicon_filepath = favicon_loader.get_favicon_path(cache.favicon_file)
-        real_file_available = favicon_filepath.is_file()
+        # 两项校验缺一不可：
+        # 1) 路径穿越防护——favicon_file 来自 DB，若含 ../ 或绝对路径可指向
+        #    LD_FAVICON_FOLDER 之外的文件，resolve 后必须仍位于目录内；
+        # 2) 内容必须是真实图片——损坏/非图片文件会被浏览器渲染成损坏图标
+        #    （_detect_image_type_from_file 内部已处理文件不存在，OSError→None）。
+        favicon_folder = Path(settings.LD_FAVICON_FOLDER).resolve()
+        favicon_content_type = (
+            favicon_loader._detect_image_type_from_file(favicon_filepath)
+            if favicon_filepath.resolve().is_relative_to(favicon_folder)
+            else None
+        )
+        real_file_available = favicon_content_type is not None
 
-    etag = _build_etag(domain, cache, real_file_available)
+    etag = _build_etag(domain, cache, real_file_available, favicon_filepath)
 
     # 处理条件请求：ETag 匹配则返回 304
     if_none_match = request.headers.get("If-None-Match", "")
-    if if_none_match and if_none_match == etag:
+    if if_none_match and if_none_match.strip('"') == etag:
         resp = HttpResponse(status=304)
-        resp["ETag"] = etag
+        resp["ETag"] = f'"{etag}"'
         if real_file_available:
             resp["Cache-Control"] = "public, max-age=86400"
         else:
@@ -784,21 +854,21 @@ def favicon_image(request: HttpRequest, domain: str):
 
     # 有缓存文件且磁盘存在 → 返回图片（无论状态，过期图标仍可使用）
     if real_file_available:
-        content_type = mimetypes.guess_type(str(favicon_filepath))[0] or 'image/png'
+        # 类型直接用上面已检测的结果（避免 guess_type 对无扩展名文件误判为 image/png）
+        content_type = favicon_content_type or "image/png"
         resp = FileResponse(favicon_filepath.open('rb'), content_type=content_type)
         resp["Cache-Control"] = "public, max-age=86400"
-        resp["ETag"] = etag
+        resp["ETag"] = f'"{etag}"'
         return resp
 
-    # 返回默认 favicon.svg
-    from django.contrib.staticfiles.finders import find
-    default_path = find('favicon.svg')
+    # 返回默认 favicon.svg（find() 失败时回退 STATIC_ROOT 等位置，见 _resolve_fallback_favicon）
+    default_path = _resolve_fallback_favicon()[0]
     if default_path:
         resp = FileResponse(Path(default_path).open('rb'), content_type='image/svg+xml')
     else:
         resp = HttpResponseNotFound()
     resp["Cache-Control"] = "no-cache"
-    resp["ETag"] = etag
+    resp["ETag"] = f'"{etag}"'
     return resp
 
 
@@ -993,10 +1063,24 @@ def handle_action(request: HttpRequest, query: QuerySet[Bookmark] = None):
         # Determine set of bookmarks
         if request.POST.get("bulk_select_across") == "on":
             # Query full list of bookmarks across all pages
-            bookmark_ids = query.only("id").values_list("id", flat=True)
+            bookmark_ids = list(query.only("id").values_list("id", flat=True))
+            # Exclude bookmarks that were explicitly unchecked while selecting all
+            exclude_ids = {
+                int(x)
+                for x in request.POST.getlist("bulk_exclude_id")
+                if x.lstrip("-").isdigit()
+            }
+            if exclude_ids:
+                bookmark_ids = [i for i in bookmark_ids if i not in exclude_ids]
         else:
             # Use only selected bookmarks
             bookmark_ids = request.POST.getlist("bookmark_id")
+
+        # Guard against duplicate ids: the bulk edit form submits checkboxes
+        # together with injected hidden fields for selections on other pages,
+        # so the same id can arrive twice. Deduplicate to keep toast counts
+        # and job totals accurate.
+        bookmark_ids = list(dict.fromkeys(bookmark_ids))
 
         if bulk_action == "bulk_archive":
             return archive_bookmarks(bookmark_ids, request.user)
@@ -1026,6 +1110,21 @@ def handle_action(request: HttpRequest, query: QuerySet[Bookmark] = None):
             return trash_bookmarks(bookmark_ids, request.user)
         if bulk_action == "bulk_restore":
             return restore_bookmarks(bookmark_ids, request.user)
+        if bulk_action == "bulk_check_health":
+
+            job, error = start_ids_job(request.user, list(bookmark_ids))
+            if error:
+                messages.error(request, error)
+            else:
+                messages.success(
+                    request,
+                    _("Health check started for %(count)s bookmarks.")
+                    % {"count": len(list(bookmark_ids))},
+                )
+            return redirect(
+                request.META.get("HTTP_REFERER")
+                or reverse("linkding:bookmarks.index")
+            )
         if bulk_action == "bulk_snapshot":
             return create_html_snapshots(bookmark_ids, request.user)
         if bulk_action == "bulk_remove_snapshot":

@@ -1,6 +1,6 @@
 {
   "name": "linkding-cn",
-  "version": "1.2.1",
+  "version": "1.3.1",
   "description": "Self-hosted bookmark manager - Chinese enhanced fork of linkding",
   "main": "index.js",
   "scripts": {
@@ -13,6 +13,7 @@
     "build-theme-wireframe": "POSTCSS_DISABLE_CACHE=true postcss -o bookmarks/static/theme-wireframe.css bookmarks/styles/theme-wireframe.css",
     "build-defuddle": "node esbuild.config.mjs",
     "dev": "rollup -c -w",
+    "test:js": "node --test bookmarks/frontend/utils/*.test.mjs",
     "build-site-adapters-css": "POSTCSS_DISABLE_CACHE=true postcss -o site_adapters/static/site-adapters.css site_adapters/styles/site-adapters.css",
     "dev-site-adapters-css": "POSTCSS_DISABLE_CACHE=true postcss -o site_adapters/static/site-adapters.css site_adapters/styles/site-adapters.css -w"
   },
@@ -30,7 +31,7 @@
   "dependencies": {
     "linkedom": "^0.18.13",
     "playwright-core": "^1.62.1",
-    "single-file-cli": "2.1.3"
+    "single-file-cli": "2.16.0"
   },
   "devDependencies": {
     "@floating-ui/dom": "^1.7.6",

@@ -2,6 +2,7 @@ import { setAfterPageLoadFocusTarget } from "../utils/focus.js";
 import { handleBookmarkAction } from "../utils/bookmark-action.js";
 import { getCSRFToken } from "../utils/csrf.js";
 import { Modal } from "./modal.js";
+import { attachHealthPopover } from "./health.js";
 
 function gettext(s) {
   return window.gettext ? window.gettext(s) : s;
@@ -121,6 +122,17 @@ class DetailsModal extends Modal {
     this.querySelector("#refresh-metadata-btn")?.addEventListener("click", () =>
       this._refreshMetadata(),
     );
+
+    // ---- 健康检查（单条） ----
+    const healthBtn = this.querySelector("[data-health-check]");
+    if (healthBtn) {
+      healthBtn.addEventListener("click", () => this._runHealthCheck(healthBtn));
+    }
+    // 状态 chip 的 dot+状态 区域：悬浮/点击显示健康详情弹层
+    const healthChipStatus = this.querySelector("[data-health-chip-status]");
+    if (healthChipStatus) {
+      this._healthPopoverCleanup = attachHealthPopover(healthChipStatus);
+    }
 
     // ---- 文件操作 ----
     this.addEventListener("click", (e) => {
@@ -534,6 +546,12 @@ class DetailsModal extends Modal {
     }
   }
 
+  // 当前弹窗预览图是否加载失败（文件缺失/404）。complete=true 且 naturalWidth=0 表示加载出错。
+  _isModalPreviewBroken() {
+    const img = this.querySelector(".info-preview-image");
+    return !!img && !!img.getAttribute("src") && img.complete && img.naturalWidth === 0;
+  }
+
   _setModalPreviewImage(src) {
     let img = this.querySelector(".info-preview-image");
     if (!img) {
@@ -569,6 +587,60 @@ class DetailsModal extends Modal {
   }
 
   // ---- 重新抓取元数据（条件性更新，与编辑页面逻辑一致） ----
+
+  async _runHealthCheck(btn) {
+    const url = btn.dataset.checkUrl;
+    if (!url) return;
+    const recheckLabel = btn.dataset.labelRecheck || "Recheck";
+    const checkLabel = btn.dataset.labelCheck || "Check now";
+    btn.disabled = true;
+    try {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "X-CSRFToken": getCSRFToken() },
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) {
+        console.error("Health check failed:", data?.error || r.status);
+        return;
+      }
+      const status = data.status || "unknown";
+      const statusDisplay = data.status_display || status;
+      // 状态指示（小圆点 + 文字）
+      const dot = this.querySelector("[data-health-dot]");
+      const text = this.querySelector("[data-health-text]");
+      if (dot) dot.className = `health-dot health-dot--${status}`;
+      if (text) text.textContent = statusDisplay;
+      // 详情弹层内容（行元素在模板中始终渲染，用 hidden 控制显隐：
+      // 即使书签从未检查过，重检后也能就地补全 HTTP/原因/检查时间，无需整页刷新）
+      const popoverStatus = this.querySelector("[data-popover-status]");
+      const popoverHttp = this.querySelector("[data-popover-http]");
+      const popoverReason = this.querySelector("[data-popover-reason]");
+      const popoverChecked = this.querySelector("[data-popover-checked]");
+      if (popoverStatus) popoverStatus.textContent = statusDisplay;
+      if (popoverHttp) {
+        popoverHttp.hidden = !data.http_status;
+        popoverHttp.textContent = data.http_status ? `HTTP ${data.http_status}` : "";
+      }
+      if (popoverReason) {
+        popoverReason.hidden = !data.reason;
+        popoverReason.textContent = data.reason || "";
+      }
+      if (popoverChecked) {
+        popoverChecked.hidden = !data.checked_at_display;
+        popoverChecked.textContent = data.checked_at_display
+          ? `${gettext("Checked at")} ${data.checked_at_display}`
+          : "";
+      }
+      // 按钮：仅图标，更新 title
+      btn.title = data.checked_at ? recheckLabel : checkLabel;
+    } catch (err) {
+      console.error("Health check failed:", err);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
 
   async _refreshMetadata() {
     const urlInput = this.querySelector(".detail-url-input");
@@ -608,12 +680,16 @@ class DetailsModal extends Modal {
       }
 
       // (3) 预览图：获取到的预览图非空，且与现有 remote_url 不同 → 替换
-      if (
-        metadata.preview_image &&
-        metadata.preview_image !== (this._data.preview_image_remote_url || "")
-      ) {
-        pending.preview_image_remote_url = metadata.preview_image;
-        this._setModalPreviewImage(metadata.preview_image);
+      if (metadata.preview_image) {
+        const currentRemote = this._data.preview_image_remote_url || "";
+        if (metadata.preview_image !== currentRemote) {
+          pending.preview_image_remote_url = metadata.preview_image;
+          this._setModalPreviewImage(metadata.preview_image);
+        } else if (this._isModalPreviewBroken()) {
+          // 远程图未变化，但当前展示的本地预览图已损坏（文件缺失/404）。
+          // 先展示远程图；保存时 _refreshShouldRetryPreview 会触发强制重下本地文件。
+          this._setModalPreviewImage(metadata.preview_image);
+        }
       }
 
       this._pendingMetadata = Object.keys(pending).length ? pending : null;
@@ -789,6 +865,10 @@ class DetailsModal extends Modal {
     if (this._onMorph) {
       document.removeEventListener("turbo:before-morph-element", this._onMorph);
       this._onMorph = null;
+    }
+    if (this._healthPopoverCleanup) {
+      this._healthPopoverCleanup.destroy();
+      this._healthPopoverCleanup = null;
     }
   }
 

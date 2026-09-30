@@ -113,7 +113,8 @@ ENV NODE_PATH=/opt/node-runtime/node_modules
 ENV PLAYWRIGHT_NODEJS_PATH=/usr/local/bin/node
 ENV LD_ENABLE_SNAPSHOTS=False
 ENV UWSGI_MAX_FD=4096
-RUN mkdir -p data /usr/share/linkding && chmod g+w . && chmod +x bootstrap.sh && \
+RUN mkdir -p data logs /usr/share/linkding && chmod g+w . && \
+    chown www-data:www-data logs && chmod +x bootstrap.sh && \
     dpkg-query -W -f='${binary:Package}\t${Version}\n' > /usr/share/linkding/os-packages.tsv
 EXPOSE 9090
 HEALTHCHECK --interval=30s --retries=3 --timeout=3s \
@@ -123,7 +124,7 @@ CMD ["./bootstrap.sh"]
 FROM linkding AS linkding-plus
 LABEL io.github.woohoodai.linkding.variant="plus"
 # Upgrade this pin deliberately, together with browser smoke tests.
-ARG CHROMIUM_VERSION=152.0.7977.82-1~deb12u1
+ARG CHROMIUM_VERSION=154.0.8037.57-1~deb12u1
 RUN --mount=type=cache,id=apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
