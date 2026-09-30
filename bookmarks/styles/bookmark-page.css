@@ -379,13 +379,9 @@ li[ld-bookmark-item] {
   }
 
   & .title img {
-    /* position: absolute; */
+    display: block;
     width: 16px;
     height: 16px;
-    /* left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    pointer-events: none; */
   }
 
   & .title img + a {
@@ -448,23 +444,12 @@ li[ld-bookmark-item] {
     position: relative;
   }
 
-  /* 同行模式：点击描述文字展开，标签不动 */
-  & .description .description-container.expanded {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-  }
-
-  & .description .description-text.expanded {
-    cursor: pointer;
-  }
-
-  /* 分行模式：点击容器展开，限制最大高度 + 滚动条 */
+  /* 展开态描述容器公共样式：限制最大高度 + 滚动条（同行/分行一致） */
+  & .description .description-container.expanded,
   & .description.expanded .description-container {
-    white-space: normal;
-    -webkit-line-clamp: unset;
     max-height: calc(15 * 1.1rem);
     overflow-y: auto;
+    overflow-x: hidden;
     /* 滚动条样式 */
     scrollbar-width: thin;
     scrollbar-gutter: stable;
@@ -481,6 +466,42 @@ li[ld-bookmark-item] {
       background: var(--secondary-border-color);
     }
   }
+
+  /* 同行模式展开：容器 normal（模板空白折叠为空格，不产生额外换行），
+     隐藏分隔符 */
+  & .description .description-container.expanded {
+    white-space: normal;
+    text-overflow: clip;
+  }
+
+  & .description .description-container.expanded .description-separator {
+    display: none;
+  }
+
+  /* 可点击展开提示：由 JS 添加 is-expandable 类管理，替代内联 cursor */
+  & .description .description-text.is-expandable,
+  & .description .description-container.is-expandable {
+    cursor: pointer;
+  }
+
+  /* 展开态描述文本：保留原始换行；长无空格文本（URL）可任意断行 */
+  & .description .description-text.expanded,
+  & .description.expanded .description-text {
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+
+  /* 同行模式展开：描述另起一行显示 */
+  & .description .description-text.expanded {
+    display: block;
+  }
+
+  /* 分行模式展开：容器保持 normal，解除行数限制 */
+  & .description.expanded .description-container {
+    white-space: normal;
+    -webkit-line-clamp: unset;
+  }
+
 
   & .description.is-editing-description .description-container {
     display: block;
@@ -722,42 +743,156 @@ button.btn-link.quick-tag-btn.active:focus {
    .toolbar-visible toggled by JS on tap. Targets ALL direct children
    of .actions so the feature works regardless of toolbar module order. */
 
-ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item] .actions > *:not(.toolbar-date) {
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item] .actions > *:not(.toolbar-date):not(.health-status) {
   max-height: 0;
   overflow: hidden;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease;
+  /* 隐藏时塌缩宽度，使常显的日期与健康指示紧贴排列 */
+  flex: 0 0 0;
+  min-width: 0;
 }
 
 /* Hover mode: pin date to the left regardless of toolbar module order */
 ul.bookmark-list.toolbar-auto-hide .toolbar-date {
   order: -1;
 }
+/* 隐藏态去除列间隙（隐藏元素不占位），日期用 margin 保持与健康指示的间距 */
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item] .actions {
+  column-gap: 0;
+}
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item] .actions > .toolbar-date {
+  margin-right: var(--unit-2);
+}
+/* 隐藏态：健康状态只显示为一个带颜色的小圆点（无外圈、无文字、无波形图标） */
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item] .actions > .health-status .health-text,
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item] .actions > .health-status .health-ring,
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item] .actions > .health-status .health-popover {
+  display: none;
+}
+/* 显式点击/键盘打开健康 popover：与工具栏展开状态解耦（触屏点击也可弹出） */
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item] .actions > .health-status.health-popover-open .health-popover {
+  display: flex;
+}
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item] .actions > .health-status .health-dot,
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item] .actions > .health-status.health-icon-mode .health-dot {
+  position: static;
+  /* 关键：清除 icon 模式 health.css 的 translate(-50%,-50%)——static 下
+     left/top 失效但 transform 仍生效，会把圆点平移出居中位置 */
+  transform: none;
+  width: 8px;
+  height: 8px;
+  border: none;
+  background: var(--health-color);
+  box-shadow: none;
+}
+/* 默认折叠态：仅 icon 模式下隐藏 Unknown 空心圆；文字模式保留空心圆+文字 */
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item] .actions > .health-status.health-icon-mode .health-dot--unknown {
+  display: none;
+}
 /* Desktop: reveal on hover */
 @media (hover: hover) and (pointer: fine) {
-  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .actions > *:not(.toolbar-date) {
+  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .actions > *:not(.toolbar-date):not(.health-status) {
     max-height: none;
     overflow: visible;
     opacity: 1;
     pointer-events: auto;
+    flex: 0 1 auto;
+    min-width: 0;
   }
 
-  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .toolbar-date {
+  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .actions {
+    column-gap: var(--unit-2);
+  }
+
+  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .actions > .toolbar-date {
+    margin-right: 0;
     order: unset;
+  }
+
+  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .actions > .health-status .health-text {
+    display: inline-flex;
+  }
+  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .actions > .health-status .health-ring {
+    display: block;
+  }
+  /* 悬浮工具栏不自动打开健康 popover（仅显式点击/键盘打开） */
+  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .actions > .health-status .health-dot,
+  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .actions > .health-status.health-icon-mode .health-dot {
+    width: 8px;
+    height: 8px;
+    border: none;
+    background: var(--health-color);
+    box-shadow: none;
+  }
+  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .actions > .health-status.health-icon-mode .health-dot {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 5px;
+    height: 5px;
+  }
+  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .actions > .health-status:not(.health-icon-mode) .health-dot {
+    position: static;
+  }
+  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .actions > .health-status .health-dot--unknown,
+  ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item]:hover .actions > .health-status.health-icon-mode .health-dot--unknown {
+    background: transparent;
+    border: 1.5px solid var(--body-border-color, #8b93a1);
   }
 }
 
 /* Mobile + desktop: reveal when JS toggles .toolbar-visible */
-ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .actions > *:not(.toolbar-date) {
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .actions > *:not(.toolbar-date):not(.health-status) {
   max-height: none;
   overflow: visible;
   opacity: 1;
   pointer-events: auto;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
-ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .toolbar-date {
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .actions {
+  column-gap: var(--unit-2);
+}
+
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .actions > .toolbar-date {
+  margin-right: 0;
   order: unset;
+}
+
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .actions > .health-status .health-text {
+  display: inline-flex;
+}
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .actions > .health-status .health-ring {
+  display: block;
+}
+/* 工具栏展开不自动打开健康 popover（仅显式点击/键盘打开） */
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .actions > .health-status .health-dot,
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .actions > .health-status.health-icon-mode .health-dot {
+  width: 8px;
+  height: 8px;
+  border: none;
+  background: var(--health-color);
+  box-shadow: none;
+}
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .actions > .health-status.health-icon-mode .health-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 5px;
+  height: 5px;
+}
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .actions > .health-status:not(.health-icon-mode) .health-dot {
+  position: static;
+}
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .actions > .health-status .health-dot--unknown,
+ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .actions > .health-status.health-icon-mode .health-dot--unknown {
+  background: transparent;
+  border: 1.5px solid var(--body-border-color, #8b93a1);
 }
 
 .bookmark-pagination {
@@ -812,6 +947,10 @@ ul.bookmark-list.toolbar-auto-hide li[ld-bookmark-item].toolbar-visible .toolbar
   .bundle-menu-item.selected a {
     background: var(--primary-color);
     color: var(--contrast-text-color);
+
+    .count {
+      color: rgba(255, 255, 255, 0.55);
+    }
   }
 
   .bundle-menu-item:not([data-folder="true"]) {
@@ -1385,7 +1524,8 @@ ul.bookmark-list {
 
   /* 批量编辑条激活状态 */
   /* 消除批量工具条和 h1 之间多余的 section-header 间距 */
-  &.active .section-header {
+  /* 仅作用于主内容区标题，避免误伤侧边栏模块标题的下边框 */
+  &.active > main > .section-header {
     border-bottom-color: transparent;
     padding-bottom: 0;
     margin-bottom: 0;
@@ -2121,10 +2261,10 @@ ul.bookmark-list {
 
 
 .sidebar {
-  /* 模块菜单按钮去掉右侧 padding 和 border，与关闭按钮对齐 */
   & .section-title .dropdown-toggle {
-    padding-right: 0;
-    border-right: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
     &:hover {
       background: transparent;
     }

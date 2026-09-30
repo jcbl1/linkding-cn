@@ -2,6 +2,7 @@ import contextlib
 import datetime
 import random
 import time
+from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -18,6 +19,7 @@ from django.db.models import (
     When,
 )
 from django.db.models.functions import Collate, Lower
+from django.utils import timezone
 
 from bookmarks.models import (
     Annotation,
@@ -593,6 +595,37 @@ def _apply_filters(
             annotation_qs = annotation_qs.filter(date_created__lt=end)
         query_set = query_set.filter(Exists(annotation_qs))
 
+    # 按健康检查日期筛选（checked_at 存储在 health_details JSON 中）
+    if search.date_filter_by == "health":
+        start = _parse_date(search.date_filter_start)
+        end = _parse_date(search.date_filter_end)
+        if start:
+            query_set = query_set.filter(
+                health_details__checked_at__gte=start.isoformat()
+            )
+        if end:
+            if isinstance(end, datetime.date) and not isinstance(
+                end, datetime.datetime
+            ):
+                end = end + datetime.timedelta(days=1)
+            query_set = query_set.filter(
+                health_details__checked_at__lt=end.isoformat()
+            )
+
+    # 健康状态多选（勾选多个 = OR；unknown 派生自 health_status IS NULL）
+    if search.health_status:
+        status_q = Q()
+        for status in search.health_status:
+            if status == "all":
+                # "all" 是筛选面板的全选控件，不作为过滤条件
+                continue
+            if status == "unknown":
+                status_q |= Q(health_status__isnull=True)
+            else:
+                status_q |= Q(health_status=status)
+        if status_q:
+            query_set = query_set.filter(status_q)
+
     return query_set
 
 
@@ -1146,17 +1179,18 @@ def _parse_tokens(tokens):
     }
 
 
+# 旧引擎（legacy search）支持的字段前缀，与 _parse_tokens 的 field_terms 键保持一致
+_FIELD_PREFIXES = ("title:", "desc:", "notes:", "url:", "domain:")
+
+
 def _is_field_term(token):
     """判断是否为field_term(如: title:(content))."""
-    field_prefixes = ("title:", "desc:", "notes:", "url:", "domain:")
-    return any(token.startswith(prefix) for prefix in field_prefixes)
+    return any(token.startswith(prefix) for prefix in _FIELD_PREFIXES)
 
 
 def _extract_field_content(token):
     """提取字段名称和内容，支持 field:(content) 和 field:keyword / field:"phrase" 两种语法。"""
-    field_prefixes = ("title:", "desc:", "notes:", "url:", "domain:")
-
-    for prefix in field_prefixes:
+    for prefix in _FIELD_PREFIXES:
         if token.startswith(prefix):
             field_name = prefix[:-1]  # Remove trailing ':'
             content_part = token[len(prefix) :]

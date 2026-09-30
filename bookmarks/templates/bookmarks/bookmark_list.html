@@ -1,5 +1,4 @@
 {% load i18n static shared pagination %}
-
 {% if bookmark_list.is_empty %}
   {% include 'bookmarks/empty_bookmarks.html' %}
 {% else %}
@@ -302,6 +301,47 @@
                             {% else %}{% translate "Unread" context "bookmark_status" %}{% endif %}
                           </button>
                         {% endif %}
+                      {% elif status.key == "health" and bookmark_list.status_display_mode != "icon" or status.key == "health" and bookmark_item.health_status %}
+                        <ld-health-indicator class="health-status{% if bookmark_list.status_display_mode == 'icon' %} health-icon-mode{% endif %}" tabindex="0"
+                              title="{% translate 'Click to view health status' %}"
+                              aria-haspopup="true" aria-expanded="false">
+                          {% if bookmark_list.status_display_mode == "icon" %}
+                            <span class="health-icon">
+                              <svg class="health-ring" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <circle cx="12" cy="12" r="9"/>
+                              </svg>
+                              <span class="health-dot health-dot--{{ bookmark_item.health_display_status|default:'unknown' }}"></span>
+                            </span>
+                          {% else %}
+                            <span class="health-dot health-dot--{{ bookmark_item.health_display_status|default:'unknown' }}"></span>
+                            <span class="health-text">{{ bookmark_item.health_display_status_display|default:"Unknown" }}</span>
+                          {% endif %}
+                          <span class="health-popover" role="tooltip">
+                            <span class="health-popover-status-row">
+                              <span class="health-popover-status">{{ bookmark_item.health_display_status_display|default:"Unknown" }}</span>
+                              <button type="button" class="health-popover-refresh" data-health-check
+                                      data-check-url="{% url 'linkding:health.check' bookmark_item.id %}"
+                                      data-label-recheck="{% translate 'Recheck' %}"
+                                      title="{% translate 'Recheck' %}" aria-label="{% translate 'Recheck' %}">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+                              </button>
+                            </span>
+                            {% if bookmark_item.health_stale %}
+                              {# 过期：展示上次检查结果区块 #}
+                              <span class="health-popover-divider"></span>
+                              <span class="health-popover-section-title">{% translate 'Last check result (expired)' %}</span>
+                              {% if bookmark_item.health_status_display %}
+                                <span class="health-popover-row health-popover-row-status">{{ bookmark_item.health_status_display }}</span>
+                              {% endif %}
+                            {% endif %}
+                            {# HTTP/原因/检查时间行始终渲染，无数据时 hidden：重检后就地更新，无需整页刷新 #}
+                            <span class="health-popover-row health-popover-row-http" {% if not bookmark_item.health_http_status %}hidden{% endif %}>{% if bookmark_item.health_http_status %}HTTP {{ bookmark_item.health_http_status }}{% endif %}</span>
+                            <span class="health-popover-row health-popover-reason" {% if not bookmark_item.health_reason %}hidden{% endif %}>{% if bookmark_item.health_reason %}{{ bookmark_item.health_reason }}{% endif %}</span>
+                            <span class="health-popover-checked" {% if not bookmark_item.health_checked_at_display %}hidden{% endif %}>
+                              {% if bookmark_item.health_checked_at_display %}{% translate 'Checked at' %} {{ bookmark_item.health_checked_at_display }}{% endif %}
+                            </span>
+                          </span>
+                        </ld-health-indicator>
                       {% endif %}
                     {% endif %}
                   {% endfor %}
@@ -349,6 +389,8 @@
       {% pagination bookmark_list.bookmarks_page %}
     </div>
 
+    {% include 'bookmarks/health_job_capsule.html' %}
+
     {% if bookmark_list.quick_tags_submenu_json %}
     <script>
       (function() {
@@ -374,7 +416,8 @@
         }
 
         // Let interactive elements (links, buttons, inputs, textarea, labels) through
-        if (e.target.closest('a, button, input, textarea, label')) return;
+        // 健康状态指示器自带点击弹窗交互，不应触发工具栏展开/收起
+        if (e.target.closest('a, button, input, textarea, label, ld-health-indicator')) return;
 
         // Hide all other items' toolbars
         document.querySelectorAll('li[ld-bookmark-item].toolbar-visible').forEach(function(other) {
