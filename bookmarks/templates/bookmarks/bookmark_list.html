@@ -301,7 +301,7 @@
                             {% else %}{% translate "Unread" context "bookmark_status" %}{% endif %}
                           </button>
                         {% endif %}
-                      {% elif status.key == "health" %}
+                      {% elif status.key == "health" and bookmark_list.status_display_mode != "icon" or status.key == "health" and bookmark_item.health_status %}
                         <ld-health-indicator class="health-status{% if bookmark_list.status_display_mode == 'icon' %} health-icon-mode{% endif %}" tabindex="0"
                               title="{% translate 'Click to view health status' %}"
                               aria-haspopup="true" aria-expanded="false">
