@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/2.2/ref/settings/
 import json
 import os
 import shlex
+import tempfile
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -358,9 +359,13 @@ LD_PREVIEW_ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp
 
 # Website loader / snapshot settings
 
-# Recommended: configure at `_builtin_overrides.defaults.http.User-Agent`
-# in data/site-adapters/adapters/defaults/adapters.jsonc.
-LD_DEFAULT_USER_AGENT = os.getenv("LD_DEFAULT_USER_AGENT","",)
+# 默认请求 UA（requests 引擎兜底与 wayback 存档用）。不再读 env：
+# 全局 UA 无法匹配运行环境引擎，且与 curl_cffi 的 Chrome TLS 指纹不一致
+# 会被反爬站点拦截。需要特定 UA 时在适配器 http/headers 显式配置。
+LD_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+)
 
 
 # Asset / snapshot settings
@@ -384,14 +389,26 @@ LD_BROWSER_ENGINE = os.getenv("LD_BROWSER_ENGINE", "chromium")
 CLOAKBROWSER_LICENSE_KEY = os.getenv("CLOAKBROWSER_LICENSE_KEY", "")
 
 LD_SINGLEFILE_PATH = os.getenv("LD_SINGLEFILE_PATH", "single-file")
+
+# 快照与 Cookie 刷新共用的持久化 Chromium profile（单一来源）。
+# 必须绝对路径：相对路径按 CWD 解析，会让不同用户命中同一目录并互相夺走属主。
+LD_CHROMIUM_PROFILE_DIR = os.getenv(
+    "LD_CHROMIUM_PROFILE_DIR",
+    os.path.join(tempfile.gettempdir(), "linkding-chromium-profile"),
+)
+# 随镜像分发的 uBlock Origin Lite 扩展目录（绝对化，摆脱 CWD 依赖）。
+LD_CHROMIUM_EXTENSION_DIR = os.getenv(
+    "LD_CHROMIUM_EXTENSION_DIR",
+    os.path.join(BASE_DIR, "uBOLite.chromium.mv3"),
+)
+
 LD_SINGLEFILE_UBLOCK_OPTIONS = os.getenv(
     "LD_SINGLEFILE_UBLOCK_OPTIONS",
     shlex.join(
         [
             "--browser-arg=--headless=new",
-            "--browser-arg=--user-data-dir=chromium-profile",
             "--browser-arg=--no-sandbox",
-            "--browser-arg=--load-extension=uBOLite.chromium.mv3",
+            f"--browser-arg=--load-extension={LD_CHROMIUM_EXTENSION_DIR}",
         ]
     ),
 )

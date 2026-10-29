@@ -18,9 +18,13 @@
           <div id="bookmark-search-container">
             {% bookmark_search bookmark_list.search %}
           </div>
-          {% include 'bookmarks/bulk_edit/toggle.html' %}
-          {% random_sort bookmark_list.search %}
+          <div class="hc-wide header-controls-wide">
+            {% include 'bookmarks/bulk_edit/toggle.html' %}
+            {% random_sort bookmark_list.search %}
+            {% include 'bookmarks/header/layout_menu.html' %}
+          </div>
           {% include 'bookmarks/sidebar/components/toggle_button.html' %}
+          {% include 'bookmarks/header/more_menu.html' with show_bulk=True show_random=True %}
         </div>
       </div>
 
@@ -30,7 +34,7 @@
         {% csrf_token %}
         {% include 'bookmarks/bulk_edit/bar.html' with disable_actions='bulk_unarchive,bulk_restore' %}
 
-        <div id="bookmark-list-container">
+        <div id="bookmark-list-container"{% if bookmark_list.group_by_date %} data-grouped{% endif %}>
           {% include 'bookmarks/bookmark_list.html' %}
         </div>
       </form>

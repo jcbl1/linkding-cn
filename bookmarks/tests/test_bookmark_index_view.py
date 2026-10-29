@@ -163,6 +163,39 @@ class BookmarkIndexViewTestCase(
         self.assertVisibleBookmarks(response, visible_bookmarks)
         self.assertInvisibleBookmarks(response, invisible_bookmarks)
 
+    def test_should_list_bookmarks_matching_author_query(self):
+        # 自由文本命中作者（与 description/title 一致）
+        visible_bookmarks = [
+            self.setup_bookmark(author="Grace Hopper", title="compiler notes"),
+            self.setup_bookmark(author="grace hopper", title="COBOL history"),
+        ]
+        invisible_bookmarks = [
+            self.setup_bookmark(author="Alan Turing", title="graceful machines"),
+        ]
+
+        response = self.client.get(
+            reverse("linkding:bookmarks.index") + "?q=hopper"
+        )
+
+        self.assertVisibleBookmarks(response, visible_bookmarks)
+        self.assertInvisibleBookmarks(response, invisible_bookmarks)
+
+    def test_should_list_bookmarks_matching_author_field_operator(self):
+        visible_bookmarks = [
+            self.setup_bookmark(author="Grace Hopper", title="compiler notes"),
+            self.setup_bookmark(author="Amy Hopperfield", title="memory chips"),
+        ]
+        invisible_bookmarks = [
+            self.setup_bookmark(author="Alan Turing", title="Grace Hopper biography"),
+        ]
+
+        response = self.client.get(
+            reverse("linkding:bookmarks.index") + "?q=author:hopper"
+        )
+
+        self.assertVisibleBookmarks(response, visible_bookmarks)
+        self.assertInvisibleBookmarks(response, invisible_bookmarks)
+
     def test_should_list_bookmarks_matching_bundle(self):
         visible_bookmarks = self.setup_numbered_bookmarks(3, prefix="foo")
         invisible_bookmarks = self.setup_numbered_bookmarks(3, prefix="bar")
@@ -395,7 +428,8 @@ class BookmarkIndexViewTestCase(
         values = self._get_bulk_action_values(response)
 
         for v in ["bulk_read", "bulk_unread", "bulk_tag", "bulk_untag",
-                   "bulk_refresh", "bulk_archive", "bulk_trash", "bulk_delete"]:
+                   "bulk_enrich_metadata", "bulk_refresh_metadata",
+                   "bulk_archive", "bulk_trash", "bulk_delete"]:
             self.assertIn(v, values)
         self.assertNotIn("bulk_share", values)
         self.assertNotIn("bulk_unshare", values)
@@ -676,7 +710,7 @@ class BookmarkIndexViewTestCase(
             element["data-sidebar-module"]
             for element in soup.select(".sidebar [data-sidebar-module]")
         ]
-        self.assertEqual(module_keys, ["tags", "summary", "domains"])
+        self.assertEqual(module_keys, ["tags", "summary", "domains", "authors"])
         self.assertIsNone(
             soup.select_one(".sidebar [data-sidebar-module='bundles']")
         )

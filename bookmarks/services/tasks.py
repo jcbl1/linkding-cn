@@ -37,12 +37,16 @@ from bookmarks.services import assets, favicon_loader, preview_image_loader
 from bookmarks.services.website_loader import load_website_metadata
 from bookmarks.utils import (
     get_registrable_domain,
+    normalize_url,
     parse_domain_roots,
 )
 
 logger = logging.getLogger(__name__)
 HTML_SNAPSHOT_DISPATCHER_LOCK = huey.lock_task("html-snapshot-dispatcher-lock")
 BACKGROUND_SERIAL_LOCK = huey.lock_task("background-serial-lock")
+
+HTML_SNAPSHOT_DISPATCHER_HEARTBEAT_KEY = "html-snapshot-dispatcher-heartbeat"
+HTML_SNAPSHOT_DISPATCHER_HEARTBEAT_MIN_TIMEOUT_SEC = 120
 
 PRIORITY_READING = 100
 PRIORITY_MANUAL_SNAPSHOT = 90
@@ -54,6 +58,11 @@ PRIORITY_PREVIEW = 10
 
 NON_URGENT_MAX_CONCURRENCY = 3
 _non_urgent_slots = threading.BoundedSemaphore(NON_URGENT_MAX_CONCURRENCY)
+
+# SingleFile does not support running multiple snapshot captures in parallel.
+# Temporary snapshots (adapter snapshot.enabled=false) bypass the dispatcher,
+# so serialize in-process create_snapshot calls with this lock.
+_TEMPORARY_SNAPSHOT_LOCK = threading.RLock()
 
 
 def acquire_non_urgent_slot() -> bool:
@@ -282,6 +291,26 @@ def refresh_favicon_for_url(user: User, url: str, priority: int | None = None):
     domain = _resolve_domain(url, domain_config)
     if domain and _set_favicon_pending_for_enqueue(domain, force=True):
         _enqueue_favicon_task(user.id, domain, priority=priority)
+
+
+def refresh_favicons_for_bookmarks(user: User, bookmarks) -> int:
+    """批量强制刷新书签所属域名的 favicon，按域名去重。返回入队数量。"""
+    if not is_favicon_feature_active(user):
+        return 0
+
+    domain_config = parse_domain_roots(user.profile.custom_domain_root)
+    domains_seen = set()
+    for bookmark in bookmarks:
+        domain = _resolve_domain(bookmark.url, domain_config)
+        if (
+            domain
+            and domain not in domains_seen
+            and _set_favicon_pending_for_enqueue(domain, force=True)
+        ):
+            domains_seen.add(domain)
+            _enqueue_favicon_task(user.id, domain)
+
+    return len(domains_seen)
 
 
 def load_favicon(
@@ -810,13 +839,13 @@ def _batch_load_preview_images_task(user_id: int):
 
 
 # ---------------------------------------------------------------------------
-# 元数据补全与刷新
+# 元数据补齐与刷新
+#
+# 两个动作语义不同，不可互相替代：
+#   - 补齐（enrich）：只填为空的字段，不覆盖已有内容
+#   - 刷新（refresh）：重新抓取并覆盖，抓不到（None）时保留原值
+# 两者都不生成 HTML 快照。
 # ---------------------------------------------------------------------------
-
-
-def refresh_metadata(bookmark: Bookmark):
-    if not settings.LD_DISABLE_BACKGROUND_TASKS:
-        _refresh_metadata_task(bookmark.id)
 
 
 def schedule_metadata_enrichment(
@@ -832,6 +861,11 @@ def schedule_metadata_enrichment(
             ignore_cache=ignore_cache,
             priority=priority,
         )
+
+
+def schedule_metadata_refresh(bookmark: Bookmark, priority: int | None = None):
+    if not settings.LD_DISABLE_BACKGROUND_TASKS:
+        _refresh_metadata_task(bookmark.id, priority=priority)
 
 
 @task(retries=3, priority=PRIORITY_CORE)
@@ -855,7 +889,7 @@ def _enrich_metadata_task(
     update_fields = []
 
     if (
-        (overwrite or not bookmark.title)
+        (overwrite or bookmark.has_placeholder_title)
         and metadata.title is not None
         and metadata.title != bookmark.title
     ):
@@ -869,6 +903,14 @@ def _enrich_metadata_task(
     ):
         bookmark.description = metadata.description
         update_fields.append("description")
+
+    if (
+        (overwrite or not bookmark.author)
+        and metadata.author
+        and metadata.author != bookmark.author
+    ):
+        bookmark.author = metadata.author
+        update_fields.append("author")
 
     if (
         (overwrite or not bookmark.preview_image_remote_url)
@@ -900,6 +942,7 @@ def _refresh_metadata_task(bookmark_id: int):
         username=_bookmark_username(bookmark),
     )
     update_fields = []
+    preview_image_changed = False
 
     if metadata.title is not None:
         bookmark.title = metadata.title
@@ -907,6 +950,9 @@ def _refresh_metadata_task(bookmark_id: int):
     if metadata.description is not None:
         bookmark.description = metadata.description
         update_fields.append("description")
+    if metadata.author:
+        bookmark.author = metadata.author
+        update_fields.append("author")
     if metadata.preview_image:
         preview_image_changed = (
             metadata.preview_image != bookmark.preview_image_remote_url
@@ -919,25 +965,18 @@ def _refresh_metadata_task(bookmark_id: int):
             update_fields.append("preview_image_file")
     if metadata.url and metadata.url != bookmark.url:
         bookmark.url = metadata.url
-        update_fields.append("url")
-    bookmark.date_modified = timezone.now()
+        bookmark.url_normalized = normalize_url(bookmark.url)
+        update_fields.extend(["url", "url_normalized"])
 
-    bookmark.save(update_fields=update_fields)
-    logger.info("Successfully refreshed metadata for bookmark. url=%s", bookmark.url)
+    if update_fields:
+        bookmark.date_modified = timezone.now()
+        update_fields.append("date_modified")
+        bookmark.save(update_fields=update_fields)
+        logger.info("Successfully refreshed metadata for bookmark. url=%s", bookmark.url)
 
-    # 重新下载本地预览图，确保 remote_url 已提交后再取新图
-    if not settings.LD_DISABLE_BACKGROUND_TASKS:
+    if preview_image_changed and not settings.LD_DISABLE_BACKGROUND_TASKS:
+        # 远程图已换，重新下载本地预览文件
         load_preview_image(bookmark.owner, bookmark, force=True)
-
-    # 若url变动，则按需更新html快照
-    if bookmark.owner.profile.enable_automatic_html_snapshots:
-        pending_assets = BookmarkAsset.objects.filter(
-            bookmark=bookmark, status=BookmarkAsset.STATUS_PENDING
-        )
-        if pending_assets.exists():  # 若有下载中的快照，则移除
-            pending_assets.delete()
-
-        create_html_snapshot(bookmark)
 
 
 # ---------------------------------------------------------------------------
@@ -1048,6 +1087,33 @@ def _get_html_snapshot_dispatcher_sleep_seconds(now, next_wake_at) -> float:
     return min(remaining_seconds, _get_html_snapshot_dispatcher_tick_seconds())
 
 
+def _html_snapshot_dispatcher_heartbeat_timeout() -> float:
+    """心跳超时阈值：至少 MIN_TIMEOUT，且不小于 10 个 tick。
+
+    循环每次 sleep 最长一个 tick，正常情况下心跳间隔远小于该阈值；
+    超时只可能是持有者已经死了。
+    """
+    tick = _get_html_snapshot_dispatcher_tick_seconds()
+    return max(float(HTML_SNAPSHOT_DISPATCHER_HEARTBEAT_MIN_TIMEOUT_SEC), tick * 10.0)
+
+
+def _touch_html_snapshot_dispatcher_heartbeat():
+    huey.put(HTML_SNAPSHOT_DISPATCHER_HEARTBEAT_KEY, time.time())
+
+
+def _html_snapshot_dispatcher_lock_is_stale() -> bool:
+    """锁还在，但写心跳的持有者已经不在了（或从未写过心跳）。"""
+    last = huey.get(HTML_SNAPSHOT_DISPATCHER_HEARTBEAT_KEY, peek=True)
+    if last is None:
+        return True
+    if isinstance(last, bytes):
+        last = last.decode("utf-8", "ignore")
+    try:
+        return time.time() - float(last) > _html_snapshot_dispatcher_heartbeat_timeout()
+    except (TypeError, ValueError):
+        return True
+
+
 def _run_html_snapshot_dispatcher_loop(
     now_func: Callable[[], object] | None = None,
     sleep_func: Callable[[float], None] | None = None,
@@ -1068,6 +1134,7 @@ def _run_html_snapshot_dispatcher_loop(
     next_eligible_at: dict[str, object] = {}
 
     while True:
+        _touch_html_snapshot_dispatcher_heartbeat()
         now = now_func()
         asset, next_wake_at = _select_next_html_snapshot_asset(now, next_eligible_at)
         if asset is None:
@@ -1087,11 +1154,19 @@ def _run_html_snapshot_dispatcher_loop(
 
 @task(retries=0, retry_delay=0, priority=PRIORITY_CORE)
 def _html_snapshot_dispatcher_task():
-    try:
-        with HTML_SNAPSHOT_DISPATCHER_LOCK:
-            _run_html_snapshot_dispatcher_loop()
-    except TaskLockedException:
-        logger.debug("HTML snapshot dispatcher already running.")
+    for attempt in (1, 2):
+        try:
+            with HTML_SNAPSHOT_DISPATCHER_LOCK:
+                _run_html_snapshot_dispatcher_loop()
+                return
+        except TaskLockedException:
+            if attempt == 2 or not _html_snapshot_dispatcher_lock_is_stale():
+                logger.debug("HTML snapshot dispatcher already running.")
+                return
+            logger.warning(
+                "Releasing stale HTML snapshot dispatcher lock (holder heartbeat expired)."
+            )
+            HTML_SNAPSHOT_DISPATCHER_LOCK.clear()
 
 
 def create_html_snapshot(bookmark: Bookmark, priority: int | None = None):
@@ -1112,8 +1187,25 @@ def create_html_snapshots(bookmark_list: list[Bookmark], priority: int | None = 
     if not is_html_snapshot_feature_active():
         return
 
+    bookmarks = list(bookmark_list)
+    if not bookmarks:
+        return
+
+    # 已有排队中的快照则跳过，避免连点造成同一页面重复抓取；
+    # 已有完成快照的仍会新建（"创建快照"的语义就是重新归档当前页面）。
+    pending_bookmark_ids = set(
+        BookmarkAsset.objects.filter(
+            bookmark__in=bookmarks,
+            asset_type=BookmarkAsset.TYPE_SNAPSHOT,
+            status=BookmarkAsset.STATUS_PENDING,
+        ).values_list("bookmark_id", flat=True)
+    )
+
     assets_to_create = []
-    for bookmark in bookmark_list:
+    for bookmark in bookmarks:
+        if bookmark.id in pending_bookmark_ids:
+            logger.debug("Snapshot already pending for url=%s", bookmark.url)
+            continue
         if _is_snapshot_disabled_by_adapter(bookmark.url, username=_get_bookmark_username(bookmark)):
             logger.debug("Snapshot disabled by adapter config for url=%s", bookmark.url)
             continue
@@ -1400,7 +1492,8 @@ def _create_temporary_snapshot(
         ) as tmp:
             tmp_path = tmp.name
 
-        create_snapshot(url, tmp_path, username=username)
+        with _TEMPORARY_SNAPSHOT_LOCK:
+            create_snapshot(url, tmp_path, username=username)
         with open(tmp_path, encoding='utf-8') as f:
             raw_content = f.read()
         content_type = (

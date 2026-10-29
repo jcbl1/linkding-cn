@@ -96,6 +96,7 @@ class Bookmark(models.Model):
     url_normalized = models.CharField(max_length=2048, blank=True, db_index=True)
     title = models.TextField(blank=True)
     description = models.TextField(blank=True)
+    author = models.TextField(blank=True, verbose_name=_("Author"))
     notes = models.TextField(blank=True)
     preview_image_remote_url = models.URLField(max_length=2048, blank=True)
     # Obsolete field, kept to not remove column when generating migrations
@@ -155,6 +156,12 @@ class Bookmark(models.Model):
             return self.title
         else:
             return self.url
+
+    @property
+    def has_placeholder_title(self):
+        """标题为空或以 URL 占位（即 resolved_title 的回退值）。"""
+        title = (self.title or "").strip()
+        return not title or title in (self.url, self.url_normalized)
 
     @property
     def resolved_description(self):
@@ -434,6 +441,10 @@ class BookmarkSearch:
     SORT_MODIFIED_DESC = "modified_desc"
     SORT_TITLE_ASC = "title_asc"
     SORT_TITLE_DESC = "title_desc"
+    SORT_HIGHLIGHTS_ASC = "highlights_asc"
+    SORT_HIGHLIGHTS_DESC = "highlights_desc"
+    SORT_ANNOTATIONS_ASC = "annotations_asc"
+    SORT_ANNOTATIONS_DESC = "annotations_desc"
     SORT_RANDOM = "random"
     SORT_DELETED_ASC = "deleted_asc"
     SORT_DELETED_DESC = "deleted_desc"
@@ -826,6 +837,10 @@ class BookmarkSearchForm(forms.Form):
         (BookmarkSearch.SORT_MODIFIED_DESC, _("Modified ↓")),
         (BookmarkSearch.SORT_TITLE_ASC, _("Title ↑")),
         (BookmarkSearch.SORT_TITLE_DESC, _("Title ↓")),
+        (BookmarkSearch.SORT_HIGHLIGHTS_DESC, _("Highlights ↓")),
+        (BookmarkSearch.SORT_HIGHLIGHTS_ASC, _("Highlights ↑")),
+        (BookmarkSearch.SORT_ANNOTATIONS_DESC, _("Annotations ↓")),
+        (BookmarkSearch.SORT_ANNOTATIONS_ASC, _("Annotations ↑")),
         (BookmarkSearch.SORT_RANDOM, _("Random")),
     ]
     FILTER_SHARED_CHOICES = [
@@ -1013,6 +1028,53 @@ class UserProfile(models.Model):
         (BOOKMARK_DESCRIPTION_DISPLAY_INLINE, _("Inline")),
         (BOOKMARK_DESCRIPTION_DISPLAY_SEPARATE, _("Separate")),
     ]
+    BOOKMARK_VIEW_MODE_LIST = "list"
+    BOOKMARK_VIEW_MODE_COMPACT = "compact"
+    BOOKMARK_VIEW_MODE_TABLE = "table"
+    BOOKMARK_VIEW_MODE_CHOICES = [
+        (BOOKMARK_VIEW_MODE_LIST, _("Default")),
+        (BOOKMARK_VIEW_MODE_COMPACT, _("Compact")),
+        (BOOKMARK_VIEW_MODE_TABLE, _("Table")),
+    ]
+    # 表格视图可用列。status 聚合书签工具栏的三个状态按钮（顺序跟随工具栏配置），
+    # 默认不展示；覆盖率高的 title/domain/tags/desc/date 构成默认列。
+    BOOKMARK_TABLE_COLUMN_KEYS = (
+        "title",
+        "author",
+        "date",
+        "tags",
+        "desc",
+        "notes",
+        "status",
+        "domain",
+        "highlights",
+        "annotations",
+    )
+    # 各列「可读」基准宽度（px）：视口富余时按 w 权重加宽，收窄到基准总宽以下转横向滚动。
+    BOOKMARK_TABLE_COLUMN_BASE_PX = {
+        "title": 220,
+        "author": 110,
+        "date": 96,
+        "tags": 130,
+        "desc": 200,
+        "notes": 150,
+        "status": 110,
+        "domain": 120,
+        "highlights": 80,
+        "annotations": 80,
+    }
+    BOOKMARK_TABLE_COLUMN_MIN_PX = 60
+    BOOKMARK_TABLE_COLUMN_MAX_PX = 2000
+    # 默认展示（顺序与上面一致，只是不含 domain）
+    BOOKMARK_TABLE_DEFAULT_COLUMNS = [
+        {"key": "title", "w": 2.4},
+        {"key": "author", "w": 1.1},
+        {"key": "date", "w": 0.9},
+        {"key": "tags", "w": 1.2},
+        {"key": "desc", "w": 2.2},
+        {"key": "notes", "w": 1.6},
+        {"key": "status", "w": 1.1},
+    ]
     BOOKMARK_LINK_TARGET_BLANK = "_blank"
     BOOKMARK_LINK_TARGET_SELF = "_self"
     BOOKMARK_LINK_TARGET_CHOICES = [
@@ -1039,16 +1101,57 @@ class UserProfile(models.Model):
         (TAG_GROUPING_SMART_TREE, _("Smart tree")),
         (TAG_GROUPING_DISABLED, _("Disabled")),
     ]
+    AUTHOR_GROUPING_ALPHABETICAL = "alphabetical"
+    AUTHOR_GROUPING_DISABLED = "disabled"
+    AUTHOR_GROUPING_CHOICES = [
+        (AUTHOR_GROUPING_ALPHABETICAL, _("Alphabetical")),
+        (AUTHOR_GROUPING_DISABLED, _("Disabled")),
+    ]
+    AUTHOR_SORT_COUNT = "count"
+    AUTHOR_SORT_NAME = "name"
+    AUTHOR_SORT_CHOICES = [
+        (AUTHOR_SORT_COUNT, _("By count")),
+        (AUTHOR_SORT_NAME, _("By name")),
+    ]
+    # 侧边栏作者模块的三态显示模式（互斥单选）
+    AUTHOR_MODE_COUNT_DESC = "count_desc"
+    AUTHOR_MODE_ALPHABETICAL = "alphabetical"
+    AUTHOR_MODE_DISABLED = "disabled"
+    AUTHOR_MODE_CHOICES = [
+        (AUTHOR_MODE_COUNT_DESC, _("By count desc")),
+        (AUTHOR_MODE_ALPHABETICAL, _("Grouped by first letter")),
+        (AUTHOR_MODE_DISABLED, _("Disable grouping")),
+    ]
+
+    @classmethod
+    def author_mode_for(cls, grouping: str, sort: str) -> str:
+        """由 (grouping, sort) 组合推导当前模式"""
+        if grouping == cls.AUTHOR_GROUPING_ALPHABETICAL:
+            return cls.AUTHOR_MODE_ALPHABETICAL
+        if sort == cls.AUTHOR_SORT_NAME:
+            return cls.AUTHOR_MODE_DISABLED
+        return cls.AUTHOR_MODE_COUNT_DESC
+
+    @classmethod
+    def author_grouping_sort_for(cls, mode: str) -> tuple[str, str]:
+        """由模式映射回 (grouping, sort) 组合"""
+        if mode == cls.AUTHOR_MODE_ALPHABETICAL:
+            return cls.AUTHOR_GROUPING_ALPHABETICAL, cls.AUTHOR_SORT_COUNT
+        if mode == cls.AUTHOR_MODE_DISABLED:
+            return cls.AUTHOR_GROUPING_DISABLED, cls.AUTHOR_SORT_NAME
+        return cls.AUTHOR_GROUPING_DISABLED, cls.AUTHOR_SORT_COUNT
     SIDEBAR_MODULE_SUMMARY = "summary"
     SIDEBAR_MODULE_BUNDLES = "bundles"
     SIDEBAR_MODULE_DOMAINS = "domains"
     SIDEBAR_MODULE_TAGS = "tags"
+    SIDEBAR_MODULE_AUTHORS = "authors"
     SIDEBAR_MODULE_COLORS = "colors"
     SIDEBAR_MODULE_LABELS = {
         SIDEBAR_MODULE_SUMMARY: _("User summary"),
         SIDEBAR_MODULE_BUNDLES: _("Filters"),
         SIDEBAR_MODULE_DOMAINS: _("Domains"),
         SIDEBAR_MODULE_TAGS: _("Tags"),
+        SIDEBAR_MODULE_AUTHORS: _("Authors"),
         SIDEBAR_MODULE_COLORS: _("Colors"),
     }
 
@@ -1132,23 +1235,27 @@ class UserProfile(models.Model):
     # 快捷编辑按钮
     QUICK_EDIT_TITLE = "title"
     QUICK_EDIT_DESCRIPTION = "description"
+    QUICK_EDIT_AUTHOR = "author"
     QUICK_EDIT_NOTES = "notes"
     QUICK_EDIT_TAGS = "tags"
     QUICK_EDIT_KEYS = [
         QUICK_EDIT_TITLE,
         QUICK_EDIT_DESCRIPTION,
+        QUICK_EDIT_AUTHOR,
         QUICK_EDIT_NOTES,
         QUICK_EDIT_TAGS,
     ]
     QUICK_EDIT_LABELS = {
         QUICK_EDIT_TITLE: _("Title"),
         QUICK_EDIT_DESCRIPTION: _("Description"),
+        QUICK_EDIT_AUTHOR: _("Author"),
         QUICK_EDIT_NOTES: _("Notes"),
         QUICK_EDIT_TAGS: _("Tags"),
     }
     QUICK_EDIT_ICONS = {
         QUICK_EDIT_TITLE: "ld-icon-edit-title",
         QUICK_EDIT_DESCRIPTION: "ld-icon-edit-description",
+        QUICK_EDIT_AUTHOR: "ld-icon-edit-author",
         QUICK_EDIT_NOTES: "ld-icon-edit-notes",
         QUICK_EDIT_TAGS: "ld-icon-tag",
     }
@@ -1192,6 +1299,17 @@ class UserProfile(models.Model):
         null=False,
         default=1,
     )
+    bookmark_view_mode = models.CharField(
+        max_length=10,
+        choices=BOOKMARK_VIEW_MODE_CHOICES,
+        blank=False,
+        default=BOOKMARK_VIEW_MODE_LIST,
+    )
+    # 表格视图列配置：[{"key": "title", "w": 2.4}, ...]，数组序即列序。
+    # w 存 fr 比例而非 px——窄屏等比压缩不溢出；空列表 = 使用默认列。显示/隐藏与顺序共用同一数组。
+    bookmark_table_columns = models.JSONField(default=list, blank=True)
+    # 按日期分组显示（今天 / 昨天 / 本周 / 更早），与视图模式正交可叠加
+    group_by_date = models.BooleanField(default=True, null=False)
     bookmark_link_target = models.CharField(
         max_length=10,
         choices=BOOKMARK_LINK_TARGET_CHOICES,
@@ -1215,6 +1333,18 @@ class UserProfile(models.Model):
         choices=TAG_GROUPING_CHOICES,
         blank=False,
         default=TAG_GROUPING_ALPHABETICAL,
+    )
+    author_grouping = models.CharField(
+        max_length=12,
+        choices=AUTHOR_GROUPING_CHOICES,
+        blank=False,
+        default=AUTHOR_GROUPING_ALPHABETICAL,
+    )
+    author_sort = models.CharField(
+        max_length=12,
+        choices=AUTHOR_SORT_CHOICES,
+        blank=False,
+        default=AUTHOR_SORT_COUNT,
     )
     legacy_search = models.BooleanField(default=False, null=False)
     enable_sharing = models.BooleanField(default=False, null=False)
@@ -1403,6 +1533,35 @@ class UserProfile(models.Model):
         default=HIGHLIGHT_COPY_ACTION_BOTH,
     )
 
+    # 书签列表页快捷键（key 为动作标识，value 为单键；空字符串表示禁用）
+    # 方向键导航（↑/↓）固定不变，不提供配置。
+    SHORTCUT_NEW_BOOKMARK = "new_bookmark"
+    SHORTCUT_FOCUS_SEARCH = "focus_search"
+    SHORTCUT_QUICK_EDIT = "quick_edit"
+    SHORTCUT_TOGGLE_NOTES = "toggle_notes"
+    SHORTCUT_KEYS = [
+        SHORTCUT_NEW_BOOKMARK,
+        SHORTCUT_FOCUS_SEARCH,
+        SHORTCUT_QUICK_EDIT,
+        SHORTCUT_TOGGLE_NOTES,
+    ]
+    DEFAULT_SHORTCUT_KEYS = {
+        SHORTCUT_NEW_BOOKMARK: "n",
+        SHORTCUT_FOCUS_SEARCH: "s",
+        SHORTCUT_QUICK_EDIT: "q",
+        SHORTCUT_TOGGLE_NOTES: "e",
+    }
+    shortcut_keys = models.JSONField(default=dict, blank=True, null=False)
+
+    def get_shortcut_keys(self) -> dict:
+        """返回合并默认值后的快捷键映射，禁用项以空字符串表示。"""
+        stored = self.shortcut_keys if isinstance(self.shortcut_keys, dict) else {}
+        merged = dict(self.DEFAULT_SHORTCUT_KEYS)
+        for key in self.SHORTCUT_KEYS:
+            if key in stored:
+                merged[key] = stored[key] if isinstance(stored[key], str) else ""
+        return merged
+
     @classmethod
     def normalize_quick_tag(cls, qt: dict) -> dict:
         tag_name = (qt.get("tag_name") or "").strip()
@@ -1469,6 +1628,7 @@ class UserProfile(models.Model):
             {"key": cls.SIDEBAR_MODULE_BUNDLES, "enabled": bundles_enabled},
             {"key": cls.SIDEBAR_MODULE_DOMAINS, "enabled": True},
             {"key": cls.SIDEBAR_MODULE_TAGS, "enabled": True},
+            {"key": cls.SIDEBAR_MODULE_AUTHORS, "enabled": True},
             {"key": cls.SIDEBAR_MODULE_COLORS, "enabled": True},
         ]
 
@@ -1511,6 +1671,111 @@ class UserProfile(models.Model):
             self.sidebar_modules,
             bundles_enabled=not self.hide_bundles,
         )
+
+    BOOKMARK_TABLE_COLUMN_LABELS = {
+        "title": _("Title"),
+        "author": _("Author"),
+        "tags": _("Tags"),
+        "desc": _("Description"),
+        "notes": _("Notes"),
+        "date": _("Date"),
+        "status": _("Status"),
+        "domain": _("Domain"),
+        "highlights": _("Highlights"),
+        "annotations": _("Annotations"),
+
+    }
+
+    @classmethod
+    def build_bookmark_table_column(cls, key: str, entry: dict) -> dict:
+        """单列的渲染结构：w 为余量权重，px 为手动拖过的像素宽（有则不参与分配），base 为基准宽。"""
+        defaults = {c["key"]: c["w"] for c in cls.BOOKMARK_TABLE_DEFAULT_COLUMNS}
+        try:
+            w = max(0.35, min(8.0, float(entry.get("w", defaults.get(key, 1)))))
+        except (TypeError, ValueError):
+            w = defaults.get(key, 1.0)
+        return {
+            "key": key,
+            "label": str(cls.BOOKMARK_TABLE_COLUMN_LABELS[key]),
+            "w": round(w, 2),
+            "base": cls.BOOKMARK_TABLE_COLUMN_BASE_PX[key],
+            "px": cls.parse_bookmark_table_column_px(entry.get("px")),
+            "sortable": key in ("title", "date", "highlights", "annotations"),
+        }
+
+    @classmethod
+    def parse_bookmark_table_column_px(cls, value):
+        """显式列宽（px）；非法值视为未设置。"""
+        if value in (None, ""):
+            return None
+        try:
+            px = int(round(float(value)))
+        except (TypeError, ValueError):
+            return None
+        return max(
+            cls.BOOKMARK_TABLE_COLUMN_MIN_PX,
+            min(cls.BOOKMARK_TABLE_COLUMN_MAX_PX, px),
+        )
+
+    def get_bookmark_table_columns(self) -> list[dict]:
+        """把列配置解析成模板可直接消费的结构。
+        配置里 on=False 的列保留在存储中但不渲染；服务端重新校验脏数据
+        （profile 可能经 API 写入）；title 列是行选择与悬停操作的锚点，强制渲染。"""
+        raw = self.bookmark_table_columns or self.BOOKMARK_TABLE_DEFAULT_COLUMNS
+        columns, seen = [], set()
+        for entry in raw:
+            key = entry.get("key") if isinstance(entry, dict) else None
+            if key not in self.BOOKMARK_TABLE_COLUMN_KEYS or key in seen:
+                continue
+            seen.add(key)
+            if entry.get("on", True) is False:
+                continue
+            columns.append(self.build_bookmark_table_column(key, entry))
+        if "title" not in [c["key"] for c in columns]:
+            columns.insert(0, self.build_bookmark_table_column("title", {}))
+        return columns
+
+    def get_bookmark_table_column_choices(self) -> list[dict]:
+        """偏好面板用：全部列 + 当前是否展示（title 恒为 on）。"""
+        visible = {c["key"] for c in self.get_bookmark_table_columns()}
+        return [
+            {
+                "key": key,
+                "label": str(self.BOOKMARK_TABLE_COLUMN_LABELS[key]),
+                "on": key in visible or key == "title",
+                "fixed": key == "title",
+            }
+            for key in self.BOOKMARK_TABLE_COLUMN_KEYS
+        ]
+
+    def get_bookmark_table_config(self) -> list[dict]:
+        """前端往返用的完整配置：全部列带 on 标志，可见列按展示序在前。
+        on 语义由 get_bookmark_table_columns 消费，缺省视为展示。"""
+        config, seen = [], set()
+
+        def add(key, entry, on):
+            column = self.build_bookmark_table_column(key, entry)
+            column["on"] = on
+            config.append(column)
+
+        for entry in self.bookmark_table_columns or []:
+            key = entry.get("key") if isinstance(entry, dict) else None
+            if key not in self.BOOKMARK_TABLE_COLUMN_KEYS or key in seen:
+                continue
+            seen.add(key)
+            add(key, entry, entry.get("on", True) is not False)
+        for entry in self.BOOKMARK_TABLE_DEFAULT_COLUMNS:
+            if entry["key"] not in seen:
+                seen.add(entry["key"])
+                add(entry["key"], entry, True)
+        for key in self.BOOKMARK_TABLE_COLUMN_KEYS:
+            if key not in seen:
+                add(key, {}, False)
+        if not any(c["key"] == "title" and c["on"] for c in config):
+            config.insert(0, {**self.build_bookmark_table_column("title", {}), "on": True})
+        return config
+
+
 
     def get_sidebar_module_items(self) -> list[dict]:
         return [
@@ -1785,6 +2050,8 @@ class UserProfileForm(forms.ModelForm):
             "bookmark_date_route",
             "bookmark_description_display",
             "bookmark_description_max_lines",
+            "bookmark_view_mode",
+            "group_by_date",
             "bookmark_link_target",
             "web_archive_integration",
             "tag_search",
@@ -1852,6 +2119,55 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
     bookmark_quick_tags = forms.CharField(required=False)
     bookmark_toolbar_modules = forms.CharField()
 
+    bookmark_table_columns = forms.JSONField(required=False)
+
+    def clean_bookmark_table_columns(self):
+        value = self.cleaned_data.get("bookmark_table_columns")
+        if value in (None, "", []):
+            return []
+        # 硬上限只防滥用；列池里已下架的键（如被移除的列）在此静默丢弃，
+        # 否则旧版本存下的配置会让之后所有列设置保存 422
+        if not isinstance(value, list) or len(value) > 64:
+            raise forms.ValidationError(_("Invalid table column configuration."))
+        cleaned = []
+        seen = set()
+        for entry in value:
+            if not isinstance(entry, dict) or entry.get("key") not in UserProfile.BOOKMARK_TABLE_COLUMN_KEYS:
+                continue
+            if entry["key"] in seen:
+                continue
+            seen.add(entry["key"])
+            try:
+                w = max(0.35, min(8.0, float(entry.get("w", 1))))
+            except (TypeError, ValueError):
+                w = 1.0
+            cleaned.append(
+                {
+                    "key": entry["key"],
+                    "w": round(w, 2),
+                    # 显式列宽（用户手动拖拽产生）；不设就继续按基准宽 + 权重分配
+                    **(
+                        {"px": px}
+                        if (px := UserProfile.parse_bookmark_table_column_px(entry.get("px")))
+                        is not None
+                        else {}
+                    ),
+                    "on": entry.get("on", True) is not False
+                    or entry["key"] == "actions",
+                }
+            )
+        if not any(c["key"] == "title" for c in cleaned):
+            # 标题列是行选择与悬停操作的锚点，不可移除
+            cleaned.insert(
+                0,
+                {
+                    "key": "title",
+                    "w": UserProfile.BOOKMARK_TABLE_DEFAULT_COLUMNS[0]["w"],
+                },
+            )
+        return cleaned
+
+
     class Meta:
         model = UserProfile
         fields = [
@@ -1862,6 +2178,8 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
             "bookmark_date_route",
             "bookmark_description_display",
             "bookmark_description_max_lines",
+            "bookmark_view_mode",
+            "group_by_date",
             "bookmark_link_target",
             "web_archive_integration",
             "tag_search",
@@ -1879,6 +2197,7 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
             "enable_preview_images",
             "enable_preview_image_placeholders",
             "enable_automatic_html_snapshots",
+            "bookmark_table_columns",
             "items_per_page",
             "highlights_per_page",
             "highlights_sticky_header_controls",
@@ -2277,6 +2596,54 @@ class UserProfileHighlightCopyFormatForm(forms.ModelForm):
         }
         if commit:
             profile.save()
+        return profile
+
+
+class UserProfileShortcutsForm(forms.ModelForm):
+    SHORTCUT_LABELS = {
+        UserProfile.SHORTCUT_NEW_BOOKMARK: _("New bookmark"),
+        UserProfile.SHORTCUT_FOCUS_SEARCH: _("Focus search"),
+        UserProfile.SHORTCUT_QUICK_EDIT: _("Quick edit"),
+        UserProfile.SHORTCUT_TOGGLE_NOTES: _("Show notes"),
+    }
+    # 可绑定的单键：仅 26 个英文字母与 0-9 数字
+    SHORTCUT_KEY_CHOICES = [
+        ("", _("Disabled")),
+        ("a", "a"), ("b", "b"), ("c", "c"), ("d", "d"), ("e", "e"),
+        ("f", "f"), ("g", "g"), ("h", "h"), ("i", "i"), ("j", "j"),
+        ("k", "k"), ("l", "l"), ("m", "m"), ("n", "n"), ("o", "o"),
+        ("p", "p"), ("q", "q"), ("r", "r"), ("s", "s"), ("t", "t"),
+        ("u", "u"), ("v", "v"), ("w", "w"), ("x", "x"), ("y", "y"),
+        ("z", "z"),
+        ("0", "0"), ("1", "1"), ("2", "2"), ("3", "3"), ("4", "4"),
+        ("5", "5"), ("6", "6"), ("7", "7"), ("8", "8"), ("9", "9"),
+    ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        current = self.instance.get_shortcut_keys()
+        for key in UserProfile.SHORTCUT_KEYS:
+            field_name = f"shortcut_{key}"
+            self.fields[field_name] = forms.ChoiceField(
+                required=False,
+                choices=self.SHORTCUT_KEY_CHOICES,
+                initial=current.get(key, ""),
+                label=self.SHORTCUT_LABELS[key],
+            )
+
+    class Meta:
+        model = UserProfile
+        fields = []
+
+    def save(self, commit=True):
+        profile = super().save(commit=False)
+        shortcut_keys = dict(profile.shortcut_keys) if isinstance(profile.shortcut_keys, dict) else {}
+        for key in UserProfile.SHORTCUT_KEYS:
+            field_name = f"shortcut_{key}"
+            shortcut_keys[key] = self.cleaned_data.get(field_name, "")
+        profile.shortcut_keys = shortcut_keys
+        if commit:
+            profile.save(update_fields=["shortcut_keys"])
         return profile
 
 

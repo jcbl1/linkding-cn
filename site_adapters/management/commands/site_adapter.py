@@ -2,9 +2,11 @@ import json
 import os
 import shutil
 import tempfile
+from urllib.parse import urlparse
 
+import requests
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from bookmarks.services.website_loader import (
     load_website_metadata,
@@ -25,6 +27,43 @@ from site_adapters.services.config.validator import classify_field, validate_con
 from site_adapters.services.subscriptions import (
     fetch_subscription,
 )
+
+
+_SENSITIVE_HEADER_NAMES = {
+    "cookie",
+    "authorization",
+    "proxy-authorization",
+    "set-cookie",
+}
+
+
+def _redact_config_for_output(obj):
+    """递归脱敏解析后的配置，避免会话 cookie/凭据明文进入 stdout。
+
+    保持键集合不变，仅把敏感值替换为 "<redacted>"：
+    - `_user_cookie` 键（resolver 注入的原始 cookie 串）
+    - `headers` 块中的 Cookie/Authorization 等敏感头值
+    """
+    if isinstance(obj, dict):
+        redacted = {}
+        for key, value in obj.items():
+            if key == "_user_cookie":
+                redacted[key] = "<redacted>" if value else value
+                continue
+            if key == "headers" and isinstance(value, dict):
+                redacted_headers = {}
+                for hname, hval in value.items():
+                    if isinstance(hname, str) and hname.lower() in _SENSITIVE_HEADER_NAMES:
+                        redacted_headers[hname] = "<redacted>"
+                    else:
+                        redacted_headers[hname] = hval
+                redacted[key] = redacted_headers
+                continue
+            redacted[key] = _redact_config_for_output(value)
+        return redacted
+    if isinstance(obj, list):
+        return [_redact_config_for_output(item) for item in obj]
+    return obj
 
 
 class Command(BaseCommand):
@@ -75,21 +114,34 @@ class Command(BaseCommand):
             style = self.style.ERROR if level == 'error' else self.style.WARNING
             msg = issue['message'] if isinstance(issue, dict) else str(issue)
             self.stdout.write(style(msg))
+        if any((issue.get('level', 'error') if isinstance(issue, dict) else 'error') == 'error'
+               for issue in issues):
+            raise CommandError("site adapters validation failed")
 
     def handle_show_config(self, opts):
         result = show_config(opts["url"], opts["dir"] or settings.LD_SITE_ADAPTERS_DIR)
         self.stdout.write(json.dumps(result, indent=2, ensure_ascii=False))
 
     def handle_metadata(self, opts):
-        config = get_metadata_config(opts["url"])
-        metadata = load_website_metadata(opts["url"], ignore_cache=True)
+        try:
+            config = get_metadata_config(opts["url"])
+            metadata = load_website_metadata(opts["url"], ignore_cache=True)
+        except (requests.RequestException, OSError) as exc:
+            # 网络异常只打印简洁信息，完整 traceback 留作日志，不污染 stdout/stderr
+            raise CommandError(f"metadata fetch failed: {type(exc).__name__}: {exc}") from None
         self.stdout.write(json.dumps({
-            "config": config,
+            "config": _redact_config_for_output(config),
             "metadata": metadata.to_dict(),
         }, indent=2, ensure_ascii=False, default=str))
 
     def handle_cookie(self, opts):
-        config = get_metadata_config(opts["url"]) if opts["section"] == "metadata" else get_snapshot_config(opts["url"])
+        section = opts["section"]
+        if section == "metadata":
+            config = get_metadata_config(opts["url"])
+        elif section == "reader":
+            config = get_reader_config(opts["url"])
+        else:
+            config = get_snapshot_config(opts["url"])
         if not config:
             self.stdout.write(self.style.ERROR("no matching domain config"))
             return
@@ -116,13 +168,16 @@ class Command(BaseCommand):
         from bookmarks.services.snapshot_processor import create_snapshot
 
         url = opts["url"]
-        snapshot_config = get_snapshot_config(url)
-        result = {
-            "metadata_config": get_metadata_config(url),
-            "snapshot_config": snapshot_config,
-            "reader_config": get_reader_config(url),
-            "metadata": load_website_metadata(url, ignore_cache=True).to_dict(),
-        }
+        try:
+            snapshot_config = get_snapshot_config(url)
+            result = {
+                "metadata_config": get_metadata_config(url),
+                "snapshot_config": snapshot_config,
+                "reader_config": get_reader_config(url),
+                "metadata": load_website_metadata(url, ignore_cache=True).to_dict(),
+            }
+        except (requests.RequestException, OSError) as exc:
+            raise CommandError(f"pipeline fetch failed: {type(exc).__name__}: {exc}") from None
         tmp_dir = None
         snapshot_path = opts["output"]
         try:
@@ -150,7 +205,10 @@ class Command(BaseCommand):
                     )
             else:
                 result["reader"] = reader_processor.parse_url(url)
-            self.stdout.write(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+            self.stdout.write(json.dumps(_redact_config_for_output(result), indent=2, ensure_ascii=False, default=str))
+        except (requests.RequestException, OSError) as exc:
+            # 网络异常只打印简洁信息，完整 traceback 留作日志
+            raise CommandError(f"pipeline fetch failed: {type(exc).__name__}: {exc}") from None
         finally:
             if tmp_dir:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -159,8 +217,7 @@ class Command(BaseCommand):
         try:
             data, root = self._load_subscription(opts["source"])
         except Exception as exc:
-            self.stdout.write(self.style.ERROR(f"load failed: {exc}"))
-            return
+            raise CommandError(f"load failed: {exc}") from exc
         issues = self._validate_subscription_data(data, root)
         if not issues:
             self.stdout.write(self.style.SUCCESS(f"subscription ok, {len(data.get('domains', {}))} domains"))
@@ -170,6 +227,9 @@ class Command(BaseCommand):
             style = self.style.ERROR if level == 'error' else self.style.WARNING
             msg = issue['message'] if isinstance(issue, dict) else str(issue)
             self.stdout.write(style(msg))
+        if any((issue.get('level', 'error') if isinstance(issue, dict) else 'error') == 'error'
+               for issue in issues):
+            raise CommandError("subscription validation failed")
 
     def handle_prefetch_subscriptions(self, opts):
         """Download remote subscriptions that are missing or due for refresh."""
@@ -218,7 +278,10 @@ class Command(BaseCommand):
             root = fetch_subscription(source, force=True)
             if not root:
                 raise ValueError("subscription fetch failed")
-            return self._load_subscription_dir(root)
+            # fetch_subscription 返回缓存的 adapters.jsonc 文件路径，
+            # _load_subscription_dir 接收的是目录（内部拼接 adapters.jsonc），
+            # 这里取其所在目录，否则会拼出 adapters.jsonc/adapters.jsonc。
+            return self._load_subscription_dir(os.path.dirname(root))
         if source.startswith("http://"):
             raise ValueError("subscription url must use HTTPS")
         with open(source, encoding="utf-8") as f:
@@ -312,16 +375,17 @@ class Command(BaseCommand):
         if not isinstance(value, str):
             issues.append(_issue('error', 'script_field_not_string', f"{domain_key}.{section}.{field} must be a string path or URL", path=f"{domain_key}.{section}.{field}"))
             return
-        # URL 引用：只检查格式
+        # URL 引用：校验 URL 合法性；外链脚本不会被订阅镜像下载，给出提示
         if value.startswith("http://") or value.startswith("https://"):
+            parsed = urlparse(value)
+            if not parsed.scheme or not parsed.netloc:
+                issues.append(_issue('error', 'script_url_invalid', f"{domain_key}.{section}.{field} invalid script URL: {value}", path=f"{domain_key}.{section}.{field}"))
+            else:
+                issues.append(_issue('warning', 'external_script_not_mirrored', f"{domain_key}.{section}.{field} external script URL is not mirrored by subscriptions; ship it under scripts/ and reference it relatively", path=f"{domain_key}.{section}.{field}"))
             return
-        # 相对路径：相对于根目录解析
-        if value.startswith("./") or value.startswith("../"):
-            script_path = os.path.normpath(os.path.join(root, value))
-        else:
-            script_path = os.path.normpath(os.path.join(root, "scripts", value))
-        if not os.path.exists(script_path):
-            issues.append(_issue('warning', 'script_path_not_found', f"{domain_key}.{section}.{field} script not found locally: {value}", path=f"{domain_key}.{section}.{field}"))
+        # 旧版标量 script 字段（已废弃）：订阅镜像只收集 scripts 数组，标量不会被
+        # 下载，给出明确的升级提示，而不是按本地路径是否存在误导性报错。
+        issues.append(_issue('warning', 'deprecated_scalar_script', f"{domain_key}.{section}.{field} legacy scalar script is deprecated and will NOT be mirrored; migrate to scripts: [{{\"path\": \"{value}\", \"hook\": \"after\"}}]", path=f"{domain_key}.{section}.{field}"))
 
 
     def handle_from_userscript(self, opts):

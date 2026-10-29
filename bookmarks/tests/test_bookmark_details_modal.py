@@ -233,7 +233,7 @@ class BookmarkDetailsModalTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin
         bookmark = self.setup_bookmark(tags=[self.setup_tag(), self.setup_tag()])
         soup = self.get_index_details_modal(bookmark)
         for tag in bookmark.tags.all():
-            tag_el = soup.find("span", {"class": "info-tag"}, string=tag.name)
+            tag_el = soup.find("span", {"class": "info-tag"}, string=f"#{tag.name}")
             self.assertIsNotNone(tag_el)
 
     # ---- Description ----
@@ -425,7 +425,7 @@ class BookmarkDetailsModalTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin
         bookmark = self.setup_bookmark()
         bookmark.health_status = HEALTH_STATUS_BLOCKED
         bookmark.health_details = {
-            "checked_at": "2026-09-15T16:18:00",
+            "checked_at": timezone.now().isoformat(),
             "http_status": 403,
             "reason": "HTTP 403",
         }
@@ -544,7 +544,7 @@ class BookmarkDetailsModalTestCase(TestCase, BookmarkFactoryMixin, HtmlTestMixin
         bookmark.date_deleted = timezone.now()
         bookmark.health_status = HEALTH_STATUS_DEAD
         bookmark.health_details = {
-            "checked_at": "2026-09-15T16:18:00",
+            "checked_at": timezone.now().isoformat(),
             "http_status": 404,
         }
         bookmark.save()

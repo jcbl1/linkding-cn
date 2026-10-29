@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from django.urls import reverse
+from django.utils import timezone
 from playwright.sync_api import expect, sync_playwright
 
 from bookmarks.models import Bookmark
@@ -287,34 +290,70 @@ class BookmarkPagePartialUpdatesE2ETestCase(LinkdingE2ETestCase):
                 self.locate_bulk_edit_bar().locator(".bulk-edit-count")
             ).to_have_text("Selected(100)")
 
-    def test_execute_resets_all_checkboxes(self):
+    def test_execute_keeps_selection_for_non_removing_action(self):
+        # Non-removing actions keep the selection for the next operation.
         self.setup_numbered_bookmarks(100)
 
         with sync_playwright() as p:
             url = reverse("linkding:bookmarks.index")
             page = self.open(url, p)
 
-            # Select all bookmarks, enable select across
             self.locate_bulk_edit_toggle().click()
             self.locate_bulk_edit_select_all().click()
             self.locate_bulk_edit_select_across().click()
 
-            # Execute bulk action
             self.select_bulk_action("Mark as unread")
             self.locate_bulk_edit_bar().get_by_text("Execute").click()
             self.page.get_by_text("Confirm").click()
-
-            # Wait for turbo stream to update the page (checkboxes get reset)
             page.wait_for_timeout(1000)
 
-            # Verify bulk edit checkboxes are reset
+            # Selection preserved after the action
             checkboxes = page.locator("label.bulk-edit-checkbox input")
             self.assertEqual(31, checkboxes.count())
             for i in range(checkboxes.count()):
-                expect(checkboxes.nth(i)).not_to_be_checked()
+                expect(checkboxes.nth(i)).to_be_checked()
+            expect(self.locate_bulk_edit_select_across()).to_be_checked()
+            expect(
+                self.locate_bulk_edit_bar().locator(".bulk-edit-count")
+            ).to_have_text("Selected(100)")
+            expect(
+                self.locate_bulk_edit_bar().locator(
+                    'button[name="bulk_execute"]'
+                )
+            ).to_be_enabled()
 
-            # Toggle select all and verify select across is reset
+            # A second action applies to the same batch
+            self.select_bulk_action("Mark as read")
+            self.locate_bulk_edit_bar().get_by_text("Execute").click()
+            self.page.get_by_text("Confirm").click()
+            page.wait_for_timeout(1000)
+
+            expect(self.locate_bulk_edit_select_across()).to_be_checked()
+            expect(
+                self.locate_bulk_edit_bar().locator(".bulk-edit-count")
+            ).to_have_text("Selected(100)")
+
+        self.assertEqual(0, Bookmark.objects.filter(unread=True).count())
+
+    def test_execute_clears_selection_for_removing_action(self):
+        # Removing actions clear the selection.
+        self.setup_numbered_bookmarks(30)
+
+        with sync_playwright() as p:
+            url = reverse("linkding:bookmarks.index")
+            page = self.open(url, p)
+
+            self.locate_bulk_edit_toggle().click()
             self.locate_bulk_edit_select_all().click()
+
+            self.select_bulk_action("Move to trash")
+            self.locate_bulk_edit_bar().get_by_text("Execute").click()
+            self.page.get_by_text("Confirm").click()
+            page.wait_for_timeout(1000)
+
+            checkboxes = page.locator("label.bulk-edit-checkbox input")
+            for i in range(checkboxes.count()):
+                expect(checkboxes.nth(i)).not_to_be_checked()
             expect(self.locate_bulk_edit_select_across()).not_to_be_checked()
 
     def test_update_select_across_bookmark_count(self):
@@ -500,3 +539,230 @@ class BookmarkPagePartialUpdatesE2ETestCase(LinkdingE2ETestCase):
             self.assertFalse(
                 self.locate_bookmark("Bookmark 2").is_visible()
             )
+
+
+class BulkEditSelectionE2ETestCase(LinkdingE2ETestCase):
+    def setup_grouped_bookmarks(self):
+        now = timezone.now()
+        for i in range(1, 4):
+            self.setup_bookmark(
+                title=f"Today Bookmark {i}", added=now - timedelta(minutes=i)
+            )
+        for i in range(1, 3):
+            self.setup_bookmark(
+                title=f"Older Bookmark {i}", added=now - timedelta(days=40, minutes=i)
+            )
+
+    def item_checkboxes(self):
+        return self.page.locator(
+            "ul.bookmark-list li[ld-bookmark-item] label.bulk-edit-checkbox"
+        )
+
+    def group_checkboxes(self):
+        return self.page.locator("li.group-header label.bulk-group-checkbox")
+
+    def checked_inputs(self):
+        return self.page.locator("ul.bookmark-list input[name='bookmark_id']:checked")
+
+    def checked_count(self):
+        return self.checked_inputs().count()
+
+    def test_group_checkbox_is_hidden_outside_bulk_mode(self):
+        self.setup_grouped_bookmarks()
+
+        with sync_playwright() as p:
+            self.open(reverse("linkding:bookmarks.index"), p)
+
+            expect(self.group_checkboxes()).to_have_count(2)
+            expect(self.group_checkboxes().first).not_to_be_visible()
+
+            self.locate_bulk_edit_toggle().click()
+
+            expect(self.group_checkboxes().first).to_be_visible()
+
+    def test_group_checkbox_selects_only_its_group(self):
+        self.setup_grouped_bookmarks()
+
+        with sync_playwright() as p:
+            self.open(reverse("linkding:bookmarks.index"), p)
+            self.locate_bulk_edit_toggle().click()
+
+            # First group holds the three bookmarks added today
+            self.group_checkboxes().first.click()
+            self.assertEqual(3, self.checked_count())
+            expect(
+                self.locate_bulk_edit_bar().locator(".bulk-edit-count")
+            ).to_have_text("Selected(3)")
+
+            # Clearing the group leaves nothing selected
+            self.group_checkboxes().first.click()
+            self.assertEqual(0, self.checked_count())
+            expect(
+                self.locate_bulk_edit_bar().locator(".bulk-edit-count")
+            ).not_to_be_visible()
+
+    def test_group_checkbox_reflects_partial_selection(self):
+        self.setup_grouped_bookmarks()
+
+        with sync_playwright() as p:
+            self.open(reverse("linkding:bookmarks.index"), p)
+            self.locate_bulk_edit_toggle().click()
+
+            group_input = self.page.locator(
+                "li.group-header label.bulk-group-checkbox input"
+            ).first
+            self.assertFalse(group_input.evaluate("el => el.indeterminate"))
+
+            self.item_checkboxes().first.click()
+
+            self.assertTrue(group_input.evaluate("el => el.indeterminate"))
+            self.assertFalse(group_input.evaluate("el => el.checked"))
+
+            # Selecting the remaining two bookmarks completes the group
+            self.item_checkboxes().nth(1).click()
+            self.item_checkboxes().nth(2).click()
+
+            self.assertTrue(group_input.evaluate("el => el.checked"))
+            self.assertFalse(group_input.evaluate("el => el.indeterminate"))
+
+    def test_shift_click_selects_range_across_groups(self):
+        self.setup_grouped_bookmarks()
+
+        with sync_playwright() as p:
+            self.open(reverse("linkding:bookmarks.index"), p)
+            self.locate_bulk_edit_toggle().click()
+
+            checkboxes = self.item_checkboxes()
+            expect(checkboxes).to_have_count(5)
+
+            # Anchor on the first bookmark, then extend over the group boundary
+            checkboxes.nth(0).click()
+            expect(
+                self.locate_bulk_edit_bar().locator(".bulk-edit-count")
+            ).to_have_text("Selected(1)")
+
+            self.page.keyboard.down("Shift")
+            checkboxes.nth(3).click()
+            self.page.keyboard.up("Shift")
+
+            self.assertEqual(4, self.checked_count())
+            expect(
+                self.locate_bulk_edit_bar().locator(".bulk-edit-count")
+            ).to_have_text("Selected(4)")
+
+    def test_shift_click_clears_range(self):
+        self.setup_grouped_bookmarks()
+
+        with sync_playwright() as p:
+            self.open(reverse("linkding:bookmarks.index"), p)
+            self.locate_bulk_edit_toggle().click()
+
+            checkboxes = self.item_checkboxes()
+            self.locate_bulk_edit_select_all().click()
+            expect(
+                self.locate_bulk_edit_bar().locator(".bulk-edit-count")
+            ).to_have_text("Selected(5)")
+
+            # Anchor on the third bookmark, shift-click the first one: the
+            # range 1-3 is cleared, 4-5 stay selected
+            checkboxes.nth(2).click()
+            self.page.keyboard.down("Shift")
+            checkboxes.nth(0).click()
+            self.page.keyboard.up("Shift")
+
+            self.assertEqual(2, self.checked_count())
+            expect(
+                self.locate_bulk_edit_bar().locator(".bulk-edit-count")
+            ).to_have_text("Selected(2)")
+
+    def test_long_press_arms_range_for_touch(self):
+        self.setup_grouped_bookmarks()
+
+        with sync_playwright() as p:
+            self.open(reverse("linkding:bookmarks.index"), p)
+            self.locate_bulk_edit_toggle().click()
+
+            checkboxes = self.item_checkboxes()
+            hint = self.locate_bulk_edit_bar().locator(".selection-hint")
+            expect(hint).not_to_be_visible()
+
+            checkboxes.nth(0).dispatch_event(
+                "pointerdown",
+                {
+                    "pointerType": "touch",
+                    "clientX": 10,
+                    "clientY": 10,
+                    "bubbles": True,
+                },
+            )
+
+            expect(hint).to_be_visible()
+            expect(hint).to_contain_text("Anchor set")
+            # The long press toggles the anchor itself, showing the direction
+            expect(self.checked_inputs()).to_have_count(1)
+
+            checkboxes.nth(3).click()
+
+            expect(self.checked_inputs()).to_have_count(4)
+            expect(hint).not_to_be_visible()
+            expect(
+                self.locate_bulk_edit_bar().locator(".bulk-edit-count")
+            ).to_have_text("Selected(4)")
+
+    def test_long_press_with_mouse_arms_range(self):
+        self.setup_grouped_bookmarks()
+
+        with sync_playwright() as p:
+            self.open(reverse("linkding:bookmarks.index"), p)
+            self.locate_bulk_edit_toggle().click()
+
+            checkboxes = self.item_checkboxes()
+            hint = self.locate_bulk_edit_bar().locator(".selection-hint")
+
+            # Hold the left button on the first bookmark instead of using shift
+            box = checkboxes.nth(0).bounding_box()
+            self.page.mouse.move(
+                box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+            )
+            self.page.mouse.down()
+
+            expect(hint).to_be_visible()
+            self.page.mouse.up()
+
+            checkboxes.nth(3).click()
+
+            expect(self.checked_inputs()).to_have_count(4)
+            expect(hint).not_to_be_visible()
+
+    def test_long_press_on_selected_bookmark_clears_range(self):
+        self.setup_grouped_bookmarks()
+
+        with sync_playwright() as p:
+            self.open(reverse("linkding:bookmarks.index"), p)
+            self.locate_bulk_edit_toggle().click()
+            self.locate_bulk_edit_select_all().click()
+
+            checkboxes = self.item_checkboxes()
+            hint = self.locate_bulk_edit_bar().locator(".selection-hint")
+
+            checkboxes.nth(3).dispatch_event(
+                "pointerdown",
+                {
+                    "pointerType": "touch",
+                    "clientX": 10,
+                    "clientY": 10,
+                    "bubbles": True,
+                },
+            )
+
+            expect(hint).to_contain_text("clear the range")
+            # The pressed anchor is cleared right away
+            expect(self.checked_inputs()).to_have_count(4)
+
+            checkboxes.nth(0).click()
+
+            # Range 1-4 cleared, bookmark 5 keeps its selection
+            expect(self.checked_inputs()).to_have_count(1)
+            expect(
+                self.locate_bulk_edit_bar().locator(".bulk-edit-count")
+            ).to_have_text("Selected(1)")

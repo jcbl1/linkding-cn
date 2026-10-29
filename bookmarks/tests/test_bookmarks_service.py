@@ -13,8 +13,10 @@ from bookmarks.services.bookmarks import (
     create_html_snapshots,
     delete_bookmarks,
     enhance_with_website_metadata,
+    enrich_bookmarks_metadata,
     mark_bookmarks_as_read,
     mark_bookmarks_as_unread,
+    refresh_bookmarks_favicons,
     refresh_bookmarks_metadata,
     restore_bookmarks,
     share_bookmarks,
@@ -34,12 +36,6 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
     def setUp(self) -> None:
         self.get_or_create_test_user()
 
-        self.mock_schedule_refresh_metadata_patcher = patch(
-            "bookmarks.services.bookmarks.tasks.refresh_metadata"
-        )
-        self.mock_schedule_refresh_metadata = (
-            self.mock_schedule_refresh_metadata_patcher.start()
-        )
         self.mock_load_preview_image_patcher = patch(
             "bookmarks.services.bookmarks.tasks.load_preview_image"
         )
@@ -54,10 +50,6 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
             "bookmarks.services.bookmarks.tasks.load_favicon"
         )
         self.mock_load_favicon = self.mock_load_favicon_patcher.start()
-        self.mock_refresh_favicon_patcher = patch(
-            "bookmarks.services.bookmarks.tasks.refresh_favicon", create=True
-        )
-        self.mock_refresh_favicon = self.mock_refresh_favicon_patcher.start()
         self.mock_create_html_snapshot_patcher = patch(
             "bookmarks.services.bookmarks.tasks.create_html_snapshot"
         )
@@ -66,11 +58,9 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
         )
 
     def tearDown(self):
-        self.mock_schedule_refresh_metadata_patcher.stop()
         self.mock_load_preview_image_patcher.stop()
         self.mock_schedule_metadata_enrichment_patcher.stop()
         self.mock_load_favicon_patcher.stop()
-        self.mock_refresh_favicon_patcher.stop()
         self.mock_create_html_snapshot_patcher.stop()
 
     def test_create_should_not_update_website_metadata(self):
@@ -115,6 +105,7 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
             url="https://example.com",
             title="Initial title",
             description="Initial description",
+            author="Initial author",
             preview_image_remote_url="https://example.com/preview.png",
         )
 
@@ -126,6 +117,24 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
         )
 
         self.mock_schedule_metadata_enrichment.assert_not_called()
+
+    def test_create_should_schedule_metadata_enrichment_when_author_missing(self):
+        # 仅空填充策略：author 为空时仍应触发元数据 enrich
+        bookmark_data = Bookmark(
+            url="https://example.com",
+            title="Initial title",
+            description="Initial description",
+            preview_image_remote_url="https://example.com/preview.png",
+        )
+
+        create_bookmark(
+            bookmark_data,
+            "",
+            self.get_or_create_test_user(),
+            schedule_metadata_enrichment=True,
+        )
+
+        self.mock_schedule_metadata_enrichment.assert_called_once()
 
     def test_create_should_update_existing_bookmark_with_same_url(self):
         original_bookmark = self.setup_bookmark(
@@ -335,6 +344,75 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
         bookmark.refresh_from_db()
         self.assertEqual(bookmark.date_added, custom_date_added)
         self.assertEqual(bookmark.date_modified, custom_date_modified)
+
+    def test_update_should_not_change_date_modified_for_state_only_change(self):
+        bookmark = self.setup_bookmark()
+        original_modified = bookmark.date_modified
+        bookmark.unread = True
+        bookmark.shared = True
+
+        update_bookmark(bookmark, "", self.user)
+
+        bookmark.refresh_from_db()
+        self.assertTrue(bookmark.unread)
+        self.assertTrue(bookmark.shared)
+        self.assertEqual(bookmark.date_modified, original_modified)
+
+    def test_update_should_change_date_modified_for_content_change(self):
+        bookmark = self.setup_bookmark()
+        original_modified = bookmark.date_modified
+        bookmark.title = "Updated title"
+
+        update_bookmark(bookmark, "", self.user)
+
+        bookmark.refresh_from_db()
+        self.assertEqual(bookmark.title, "Updated title")
+        self.assertGreater(bookmark.date_modified, original_modified)
+
+    def test_update_should_change_date_modified_for_notes_change(self):
+        bookmark = self.setup_bookmark()
+        original_modified = bookmark.date_modified
+        bookmark.notes = "Updated notes"
+
+        update_bookmark(bookmark, "", self.user)
+
+        bookmark.refresh_from_db()
+        self.assertGreater(bookmark.date_modified, original_modified)
+
+    def test_update_should_change_date_modified_for_tag_change(self):
+        bookmark = self.setup_bookmark()
+        original_modified = bookmark.date_modified
+
+        update_bookmark(bookmark, "new-tag", self.user)
+
+        bookmark.refresh_from_db()
+        self.assertEqual(list(bookmark.tag_names), ["new-tag"])
+        self.assertGreater(bookmark.date_modified, original_modified)
+
+    def test_update_should_not_change_date_modified_when_tags_unchanged(self):
+        tag = self.setup_tag()
+        bookmark = self.setup_bookmark(tags=[tag])
+        original_modified = bookmark.date_modified
+
+        update_bookmark(bookmark, tag.name, self.user)
+
+        bookmark.refresh_from_db()
+        self.assertEqual(bookmark.date_modified, original_modified)
+
+    def test_update_should_skip_tags_when_caller_reports_no_tag_change(self):
+        tag = self.setup_tag()
+        bookmark = self.setup_bookmark(tags=[tag])
+        original_modified = bookmark.date_modified
+        bookmark.unread = True
+
+        update_bookmark(
+            bookmark, "ignored-tag", self.user, tags_may_have_changed=False
+        )
+
+        bookmark.refresh_from_db()
+        self.assertTrue(bookmark.unread)
+        self.assertEqual(list(bookmark.tag_names), [tag.name])
+        self.assertEqual(bookmark.date_modified, original_modified)
 
     def test_update_should_create_web_archive_snapshot_if_url_did_change(self):
         with patch.object(
@@ -703,6 +781,63 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
         self.assertCountEqual(bookmark2.tags.all(), [tag1, tag2])
         self.assertCountEqual(bookmark3.tags.all(), [tag1, tag2])
         self.assertEqual(6, BookmarkToTagRelationShip.objects.count())
+
+    def test_tag_bookmarks_should_not_update_date_modified_when_relationship_exists(
+        self,
+    ):
+        tag = self.setup_tag()
+        bookmark = self.setup_bookmark(tags=[tag])
+        old_date_modified = bookmark.date_modified
+
+        tag_bookmarks([bookmark.id], tag.name, self.get_or_create_test_user())
+
+        bookmark.refresh_from_db()
+        self.assertEqual(bookmark.date_modified, old_date_modified)
+
+    def test_tag_bookmarks_should_update_date_modified_when_tagging(self):
+        tag = self.setup_tag()
+        bookmark = self.setup_bookmark()
+        old_date_modified = bookmark.date_modified
+
+        tag_bookmarks([bookmark.id], tag.name, self.get_or_create_test_user())
+
+        bookmark.refresh_from_db()
+        self.assertGreater(bookmark.date_modified, old_date_modified)
+
+    def test_untag_bookmarks_should_not_create_tags(self):
+        bookmark = self.setup_bookmark()
+
+        untag_bookmarks(
+            [bookmark.id], "does-not-exist", self.get_or_create_test_user()
+        )
+
+        self.assertFalse(
+            Tag.objects.filter(
+                owner=self.get_or_create_test_user(), name="does-not-exist"
+            ).exists()
+        )
+
+    def test_untag_bookmarks_should_not_update_date_modified_when_nothing_removed(
+        self,
+    ):
+        tag = self.setup_tag()
+        bookmark = self.setup_bookmark()
+        old_date_modified = bookmark.date_modified
+
+        untag_bookmarks([bookmark.id], tag.name, self.get_or_create_test_user())
+
+        bookmark.refresh_from_db()
+        self.assertEqual(bookmark.date_modified, old_date_modified)
+
+    def test_untag_bookmarks_should_update_date_modified_when_removing(self):
+        tag = self.setup_tag()
+        bookmark = self.setup_bookmark(tags=[tag])
+        old_date_modified = bookmark.date_modified
+
+        untag_bookmarks([bookmark.id], tag.name, self.get_or_create_test_user())
+
+        bookmark.refresh_from_db()
+        self.assertGreater(bookmark.date_modified, old_date_modified)
 
     def test_tag_bookmarks_should_only_tag_specified_bookmarks(self):
         bookmark1 = self.setup_bookmark()
@@ -1119,32 +1254,140 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
             self.assertEqual("", bookmark.title)
             self.assertEqual("", bookmark.description)
 
+    def test_enhance_with_website_metadata_fills_author_only_when_empty(self):
+        bookmark = self.setup_bookmark(url="https://example.com")
+        with patch.object(
+            website_loader, "load_website_metadata"
+        ) as mock_load_website_metadata:
+            mock_load_website_metadata.return_value = website_loader.WebsiteMetadata(
+                url="https://example.com",
+                title="Website title",
+                description="Website description",
+                author="Website author",
+                preview_image=None,
+            )
+
+            # empty author is filled
+            bookmark.title = ""
+            bookmark.description = ""
+            bookmark.author = ""
+            bookmark.save()
+            enhance_with_website_metadata(bookmark)
+            bookmark.refresh_from_db()
+
+            self.assertEqual("Website author", bookmark.author)
+
+            # existing author is not overwritten (仅空填充)
+            bookmark.author = "Initial author"
+            bookmark.save()
+            enhance_with_website_metadata(bookmark)
+            bookmark.refresh_from_db()
+
+            self.assertEqual("Initial author", bookmark.author)
+
+            # metadata returns no author, empty author stays empty
+            mock_load_website_metadata.return_value = website_loader.WebsiteMetadata(
+                url="https://example.com",
+                title="Website title",
+                description="Website description",
+                preview_image=None,
+            )
+            bookmark.author = ""
+            bookmark.save()
+            enhance_with_website_metadata(bookmark)
+            bookmark.refresh_from_db()
+
+            self.assertEqual("", bookmark.author)
+
+    def test_enrich_bookmarks_metadata(self):
+        bookmark1 = self.setup_bookmark()
+        bookmark2 = self.setup_bookmark()
+        bookmark3 = self.setup_bookmark()
+
+        enrich_bookmarks_metadata(
+            [bookmark1.id, bookmark2.id, bookmark3.id], self.get_or_create_test_user()
+        )
+
+        self.assertEqual(self.mock_schedule_metadata_enrichment.call_count, 3)
+        self.mock_create_html_snapshot.assert_not_called()
+
+    def test_enrich_bookmarks_metadata_should_only_enrich_specified_bookmarks(self):
+        bookmark1 = self.setup_bookmark()
+        bookmark2 = self.setup_bookmark()
+        bookmark3 = self.setup_bookmark()
+
+        enrich_bookmarks_metadata(
+            [bookmark1.id, bookmark3.id], self.get_or_create_test_user()
+        )
+
+        self.assertEqual(self.mock_schedule_metadata_enrichment.call_count, 2)
+
+        for call_args in self.mock_schedule_metadata_enrichment.call_args_list:
+            args, kwargs = call_args
+            self.assertNotIn(bookmark2.id, args)
+
+    def test_enrich_bookmarks_metadata_should_only_enrich_user_owned_bookmarks(self):
+        other_user = self.setup_user()
+        bookmark1 = self.setup_bookmark()
+        bookmark2 = self.setup_bookmark()
+        inaccessible_bookmark = self.setup_bookmark(user=other_user)
+
+        enrich_bookmarks_metadata(
+            [bookmark1.id, bookmark2.id, inaccessible_bookmark.id],
+            self.get_or_create_test_user(),
+        )
+
+        self.assertEqual(self.mock_schedule_metadata_enrichment.call_count, 2)
+
+        for call_args in self.mock_schedule_metadata_enrichment.call_args_list:
+            args, kwargs = call_args
+            self.assertNotIn(inaccessible_bookmark.id, args)
+
+    def test_enrich_bookmarks_metadata_should_accept_mix_of_int_and_string_ids(self):
+        bookmark1 = self.setup_bookmark()
+        bookmark2 = self.setup_bookmark()
+        bookmark3 = self.setup_bookmark()
+
+        enrich_bookmarks_metadata(
+            [str(bookmark1.id), str(bookmark2.id), bookmark3.id],
+            self.get_or_create_test_user(),
+        )
+
+        self.assertEqual(self.mock_schedule_metadata_enrichment.call_count, 3)
+
     def test_refresh_bookmarks_metadata(self):
         bookmark1 = self.setup_bookmark()
         bookmark2 = self.setup_bookmark()
         bookmark3 = self.setup_bookmark()
 
-        refresh_bookmarks_metadata(
-            [bookmark1.id, bookmark2.id, bookmark3.id], self.get_or_create_test_user()
-        )
+        with patch(
+            "bookmarks.services.bookmarks.tasks.schedule_metadata_refresh"
+        ) as mock_schedule_metadata_refresh:
+            refresh_bookmarks_metadata(
+                [bookmark1.id, bookmark2.id, bookmark3.id],
+                self.get_or_create_test_user(),
+            )
 
-        self.assertEqual(self.mock_schedule_refresh_metadata.call_count, 3)
-        self.assertEqual(self.mock_refresh_favicon.call_count, 3)
+            self.assertEqual(mock_schedule_metadata_refresh.call_count, 3)
+        self.mock_create_html_snapshot.assert_not_called()
 
     def test_refresh_bookmarks_metadata_should_only_refresh_specified_bookmarks(self):
         bookmark1 = self.setup_bookmark()
         bookmark2 = self.setup_bookmark()
         bookmark3 = self.setup_bookmark()
 
-        refresh_bookmarks_metadata(
-            [bookmark1.id, bookmark3.id], self.get_or_create_test_user()
-        )
+        with patch(
+            "bookmarks.services.bookmarks.tasks.schedule_metadata_refresh"
+        ) as mock_schedule_metadata_refresh:
+            refresh_bookmarks_metadata(
+                [bookmark1.id, bookmark3.id], self.get_or_create_test_user()
+            )
 
-        self.assertEqual(self.mock_schedule_refresh_metadata.call_count, 2)
-
-        for call_args in self.mock_schedule_refresh_metadata.call_args_list:
-            args, kwargs = call_args
-            self.assertNotIn(bookmark2.id, args)
+            self.assertEqual(mock_schedule_metadata_refresh.call_count, 2)
+            scheduled_ids = {
+                call.args[0].id for call in mock_schedule_metadata_refresh.call_args_list
+            }
+            self.assertNotIn(bookmark2.id, scheduled_ids)
 
     def test_refresh_bookmarks_metadata_should_only_refresh_user_owned_bookmarks(self):
         other_user = self.setup_user()
@@ -1152,28 +1395,74 @@ class BookmarkServiceTestCase(TestCase, BookmarkFactoryMixin):
         bookmark2 = self.setup_bookmark()
         inaccessible_bookmark = self.setup_bookmark(user=other_user)
 
-        refresh_bookmarks_metadata(
-            [bookmark1.id, bookmark2.id, inaccessible_bookmark.id],
-            self.get_or_create_test_user(),
-        )
+        with patch(
+            "bookmarks.services.bookmarks.tasks.schedule_metadata_refresh"
+        ) as mock_schedule_metadata_refresh:
+            refresh_bookmarks_metadata(
+                [bookmark1.id, bookmark2.id, inaccessible_bookmark.id],
+                self.get_or_create_test_user(),
+            )
 
-        self.assertEqual(self.mock_schedule_refresh_metadata.call_count, 2)
-
-        for call_args in self.mock_schedule_refresh_metadata.call_args_list:
-            args, kwargs = call_args
-            self.assertNotIn(inaccessible_bookmark.id, args)
+            self.assertEqual(mock_schedule_metadata_refresh.call_count, 2)
+            scheduled_ids = {
+                call.args[0].id for call in mock_schedule_metadata_refresh.call_args_list
+            }
+            self.assertNotIn(inaccessible_bookmark.id, scheduled_ids)
 
     def test_refresh_bookmarks_metadata_should_accept_mix_of_int_and_string_ids(self):
         bookmark1 = self.setup_bookmark()
         bookmark2 = self.setup_bookmark()
         bookmark3 = self.setup_bookmark()
 
-        refresh_bookmarks_metadata(
-            [str(bookmark1.id), str(bookmark2.id), bookmark3.id],
-            self.get_or_create_test_user(),
+        with patch(
+            "bookmarks.services.bookmarks.tasks.schedule_metadata_refresh"
+        ) as mock_schedule_metadata_refresh:
+            refresh_bookmarks_metadata(
+                [str(bookmark1.id), str(bookmark2.id), bookmark3.id],
+                self.get_or_create_test_user(),
+            )
+
+            self.assertEqual(mock_schedule_metadata_refresh.call_count, 3)
+
+    def test_enrich_bookmarks_metadata_should_skip_complete_bookmarks(self):
+        complete = self.setup_bookmark(
+            title="Title", description="Description", author="Author"
+        )
+        complete.preview_image_remote_url = "https://example.com/preview.png"
+        complete.save(update_fields=["preview_image_remote_url"])
+        incomplete = self.setup_bookmark(title="", description="", author="")
+
+        enrich_bookmarks_metadata(
+            [complete.id, incomplete.id], self.get_or_create_test_user()
         )
 
-        self.assertEqual(self.mock_schedule_refresh_metadata.call_count, 3)
+        self.assertEqual(self.mock_schedule_metadata_enrichment.call_count, 1)
+        scheduled = self.mock_schedule_metadata_enrichment.call_args.args[0]
+        self.assertEqual(scheduled.id, incomplete.id)
+
+    def test_bulk_actions_should_ignore_invalid_bookmark_ids(self):
+        bookmark = self.setup_bookmark()
+
+        archive_bookmarks(
+            ["not-a-number", str(bookmark.id)], self.get_or_create_test_user()
+        )
+
+        bookmark.refresh_from_db()
+        self.assertTrue(bookmark.is_archived)
+
+    def test_refresh_bookmarks_favicons_delegates_to_task_layer(self):
+        bookmark = self.setup_bookmark()
+
+        with patch(
+            "bookmarks.services.bookmarks.tasks.refresh_favicons_for_bookmarks"
+        ) as mock_refresh:
+            refresh_bookmarks_favicons([bookmark.id], self.get_or_create_test_user())
+
+            mock_refresh.assert_called_once()
+            passed_bookmarks = mock_refresh.call_args.args[1]
+            self.assertEqual(
+                list(passed_bookmarks.values_list("id", flat=True)), [bookmark.id]
+            )
 
     def test_trash_bookmark(self):
         bookmark = self.setup_bookmark()

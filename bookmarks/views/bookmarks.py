@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import random as rng
 import time
 import urllib.parse
@@ -25,6 +26,9 @@ from django.utils.translation import gettext as _
 from bookmarks import queries, utils
 from bookmarks.forms import BookmarkForm
 from bookmarks.middlewares import (
+    PREF_COOKIE_AUTHOR_GROUPING,
+    PREF_COOKIE_AUTHOR_MODE,
+    PREF_COOKIE_AUTHOR_SORT,
     PREF_COOKIE_DOMAIN_COMPACT_MODE,
     PREF_COOKIE_DOMAIN_VIEW_MODE,
     PREF_COOKIE_TAG_GROUPING,
@@ -46,6 +50,7 @@ from bookmarks.services.bookmarks import (
     create_html_articles,
     create_html_snapshots,
     delete_bookmarks,
+    enrich_bookmarks_metadata,
     mark_bookmarks_as_read,
     mark_bookmarks_as_unread,
     refresh_bookmarks_favicons,
@@ -71,11 +76,14 @@ from bookmarks.views.health_check import (
     start_ids_job,
 )
 
+logger = logging.getLogger(__name__)
+
 SIDEBAR_MODULE_TEMPLATES = {
     UserProfile.SIDEBAR_MODULE_SUMMARY: "bookmarks/sidebar/modules/summary/index.html",
     UserProfile.SIDEBAR_MODULE_BUNDLES: "bookmarks/sidebar/modules/bundles/index.html",
     UserProfile.SIDEBAR_MODULE_DOMAINS: "bookmarks/sidebar/modules/domains/index.html",
     UserProfile.SIDEBAR_MODULE_TAGS: "bookmarks/sidebar/modules/tags/index.html",
+    UserProfile.SIDEBAR_MODULE_AUTHORS: "bookmarks/sidebar/modules/authors/index.html",
 }
 
 
@@ -85,6 +93,7 @@ def _build_sidebar_modules(request: HttpRequest, context: dict) -> list[dict]:
         UserProfile.SIDEBAR_MODULE_BUNDLES: context.get("bundles") is not None,
         UserProfile.SIDEBAR_MODULE_DOMAINS: context.get("domains") is not None,
         UserProfile.SIDEBAR_MODULE_TAGS: context.get("tag_cloud") is not None,
+        UserProfile.SIDEBAR_MODULE_AUTHORS: context.get("author_cloud") is not None,
     }
     wrapper_ids = {
         UserProfile.SIDEBAR_MODULE_SUMMARY: "sidebar-user-summary-container",
@@ -109,12 +118,14 @@ def _build_sidebar_modules(request: HttpRequest, context: dict) -> list[dict]:
 SUMMARY_ACTIONS = {"toggle_mode", "toggle_show_weekdays", "toggle_show_details", "nav_month", "nav_week"}
 DOMAIN_ACTIONS = {"toggle_domain_view_mode", "toggle_domain_compact_mode"}
 TAG_ACTIONS = {"toggle_tag_grouping"}
+AUTHOR_ACTIONS = {"toggle_author_mode"}
 
 # Maps preference actions to cookie names for anonymous users
 _ANONYMOUS_PREF_COOKIE_MAP = {
     "toggle_domain_view_mode": PREF_COOKIE_DOMAIN_VIEW_MODE,
     "toggle_domain_compact_mode": PREF_COOKIE_DOMAIN_COMPACT_MODE,
     "toggle_tag_grouping": PREF_COOKIE_TAG_GROUPING,
+    "toggle_author_mode": PREF_COOKIE_AUTHOR_MODE,
 }
 _PREF_COOKIE_MAX_AGE = 365 * 24 * 60 * 60  # 1 year
 
@@ -138,6 +149,18 @@ def _get_domain_tag_contexts(request: HttpRequest):
     return contexts.ActiveDomainsContext, contexts.ActiveTagCloudContext
 
 
+def _get_author_context(request: HttpRequest):
+    """Return the AuthorCloudContext class for the current page."""
+    path = request.path
+    if "/shared" in path:
+        return contexts.SharedAuthorCloudContext
+    if "/archived" in path:
+        return contexts.ArchivedAuthorCloudContext
+    if "/trash" in path:
+        return contexts.TrashedAuthorCloudContext
+    return contexts.ActiveAuthorCloudContext
+
+
 def _handle_preference_toggle(request: HttpRequest):
     action = request.POST["pref_action"]
     profile = request.user_profile
@@ -155,6 +178,11 @@ def _handle_preference_toggle(request: HttpRequest):
         profile.domain_compact_mode = request.POST["value"] == "1"
     elif action == "toggle_tag_grouping":
         profile.tag_grouping = request.POST["value"]
+    elif action == "toggle_author_mode":
+        (
+            profile.author_grouping,
+            profile.author_sort,
+        ) = UserProfile.author_grouping_sort_for(request.POST["value"])
 
     if is_anonymous:
         request.user_profile = profile
@@ -201,6 +229,15 @@ def _handle_preference_toggle(request: HttpRequest):
             "bookmarks/sidebar/modules/tags/index.html",
             {"tag_cloud": tag_cloud},
         )
+    elif action in AUTHOR_ACTIONS:
+        AuthorCloudCtx = _get_author_context(request)
+        author_cloud = AuthorCloudCtx(request, search)
+        response = turbo.update(
+            request,
+            "author-section-container",
+            "bookmarks/sidebar/modules/authors/index.html",
+            {"author_cloud": author_cloud},
+        )
     else:
         return HttpResponseRedirect(reverse("linkding:bookmarks.index"))
 
@@ -237,6 +274,7 @@ def index(request: HttpRequest):
     bundles = contexts.BundlesContext(request)
     domains = contexts.ActiveDomainsContext(request, search)
     tag_cloud = contexts.ActiveTagCloudContext(request, search)
+    author_cloud = contexts.ActiveAuthorCloudContext(request, search)
     bookmark_details = contexts.get_details_context(
         request, contexts.ActiveBookmarkDetailsContext
     )
@@ -251,6 +289,7 @@ def index(request: HttpRequest):
             "bundles": bundles,
             "domains": domains,
             "tag_cloud": tag_cloud,
+            "author_cloud": author_cloud,
             "details": bookmark_details,
             "create_bundle_query_string": create_bundle_query_string,
         },
@@ -282,6 +321,7 @@ def archived(request: HttpRequest):
     bundles = contexts.BundlesContext(request)
     domains = contexts.ArchivedDomainsContext(request, search)
     tag_cloud = contexts.ArchivedTagCloudContext(request, search)
+    author_cloud = contexts.ArchivedAuthorCloudContext(request, search)
     bookmark_details = contexts.get_details_context(
         request, contexts.ArchivedBookmarkDetailsContext
     )
@@ -295,6 +335,7 @@ def archived(request: HttpRequest):
             "bundles": bundles,
             "domains": domains,
             "tag_cloud": tag_cloud,
+            "author_cloud": author_cloud,
             "details": bookmark_details,
             "create_bundle_query_string": create_bundle_query_string,
         },
@@ -324,6 +365,7 @@ def shared(request: HttpRequest):
     bookmark_list = contexts.SharedBookmarkListContext(request, search)
     domains = contexts.SharedDomainsContext(request, search)
     tag_cloud = contexts.SharedTagCloudContext(request, search)
+    author_cloud = contexts.SharedAuthorCloudContext(request, search)
     bookmark_details = contexts.get_details_context(
         request, contexts.SharedBookmarkDetailsContext
     )
@@ -339,6 +381,7 @@ def shared(request: HttpRequest):
             "bookmark_list": bookmark_list,
             "domains": domains,
             "tag_cloud": tag_cloud,
+            "author_cloud": author_cloud,
             "details": bookmark_details,
             "users": users,
             "rss_feed_url": reverse("linkding:feeds.public_shared"),
@@ -377,6 +420,7 @@ def trashed(request: HttpRequest):
     bundles = contexts.BundlesContext(request)
     domains = contexts.TrashedDomainsContext(request, search)
     tag_cloud = contexts.TrashedTagCloudContext(request, search)
+    author_cloud = contexts.TrashedAuthorCloudContext(request, search)
     bookmark_details = contexts.get_details_context(
         request, contexts.TrashedBookmarkDetailsContext
     )
@@ -390,6 +434,7 @@ def trashed(request: HttpRequest):
             "bundles": bundles,
             "domains": domains,
             "tag_cloud": tag_cloud,
+            "author_cloud": author_cloud,
             "details": bookmark_details,
             "create_bundle_query_string": create_bundle_query_string,
         },
@@ -425,6 +470,7 @@ def render_bookmarks_view(request: HttpRequest, template_name, context):
         context.setdefault("bundles", None)
         context.setdefault("domains", None)
         context.setdefault("tag_cloud", None)
+        context.setdefault("author_cloud", None)
         context["sidebar_lazy_load"] = True
 
     # Domain config fingerprint for client-side sessionStorage cache busting
@@ -1089,10 +1135,10 @@ def handle_action(request: HttpRequest, query: QuerySet[Bookmark] = None):
         if bulk_action == "bulk_delete":
             return delete_bookmarks(bookmark_ids, request.user)
         if bulk_action == "bulk_tag":
-            tag_string = convert_tag_string(request.POST["bulk_tag_string"])
+            tag_string = convert_tag_string(request.POST.get("bulk_tag_string", ""))
             return tag_bookmarks(bookmark_ids, tag_string, request.user)
         if bulk_action == "bulk_untag":
-            tag_string = convert_tag_string(request.POST["bulk_tag_string"])
+            tag_string = convert_tag_string(request.POST.get("bulk_tag_string", ""))
             return untag_bookmarks(bookmark_ids, tag_string, request.user)
         if bulk_action == "bulk_read":
             return mark_bookmarks_as_read(bookmark_ids, request.user)
@@ -1102,7 +1148,9 @@ def handle_action(request: HttpRequest, query: QuerySet[Bookmark] = None):
             return share_bookmarks(bookmark_ids, request.user)
         if bulk_action == "bulk_unshare":
             return unshare_bookmarks(bookmark_ids, request.user)
-        if bulk_action == "bulk_refresh":
+        if bulk_action == "bulk_enrich_metadata":
+            return enrich_bookmarks_metadata(bookmark_ids, request.user)
+        if bulk_action == "bulk_refresh_metadata":
             return refresh_bookmarks_metadata(bookmark_ids, request.user)
         if bulk_action == "bulk_refresh_favicon":
             return refresh_bookmarks_favicons(bookmark_ids, request.user)
@@ -1133,6 +1181,13 @@ def handle_action(request: HttpRequest, query: QuerySet[Bookmark] = None):
             return create_html_articles(bookmark_ids, request.user)
         if bulk_action == "bulk_remove_article":
             return remove_all_html_articles(bookmark_ids, request.user)
+
+        logger.warning(
+            "Ignoring unknown bulk action. action=%s user=%s count=%s",
+            bulk_action,
+            request.user.username,
+            len(bookmark_ids),
+        )
 
 
 @login_required

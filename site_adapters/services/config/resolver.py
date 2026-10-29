@@ -60,10 +60,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Default lazy-load attribute names used when process_lazy_images is true.
-# Kept in sync with DEFAULT_LAZY_ATTRS in snapshot_browser_script.js.
+# Kept in sync with DEFAULT_LAZY_ATTRS in snapshot_browser_script.js (incl. the
+# trailing "src" fallback). This list is merged into section-level custom attrs
+# and passed to the browser script, so it must match the JS default exactly.
 _DEFAULT_LAZY_ATTRS = [
     "data-src", "data-actualsrc", "data-original", "data-lazy-src",
     "data-original-src", "data-actual-image", "data-lazy", "data-defer-src",
+    "src",
 ]
 
 
@@ -398,12 +401,16 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
             result['select_title'] = section_data['select_title']
         if 'select_description' in section_data:
             result['select_description'] = section_data['select_description']
+        if 'select_author' in section_data:
+            result['select_author'] = section_data['select_author']
         if 'select_image' in section_data:
             result['select_image'] = section_data['select_image']
         if 'rewrite_title' in section_data:
             result['rewrite_title'] = section_data['rewrite_title']
         if 'rewrite_description' in section_data:
             result['rewrite_description'] = section_data['rewrite_description']
+        if 'rewrite_author' in section_data:
+            result['rewrite_author'] = section_data['rewrite_author']
         if 'rewrite_image' in section_data:
             result['rewrite_image'] = section_data['rewrite_image']
         result['scripts'] = section_data.get('scripts')
@@ -443,6 +450,12 @@ def _build_section_config(full_config: dict, section: str, base_dir: str, userna
 
     elif section == 'health':
         result['health_enabled'] = section_data.get('enabled', True)
+        # Health 判定字段透传：仅支持嵌套块写法（http_head_probe.* /
+        # content_check.*），由 health_checker._normalize_config 消费。此前仅
+        # 输出 health_enabled，导致 health 段配置的判定字段被丢弃。
+        for key in ('http_head_probe', 'content_check', 'max_content_limit', 'reason'):
+            if key in section_data:
+                result[key] = section_data[key]
 
     # URL processing
     url = full_config.get('_url', '')

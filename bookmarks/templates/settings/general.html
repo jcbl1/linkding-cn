@@ -176,7 +176,7 @@
               </div>
               <div id="settings-custom-css-panel" data-settings-panel-body hidden>
                 {% formfield custom_css_form.custom_css class="form-input settings-textarea monospace" rows="8" data_settings_draft_input="" %}
-                <div class="settings-field-errors" data-field-error-for="custom_css"></div>
+                <div class="field-errors" data-field-error-for="custom_css"></div>
                 <div class="settings-panel-footer">
                   <button type="button"
                           class="btn settings-draft-button"
@@ -200,7 +200,31 @@
           <form action="{% url 'linkding:settings.save' %}" method="post" class="settings-card" data-settings-save-mode="instant">
             {% csrf_token %}
             <input type="hidden" name="form_id" value="profile_quick">
-            <input type="hidden" name="form_fields" value="items_per_page,sticky_header_controls,sticky_pagination">
+            <input type="hidden" name="form_fields" value="bookmark_view_mode,group_by_date,items_per_page,sticky_header_controls,sticky_pagination">
+            <div class="settings-row">
+              <div class="settings-copy">
+                <label for="{{ profile_quick_form.bookmark_view_mode.id_for_label }}" class="settings-label">{% translate "List view" %}</label>
+                <div class="form-input-hint">
+                  {% translate "Choose how bookmarks are arranged in the list." %}
+                </div>
+              </div>
+              <div class="settings-control">
+                {% formfield profile_quick_form.bookmark_view_mode class="form-select settings-select-input" %}
+                <div class="field-errors" data-field-error-for="bookmark_view_mode"></div>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-copy">
+                <label for="{{ profile_quick_form.group_by_date.id_for_label }}" class="settings-label">{% translate "Group by date" %}</label>
+                <div class="form-input-hint">
+                  {% translate "Group bookmarks by when they were added: today, yesterday, this week, this month, by month." %}
+                </div>
+              </div>
+              <label for="{{ profile_quick_form.group_by_date.id_for_label }}" class="form-switch settings-switch">
+                {{ profile_quick_form.group_by_date }}
+                <i class="form-icon"></i>
+              </label>
+            </div>
             <div class="settings-row">
               <div class="settings-copy">
                 <label for="{{ profile_quick_form.items_per_page.id_for_label }}" class="settings-label">{% translate "Bookmarks per page" %}</label>
@@ -210,7 +234,7 @@
               </div>
               <div class="settings-control">
                 {% formfield profile_quick_form.items_per_page class="form-input settings-number-input settings-number-input-compact" min="10" %}
-                <div class="settings-field-errors" data-field-error-for="items_per_page"></div>
+                <div class="field-errors" data-field-error-for="items_per_page"></div>
               </div>
             </div>
             <div class="settings-row">
@@ -386,7 +410,7 @@
                       </li>
                     {% endfor %}
                   </ul>
-                  <div class="settings-field-errors" data-field-error-for="sidebar_modules"></div>
+                  <div class="field-errors" data-field-error-for="sidebar_modules"></div>
                 </div>
               </div>
             </div>
@@ -471,7 +495,7 @@ reddit.com/r/Music music reddit</pre>
               </div>
               <div id="settings-auto-tagging-panel" data-settings-panel-body hidden>
                 {% formfield auto_tagging_rules_form.auto_tagging_rules class="form-input settings-textarea monospace" rows="8" data_settings_draft_input="" %}
-                <div class="settings-field-errors" data-field-error-for="auto_tagging_rules"></div>
+                <div class="field-errors" data-field-error-for="auto_tagging_rules"></div>
                 <div class="settings-panel-footer">
                   <button type="button"
                           class="btn settings-draft-button"
@@ -530,7 +554,7 @@ reddit.com/r/Music music reddit</pre>
               </div>
               <div id="settings-custom-domain-panel" data-settings-panel-body hidden>
                 {% formfield custom_domain_root_form.custom_domain_root class="form-input settings-textarea monospace" rows="8" data_settings_draft_input="" %}
-                <div class="settings-field-errors" data-field-error-for="custom_domain_root"></div>
+                <div class="field-errors" data-field-error-for="custom_domain_root"></div>
                 <div class="settings-panel-footer">
                   <button type="button"
                           class="btn settings-draft-button"
@@ -599,7 +623,7 @@ reddit.com/r/Music music reddit</pre>
               </div>
               <div class="settings-control">
                 {% formfield profile_quick_form.bookmark_description_max_lines class="form-input settings-number-input" min="1" %}
-                <div class="settings-field-errors" data-field-error-for="bookmark_description_max_lines"></div>
+                <div class="field-errors" data-field-error-for="bookmark_description_max_lines"></div>
               </div>
             </div>
 
@@ -1024,7 +1048,7 @@ reddit.com/r/Music music reddit</pre>
                       </li>
                     {% endfor %}
                   </ul>
-                  <div class="settings-field-errors" data-field-error-for="bookmark_actions"></div>
+                  <div class="field-errors" data-field-error-for="bookmark_actions"></div>
                 </div>
               </div>
             </div>
@@ -1083,6 +1107,8 @@ reddit.com/r/Music music reddit</pre>
                             <svg class="settings-action-preview" xmlns="http://www.w3.org/2000/svg" width="16" height="16"><use xlink:href="#ld-icon-edit-title"></use></svg>
                           {% elif item.key == "description" %}
                             <svg class="settings-action-preview" xmlns="http://www.w3.org/2000/svg" width="16" height="16"><use xlink:href="#ld-icon-edit-description"></use></svg>
+                          {% elif item.key == "author" %}
+                            <svg class="settings-action-preview" xmlns="http://www.w3.org/2000/svg" width="16" height="16"><use xlink:href="#ld-icon-edit-author"></use></svg>
                           {% elif item.key == "notes" %}
                             <svg class="settings-action-preview" xmlns="http://www.w3.org/2000/svg" width="16" height="16"><use xlink:href="#ld-icon-note"></use></svg>
                           {% elif item.key == "tags" %}
@@ -1097,7 +1123,7 @@ reddit.com/r/Music music reddit</pre>
                       </li>
                     {% endfor %}
                   </ul>
-                  <div class="settings-field-errors" data-field-error-for="bookmark_quick_edits"></div>
+                  <div class="field-errors" data-field-error-for="bookmark_quick_edits"></div>
                 </div>
               </div>
             </div>
@@ -1173,7 +1199,7 @@ reddit.com/r/Music music reddit</pre>
                       </li>
                     {% endfor %}
                   </ul>
-                  <div class="settings-field-errors" data-field-error-for="bookmark_statuses"></div>
+                  <div class="field-errors" data-field-error-for="bookmark_statuses"></div>
                 </div>
               </div>
             </div>
@@ -1208,6 +1234,7 @@ reddit.com/r/Music music reddit</pre>
                             data-settings-panel-collapsed-label="{% translate 'Expand' %}"
                             aria-controls="settings-bookmark-quick-tags-panel"
                             aria-label="{% translate 'Expand' %}"
+                            {% if not profile_quick_form.bookmark_quick_tag_items %}hidden{% endif %}
                             aria-expanded="false">
                       <span class="text-assistive" data-settings-panel-toggle-label>
                         {% translate "Expand" %}
@@ -1267,7 +1294,7 @@ reddit.com/r/Music music reddit</pre>
                       </li>
                     {% endfor %}
                   </ul>
-                  <div class="settings-field-errors" data-field-error-for="bookmark_quick_tags"></div>
+                  <div class="field-errors" data-field-error-for="bookmark_quick_tags"></div>
                 </div>
               </div>
             </div>
@@ -1300,7 +1327,7 @@ reddit.com/r/Music music reddit</pre>
               </div>
               <div class="settings-control">
                 {% formfield health_form.health_max_age_days class="form-input settings-number-input" min="0" placeholder=health_defaults.max_age_days %}
-                <div class="settings-field-errors" data-field-error-for="health_max_age_days"></div>
+                <div class="field-errors" data-field-error-for="health_max_age_days"></div>
               </div>
             </div>
             <div class="settings-row">
@@ -1316,7 +1343,7 @@ reddit.com/r/Music music reddit</pre>
               </div>
               <div class="settings-control">
                 {% formfield health_form.health_check_workers class="form-input settings-number-input" min="1" placeholder=health_defaults.workers %}
-                <div class="settings-field-errors" data-field-error-for="health_check_workers"></div>
+                <div class="field-errors" data-field-error-for="health_check_workers"></div>
               </div>
             </div>
             <div class="settings-row">
@@ -1332,7 +1359,7 @@ reddit.com/r/Music music reddit</pre>
               </div>
               <div class="settings-control">
                 {% formfield health_form.health_domain_interval class="form-input settings-number-input" min="0" step="0.5" placeholder=health_defaults.domain_interval %}
-                <div class="settings-field-errors" data-field-error-for="health_domain_interval"></div>
+                <div class="field-errors" data-field-error-for="health_domain_interval"></div>
               </div>
             </div>
           </form>
@@ -1404,7 +1431,7 @@ reddit.com/r/Music music reddit</pre>
               </div>
               <div class="settings-control">
                 {% formfield profile_quick_form.highlights_per_page class="form-input settings-number-input settings-number-input-compact" min="1" %}
-                <div class="settings-field-errors" data-field-error-for="highlights_per_page"></div>
+                <div class="field-errors" data-field-error-for="highlights_per_page"></div>
               </div>
             </div>
             <div class="settings-row">
@@ -1508,7 +1535,7 @@ reddit.com/r/Music music reddit</pre>
                       </li>
                     {% endfor %}
                   </ul>
-                  <div class="settings-field-errors" data-field-error-for="highlights_sidebar_modules"></div>
+                  <div class="field-errors" data-field-error-for="highlights_sidebar_modules"></div>
                 </div>
               </div>
             </div>
@@ -1568,7 +1595,7 @@ reddit.com/r/Music music reddit</pre>
               </div>
               <div id="settings-hl-item-format-panel" data-settings-panel-body hidden>
                 {% formfield highlight_copy_format_form.item_format class="form-input settings-textarea monospace" rows="4" data_settings_draft_input="" data_hl_copy_preview_input="" %}
-                <div class="settings-field-errors" data-field-error-for="item_format"></div>
+                <div class="field-errors" data-field-error-for="item_format"></div>
                 <div class="settings-panel-footer">
                   <button type="button"
                           class="btn settings-draft-button"
@@ -1636,7 +1663,7 @@ reddit.com/r/Music music reddit</pre>
               </div>
               <div id="settings-hl-separator-panel" data-settings-panel-body hidden>
                 {% formfield highlight_copy_format_form.separator class="form-input settings-textarea monospace" rows="3" data_settings_draft_input="" data_hl_sep_preview_input="" %}
-                <div class="settings-field-errors" data-field-error-for="separator"></div>
+                <div class="field-errors" data-field-error-for="separator"></div>
                 <div class="settings-panel-footer">
                   <button type="button"
                           class="btn settings-draft-button"
@@ -1661,6 +1688,65 @@ reddit.com/r/Music music reddit</pre>
               </div>
             </form>
           </div>
+        </section>
+
+        <section id="settings-shortcuts" class="settings-section" aria-labelledby="settings-shortcuts-heading">
+          <div class="settings-section-heading">
+            <div class="settings-label-row">
+              <h2 id="settings-shortcuts-heading">{% translate "Shortcuts" %}</h2>
+              <span class="settings-help" data-settings-help data-settings-help-open="false">
+                <button type="button" class="settings-help-button" data-settings-help-button aria-label="{% translate 'More info' %}" aria-expanded="false">
+                  <svg width="16" height="16" aria-hidden="true"><use href="#ld-icon-info"></use></svg>
+                </button>
+                <span class="settings-help-popover" role="tooltip"><span class="form-input-hint">{% translate "Customize the keyboard shortcuts for the bookmark list. Choose a single key, or select “Disabled” to turn a shortcut off." %}</span></span>
+              </span>
+            </div>
+          </div>
+          <form action="{% url 'linkding:settings.save' %}" method="post" class="settings-card settings-card-stack" data-settings-save-mode="instant">
+            {% csrf_token %}
+            <input type="hidden" name="form_id" value="profile_shortcuts">
+            <div class="settings-row">
+              <div class="settings-copy">
+                <label for="{{ shortcuts_form.shortcut_new_bookmark.id_for_label }}" class="settings-label">{% translate "New bookmark" %}</label>
+                <div class="form-input-hint">
+                  {% translate "Open the add bookmark page." %}
+                </div>
+              </div>
+              <div class="settings-control">
+                {% formfield shortcuts_form.shortcut_new_bookmark class="form-select settings-select-input" %}
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-copy">
+                <label for="{{ shortcuts_form.shortcut_focus_search.id_for_label }}" class="settings-label">{% translate "Focus search" %}</label>
+              </div>
+              <div class="settings-control">
+                {% formfield shortcuts_form.shortcut_focus_search class="form-select settings-select-input" %}
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-copy">
+                <label for="{{ shortcuts_form.shortcut_quick_edit.id_for_label }}" class="settings-label">{% translate "Quick edit" %}</label>
+                <div class="form-input-hint">
+                  {% translate "Put the title, author, tags, description or notes under the mouse cursor into edit mode." %}
+                </div>
+              </div>
+              <div class="settings-control">
+                {% formfield shortcuts_form.shortcut_quick_edit class="form-select settings-select-input" %}
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-copy">
+                <label for="{{ shortcuts_form.shortcut_toggle_notes.id_for_label }}" class="settings-label">{% translate "Show notes" %}</label>
+                <div class="form-input-hint">
+                  {% translate "Keep the notes permanently visible on the page." %}
+                </div>
+              </div>
+              <div class="settings-control">
+                {% formfield shortcuts_form.shortcut_toggle_notes class="form-select settings-select-input" %}
+              </div>
+            </div>
+          </form>
         </section>
 
         <section id="settings-user" class="settings-section" aria-labelledby="settings-user-heading">
@@ -1841,6 +1927,7 @@ reddit.com/r/Music music reddit</pre>
         <button type="button" class="settings-directory-link" data-settings-section-target="settings-health" aria-controls="settings-health">{% translate "Health Check" %}</button>
         <button type="button" class="settings-directory-link" data-settings-section-target="settings-sharing" aria-controls="settings-sharing">{% translate "Sharing" %}</button>
         <button type="button" class="settings-directory-link" data-settings-section-target="settings-highlights" aria-controls="settings-highlights">{% translate "Highlights" %}</button>
+        <button type="button" class="settings-directory-link" data-settings-section-target="settings-shortcuts" aria-controls="settings-shortcuts">{% translate "Shortcuts" %}</button>
         <button type="button" class="settings-directory-link" data-settings-section-target="settings-user" aria-controls="settings-user">{% translate "User & Visitors" %}</button>
         <button type="button" class="settings-directory-link" data-settings-section-target="settings-import-export" aria-controls="settings-import-export">{% translate "Import & Export" %}</button>
         <button type="button" class="settings-directory-link" data-settings-section-target="settings-about" aria-controls="settings-about">{% translate "About" %}</button>

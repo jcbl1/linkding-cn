@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 
 import requests
 from bs4 import BeautifulSoup
+from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from requests import RequestException
@@ -57,6 +58,7 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
             "bookmark_date_display": UserProfile.BOOKMARK_DATE_DISPLAY_RELATIVE,
             "bookmark_description_display": UserProfile.BOOKMARK_DESCRIPTION_DISPLAY_INLINE,
             "bookmark_description_max_lines": "1",
+            "bookmark_view_mode": UserProfile.BOOKMARK_VIEW_MODE_LIST,
             "bookmark_link_target": UserProfile.BOOKMARK_LINK_TARGET_BLANK,
             "enable_web_archive": False,
             "tag_search": UserProfile.TAG_SEARCH_STRICT,
@@ -148,6 +150,7 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
             "settings-health",
             "settings-sharing",
             "settings-highlights",
+            "settings-shortcuts",
             "settings-user",
             "settings-import-export",
             "settings-about",
@@ -172,6 +175,7 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
                 "settings-health",
                 "settings-sharing",
                 "settings-highlights",
+                "settings-shortcuts",
                 "settings-user",
                 "settings-import-export",
                 "settings-about",
@@ -224,6 +228,28 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
             )
         ]
         self.assertEqual(landing_page_labels, ["Login page", "Shared page"])
+
+    def test_should_render_bookmark_view_mode_select_options(self):
+        response = self.client.get(reverse("linkding:settings.general"))
+        soup = self.make_soup(response.content.decode())
+
+        select = soup.select_one('select[name="bookmark_view_mode"]')
+        self.assertIsNotNone(select)
+        values = [option.get("value") for option in select.select("option")]
+        self.assertEqual(
+            values,
+            [
+                UserProfile.BOOKMARK_VIEW_MODE_LIST,
+                UserProfile.BOOKMARK_VIEW_MODE_COMPACT,
+                UserProfile.BOOKMARK_VIEW_MODE_TABLE,
+            ],
+        )
+        selected = [
+            option.get("value")
+            for option in select.select("option")
+            if option.has_attr("selected")
+        ]
+        self.assertEqual(selected, [UserProfile.BOOKMARK_VIEW_MODE_LIST])
 
     def test_search_and_tag_cards_should_render_in_expected_sections(self):
         response = self.client.get(reverse("linkding:settings.general"))
@@ -384,6 +410,7 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
                     "bookmark_date_display": UserProfile.BOOKMARK_DATE_DISPLAY_HIDDEN,
                     "bookmark_description_display": UserProfile.BOOKMARK_DESCRIPTION_DISPLAY_SEPARATE,
                     "bookmark_description_max_lines": "3",
+                    "bookmark_view_mode": UserProfile.BOOKMARK_VIEW_MODE_COMPACT,
                     "bookmark_link_target": UserProfile.BOOKMARK_LINK_TARGET_SELF,
                     "enable_web_archive": True,
                     "tag_search": UserProfile.TAG_SEARCH_LAX,
@@ -437,6 +464,10 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
         )
         self.assertEqual(self.user.profile.bookmark_description_max_lines, 3)
         self.assertEqual(
+            self.user.profile.bookmark_view_mode,
+            UserProfile.BOOKMARK_VIEW_MODE_COMPACT,
+        )
+        self.assertEqual(
             self.user.profile.bookmark_link_target,
             UserProfile.BOOKMARK_LINK_TARGET_SELF,
         )
@@ -473,6 +504,7 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
                 {"key": "summary", "enabled": True},
                 {"key": "bundles", "enabled": False},
                 {"key": "tags", "enabled": True},
+                {"key": "authors", "enabled": True},
                 {"key": "colors", "enabled": True},
             ],
         )
@@ -872,3 +904,71 @@ class SettingsGeneralViewTestCase(TestCase, BookmarkFactoryMixin):
         with patch.object(requests, "get", return_value=latest_version_response_mock):
             version_info = get_version_info(random.random())
             self.assertEqual(version_info, app_version)
+
+class BookmarkTableColumnsCleanTest(TestCase):
+    """列配置清洗：已下架的键静默丢弃，而不是整包 422。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="cols_clean", password="x")
+        self.client.force_login(self.user)
+
+    def _save(self, config):
+        return self.client.post(
+            reverse("linkding:settings.save"),
+            {
+                "form_id": "profile_quick",
+                "form_fields": "bookmark_table_columns",
+                "bookmark_table_columns": json.dumps(config),
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+    def test_stale_keys_are_dropped(self):
+        """旧版本存下的配置含已移除的 entry 键，保存应清洗而非拒绝。"""
+        stale = [
+            {"key": "title", "w": 3.68, "on": True},
+            {"key": "entry", "w": 2.36, "on": True},
+            {"key": "domain", "w": 1.8, "on": False},
+        ]
+        response = self._save(stale)
+        self.assertEqual(response.status_code, 200)
+        profile = self.user.profile
+        profile.refresh_from_db()
+        self.assertEqual(
+            [c["key"] for c in profile.bookmark_table_columns],
+            ["title", "domain"],
+        )
+
+    def test_oversized_payload_rejected(self):
+        response = self._save([{"key": "title"}] * 100)
+        self.assertEqual(response.status_code, 422)
+
+    def test_explicit_column_width_round_trips(self):
+        """手动拖拽产生的显式列宽（px）要保留下来，并夹到合法区间。"""
+        response = self._save(
+            [
+                {"key": "title", "w": 2.4, "px": 512, "on": True},
+                {"key": "date", "w": 0.9, "px": 5, "on": True},
+            ]
+        )
+        self.assertEqual(response.status_code, 200)
+        profile = self.user.profile
+        profile.refresh_from_db()
+        by_key = {c["key"]: c for c in profile.bookmark_table_columns}
+        self.assertEqual(by_key["title"]["px"], 512)
+        # 下限 60px：过小的值被夹住而不是原样存下
+        self.assertEqual(by_key["date"]["px"], UserProfile.BOOKMARK_TABLE_COLUMN_MIN_PX)
+
+        # 渲染时以 px 为准，基准宽与权重一并带出（前端还需要它们分配余量）
+        columns = {c["key"]: c for c in profile.get_bookmark_table_columns()}
+        self.assertEqual(columns["title"]["px"], 512)
+        self.assertEqual(
+            columns["title"]["base"],
+            UserProfile.BOOKMARK_TABLE_COLUMN_BASE_PX["title"],
+        )
+        # 没拖过的列没有 px
+        self.assertIsNone(columns["domain"]["px"] if "domain" in columns else None)
+
+    def test_non_list_rejected(self):
+        response = self._save("not-a-list")
+        self.assertEqual(response.status_code, 422)

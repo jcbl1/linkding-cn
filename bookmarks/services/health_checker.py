@@ -18,6 +18,7 @@ from datetime import timedelta
 
 import requests
 from bs4 import BeautifulSoup
+from charset_normalizer import from_bytes
 from django.conf import settings
 from django.utils import timezone
 
@@ -31,6 +32,8 @@ from bookmarks.models import (
     CheckJob,
 )
 from bookmarks.services.website_loader import (
+    _is_transport_exception,
+    _open_http_stream,
     _record_domain_request,
     _wait_for_domain,
     build_request_cookies,
@@ -103,8 +106,16 @@ def _default_health_config() -> dict:
         "probe_timeout": 3,
         "accept_status": list(DEFAULT_ACCEPT_STATUS),
         "blocked_status": list(DEFAULT_BLOCKED_STATUS),
-        # 登录墙路径词：带路径锚定避免子串误伤（如 "auth" 会命中 author_share=1）
-        "blocked_location_patterns": ["/login", "/signin", "/auth", "/passport", "/accounts"],
+        # 登录墙路径词：带路径锚定避免子串误伤（如 "/auth" 会命中 /oauth/authorize、
+        # /auth_callback 这类真实可达的 200 页）。锚定到路径边界（/ ? # 或串尾），
+        # 与下方注释意图一致；适配器自定义 pattern 不受影响。
+        "blocked_location_patterns": [
+            "/login(?:[/?#]|$)",
+            "/signin(?:[/?#]|$)",
+            "/auth(?:[/?#]|$)",
+            "/passport(?:[/?#]|$)",
+            "/accounts(?:[/?#]|$)",
+        ],
         # L2 内容检查
         "check_content": DEFAULT_CHECK_CONTENT,
         "check_selectors": list(DEFAULT_CHECK_SELECTORS),
@@ -132,8 +143,9 @@ def _normalize_config(raw: dict | None) -> dict:
     """把任意输入（resolver 输出 / 直接传入的嵌套结构）归一化为内部扁平结构。
 
     支持两种输入形态：
-    - 嵌套：http_head_probe.* / content_check.*（对齐 cookie.verify 的分层）
-    - 扁平：resolver 展开后的键（probe_enabled / accept_status / check_content / valid_* / invalid_*）
+    - 嵌套：http_head_probe.* / content_check.*（对齐 cookie.verify 的分层，也是用户配置的唯一写法）
+    - 扁平：内部归一化结构（probe_enabled / accept_status / check_content / valid_* /
+      invalid_*），即 _default_health_config() 的形状，供内部调用方与测试直接传入
     """
     raw = raw or {}
     out = _default_health_config()
@@ -147,14 +159,25 @@ def _normalize_config(raw: dict | None) -> dict:
         "_request_url",
         "_adapter",
         "_domain_key",
+        # 凭据/引擎相关：供 _maybe_acquire_cookie 预取与 _open_http_stream 引擎分发
+        "cookie",
+        "http_engine",
+        "_effective_cookie_scope",
+        "_user_cookie",
     ):
         if raw.get(key) is not None:
             out[key] = raw[key]
 
-    # L1：嵌套优先，resolver 扁平输出回退
+    # L1：嵌套优先，扁平（内部归一化结构）回退
     probe = raw.get("http_head_probe") or {}
-    out["probe_enabled"] = probe.get("enabled", out["probe_enabled"])
-    out["probe_timeout"] = probe.get("timeout", out["probe_timeout"])
+    if "enabled" in probe:
+        out["probe_enabled"] = probe["enabled"]
+    elif raw.get("probe_enabled") is not None:
+        out["probe_enabled"] = raw["probe_enabled"]
+    if "timeout" in probe:
+        out["probe_timeout"] = probe["timeout"]
+    elif raw.get("probe_timeout") is not None:
+        out["probe_timeout"] = raw["probe_timeout"]
     if "accept_status" in probe:
         out["accept_status"] = probe["accept_status"]
     elif raw.get("accept_status") is not None:
@@ -167,14 +190,13 @@ def _normalize_config(raw: dict | None) -> dict:
         out["blocked_location_patterns"] = probe["blocked_location_patterns"]
     elif raw.get("blocked_location_patterns") is not None:
         out["blocked_location_patterns"] = raw["blocked_location_patterns"]
-    if raw.get("probe_enabled") is not None:
-        out["probe_enabled"] = raw["probe_enabled"]
-    if raw.get("probe_timeout") is not None:
-        out["probe_timeout"] = raw["probe_timeout"]
 
-    # L2：嵌套优先，resolver 扁平输出回退
+    # L2：嵌套优先，扁平（内部归一化结构）回退
     content = raw.get("content_check") or {}
-    out["check_content"] = content.get("enabled", out["check_content"])
+    if "enabled" in content:
+        out["check_content"] = content["enabled"]
+    elif raw.get("check_content") is not None:
+        out["check_content"] = raw["check_content"]
     if "timeout" in content:
         out["content_timeout"] = content["timeout"]
     elif raw.get("content_timeout") is not None:
@@ -199,8 +221,6 @@ def _normalize_config(raw: dict | None) -> dict:
         out["invalid_patterns"] = content["invalid_patterns"]
     elif raw.get("invalid_patterns") is not None:
         out["invalid_patterns"] = raw["invalid_patterns"]
-    if raw.get("check_content") is not None:
-        out["check_content"] = raw["check_content"]
 
     return out
 
@@ -218,17 +238,22 @@ def _resolve_config(url: str, config: dict | None, username: str = "") -> dict:
     return _normalize_config(resolved)
 
 
-def _request_kwargs(config: dict, timeout: float | None = None) -> dict:
-    kwargs = {
-        "allow_redirects": True,
-        "headers": build_request_headers(config),
-        "cookies": build_request_cookies(config),
-        "timeout": timeout if timeout is not None else config.get("content_timeout", 30),
-    }
-    proxy = config.get("proxy")
-    if proxy:
-        kwargs["proxies"] = proxy
-    return kwargs
+def _is_redirect_loop_exception(exc) -> bool:
+    """True for redirect-loop errors from either the requests or curl_cffi engine.
+
+    curl_cffi 抛自己的 TooManyRedirects（与 requests 的不兼容、也不是
+    requests.RequestException 子类），此前会落进通用 except 被当传输错误
+    → FAILED，与 requests 引擎下判 DEAD "redirect loop" 不一致。这里统一识别。
+    """
+    if isinstance(exc, requests.exceptions.TooManyRedirects):
+        return True
+    try:
+        from curl_cffi.requests.exceptions import (
+            TooManyRedirects as _CurlTooManyRedirects,
+        )
+    except ImportError:
+        return False
+    return isinstance(exc, _CurlTooManyRedirects)
 
 
 def _head_probe(url: str, config: dict, timeout: float):
@@ -236,20 +261,40 @@ def _head_probe(url: str, config: dict, timeout: float):
 
     请求目标优先取适配器解析出的 `_request_url`（对应通用 `request_url` 改写）。
     timeout 由调用方按总预算分配传入。
+
+    与 GET 探针 / metadata 链路完全同源：复用 _open_http_stream（curl_cffi 引擎分发、
+    impersonate=chrome、非显式 UA 剥离、失败回退 requests），避免 HEAD 单独一套画像
+    （Chrome TLS 指纹 + Edge/空 UA 的矛盾组合）被风控站点误判。
     """
     start = time.monotonic()
+    response = None
+    probe_url = config.get("_request_url") or url
     try:
-        kwargs = _request_kwargs(config, timeout=timeout)
-        probe_url = config.get("_request_url") or url
-        response = requests.head(probe_url, **{**kwargs, "stream": True})
+        response = _open_http_stream(
+            probe_url,
+            timeout=timeout,
+            headers=build_request_headers(config),
+            cookies=build_request_cookies(config),
+            proxies=config.get("proxy"),
+            config=config,
+            method="HEAD",
+        )
         status = response.status_code
         duration_ms = int((time.monotonic() - start) * 1000)
         if status in _HEAD_UNRELIABLE_STATUS:
             return None
         return status, response.url or probe_url, duration_ms
-    except requests.RequestException as exc:
+    except Exception as exc:
+        if not _is_transport_exception(exc):
+            raise
         logger.debug("HEAD probe failed for %s: %s", url, exc)
         return None
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
 
 
 def _get_probe(url: str, config: dict, need_content: bool, timeout: float):
@@ -263,33 +308,55 @@ def _get_probe(url: str, config: dict, need_content: bool, timeout: float):
     max_bytes = config.get("max_content_limit", DEFAULT_MAX_CONTENT_BYTES)
     target = config.get("_request_url") or url
     accept = set(config.get("accept_status", DEFAULT_ACCEPT_STATUS))
+    response = None
     try:
-        with requests.get(
-            target, stream=True, **_request_kwargs(config, timeout=timeout)
-        ) as response:
-            status = response.status_code
-            final_url = response.url or target
-            # 只有 2xx 成功页才需要读 body 扫内容信号；
-            # 4xx/5xx 的状态码已定性，body 无价值，完全不读
-            if need_content and status in accept:
-                read_limit = max_bytes
-                size = 0
-                chunks = []
-                for chunk in response.iter_content(chunk_size=32 * 1024):
-                    size += len(chunk)
-                    chunks.append(chunk)
-                    if size >= read_limit:
-                        break
-                content = b"".join(chunks)[:read_limit]
-            else:
-                content = b""
-            duration_ms = int((time.monotonic() - start) * 1000)
-            return status, final_url, content, duration_ms
+        # 与 metadata 链路完全同源：curl_cffi + impersonate="chrome" + UA 策略
+        # （否则 TLS 指纹非 Chrome，风控站点如知乎会拦截/重定向）
+        response = _open_http_stream(
+            target,
+            timeout=timeout,
+            headers=build_request_headers(config),
+            cookies=build_request_cookies(config),
+            proxies=config.get("proxy"),
+            config=config,
+        )
+        status = response.status_code
+        final_url = response.url or target
+        # 只有 2xx 成功页才需要读 body 扫内容信号；
+        # 4xx/5xx 的状态码已定性，body 无价值，完全不读
+        if need_content and status in accept:
+            read_limit = max_bytes
+            size = 0
+            chunks = []
+            for chunk in response.iter_content(chunk_size=32 * 1024):
+                size += len(chunk)
+                chunks.append(chunk)
+                if size >= read_limit:
+                    break
+            content = b"".join(chunks)[:read_limit]
+        else:
+            content = b""
+        duration_ms = int((time.monotonic() - start) * 1000)
+        return status, final_url, content, duration_ms
     except requests.exceptions.TooManyRedirects:
         raise
-    except requests.RequestException as exc:
+    except Exception as exc:
+        # curl_cffi 抛自己的 TooManyRedirects（与 requests 不兼容），统一按
+        # redirect-loop 语义向上抛，避免落进传输错误分支 → FAILED
+        if _is_redirect_loop_exception(exc):
+            raise
+        # _open_http_stream 内部已把 curl_cffi 传输失败回退到 requests；
+        # 此处兜底捕获 curl_cffi 的独立异常类型（与 requests 不兼容）
+        if not _is_transport_exception(exc):
+            raise
         logger.debug("GET probe failed for %s: %s", url, exc)
         return None, None, None, None
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
 
 
 def _fetch(url: str, config: dict):
@@ -298,7 +365,7 @@ def _fetch(url: str, config: dict):
     `probes` 记录各分段（HEAD / GET）的状态、终址与耗时，供测试看板
     与书签详情展示；未执行的分段为 None。
 
-    超时：L1 HEAD 用 `probe_timeout`（默认 5s），L2 GET 用 `content_timeout`
+    超时：L1 HEAD 用 `probe_timeout`（默认 3s），L2 GET 用 `content_timeout`
     （默认 30s），两者独立。
 
     - probe_enabled=False：跳过 HEAD，直接 GET（GET 拿满总预算）。
@@ -309,7 +376,7 @@ def _fetch(url: str, config: dict):
     probe_enabled = config.get("probe_enabled", True)
     accept = set(config.get("accept_status", DEFAULT_ACCEPT_STATUS))
     blocked = set(config.get("blocked_status", DEFAULT_BLOCKED_STATUS))
-    probe_timeout = config.get("probe_timeout", 5)
+    probe_timeout = config.get("probe_timeout", 3)
     content_timeout = config.get("content_timeout", 30)
 
     domain = get_registrable_domain(url)
@@ -351,10 +418,19 @@ def _fetch(url: str, config: dict):
                 return head_status, head_final_url, None, probes
             # 需要正文：继续 GET
 
-    # GET 探针使用 L2 独立超时
-    get_status, get_final_url, content, get_duration = _get_probe(
-        url, config, need_content=check_content, timeout=content_timeout
-    )
+    # GET 探针使用 L2 独立超时。
+    # 5xx 与传输错误（get_status is None）做一次短退避重试：metadata 链路对
+    # RetryableMetadataError 有指数退避，health 此前零重试，瞬时服务端抖动会被
+    # 直接计入 DEAD/FAILED 统计。这里轻量重试一次（~1s），保持返回结构不变。
+    get_status = get_final_url = content = get_duration = None
+    for attempt in range(2):
+        get_status, get_final_url, content, get_duration = _get_probe(
+            url, config, need_content=check_content, timeout=content_timeout
+        )
+        transient = get_status is None or 500 <= get_status < 600
+        if not transient or attempt == 1:
+            break
+        time.sleep(1.0)
     if get_status is not None:
         probes["get"] = {
             "status": get_status,
@@ -368,6 +444,8 @@ def _fetch(url: str, config: dict):
 
 _profile_domain_last_request: dict[str, float] = {}
 _profile_domain_rate_lock = threading.Lock()
+# 与 website_loader 全局限流器对齐：防止无界增长
+_PROFILE_DOMAIN_RATE_MAX_SIZE = 1000
 
 
 def _wait_for_domain_with_interval(domain: str, interval: float):
@@ -378,6 +456,9 @@ def _wait_for_domain_with_interval(domain: str, interval: float):
 
     wait = 0.0
     with _profile_domain_rate_lock:
+        # 与全局 _wait_for_domain 一致：超限清空，防止 dict 无界增长
+        if len(_profile_domain_last_request) >= _PROFILE_DOMAIN_RATE_MAX_SIZE:
+            _profile_domain_last_request.clear()
         now = _time.monotonic()
         last = _profile_domain_last_request.get(domain, 0)
         wait = interval - (now - last)
@@ -393,9 +474,14 @@ def _decode_text(content: bytes | None) -> str:
     if not content:
         return ""
     try:
-        return content.decode("utf-8", errors="replace")
-    except Exception:
-        return ""
+        # 与 metadata 链路同源：用 charset_normalizer 探测编码，避免 GBK/GB2312
+        # 老站被硬编码 utf-8(errors=replace) 解成乱码后 L2 中文关键词信号静默失效。
+        match = from_bytes(content).best()
+        if match is not None:
+            return str(match)
+    except Exception as exc:
+        logger.debug("charset detection failed: %s", exc)
+    return content.decode("utf-8", errors="replace")
 
 
 def _content_signals(html: str, config: dict) -> list[dict]:
@@ -483,11 +569,115 @@ def check_url(url: str, config: dict | None = None, username: str = "") -> dict:
 
     返回的 `status` 为五类判定之一；若该域名的适配器设置 `health.enabled=false`，
     返回 `skipped=True` 且 `status=None`，调用方应把书签标记为未检查（unknown）。
+
+    与 metadata 一致，命中反爬信号（401/403、人机验证重定向）时自动刷新
+    cookie 并重试一次，避免把风控拦截误判为页面真实状态。
     """
     resolved_config = _resolve_config(url, config, username)
+    _maybe_acquire_cookie(url, resolved_config, username)
     result = _check_url(url, resolved_config)
+    if _is_anti_bot_retryable(url, resolved_config, result):
+        new_cookie = _refresh_and_retry(url, resolved_config, username)
+        if new_cookie:
+            resolved_config["_user_cookie"] = new_cookie
+            result = _check_url(url, resolved_config)
     _apply_custom_reason(result, resolved_config)
     return result
+
+
+def _is_anti_bot_retryable(url: str, config: dict, result: dict) -> bool:
+    """判定结果是否命中"可刷新"的反爬信号。
+
+    仅当配置声明了 auto/login cookie 且带 refresh 时才允许重试，
+    避免对真实不可访问（dead/404）或真实 missing 页面做无谓刷新。
+    """
+    from urllib.parse import urlparse
+    from site_adapters.services.auth.cookies import _should_refresh_cookie
+
+    cookie_config = config.get("cookie") or {}
+    if not cookie_config or not _should_refresh_cookie(cookie_config):
+        return False
+    if result.get("http_status") in (401, 403):
+        return True
+    # 重定向到人机验证/登录类地址（与 verify 的 location 检测对齐）
+    redirect_url = result.get("redirect_url")
+    if redirect_url:
+        location_patterns = (
+            cookie_config.get("verify", {})
+            .get("http_head_probe", {})
+            .get("invalid_location_patterns", [])
+        ) or ["/login", "/signin", "/auth", "/passport", "/accounts",
+              "/account/unhuman", "/unhuman"]
+        for pattern in location_patterns:
+            try:
+                if re.search(pattern, redirect_url, re.IGNORECASE):
+                    return True
+            except re.error:
+                continue
+    return False
+
+
+def _refresh_and_retry(url: str, config: dict, username: str) -> str | None:
+    """风控信号触发 cookie 强制刷新，返回新 cookie（失败返回 None）。"""
+    from site_adapters.services.auth.cookies import verify_and_refresh
+
+    domain_key = config.get("_domain_key")
+    if not domain_key:
+        return None
+    scope = config.get("_effective_cookie_scope", "")
+    cookie_config = config.get("cookie") or {}
+    return verify_and_refresh(
+        cookie_config=cookie_config,
+        url=url,
+        domain_key=domain_key,
+        verify_context={"url": url, "status": 0,
+                        "title": "", "body_preview": ""},
+        username=username,
+        scope=scope,
+        force_refresh=True,
+    )
+
+
+def _maybe_acquire_cookie(url: str, config: dict, username: str) -> None:
+    """Health 检查前的 auto cookie 预取。
+
+    适配器声明了 auto cookie 且当前 scope 无任何凭据时，用浏览器
+    刷新获取并缓存；已有凭据（auto 或手动）则直接使用，不重复刷新。
+    刷新结果写入 config["_user_cookie"]，随请求携带。
+    """
+    from urllib.parse import urlparse
+
+    from site_adapters.services.auth.credentials import get_shared_cookie
+    from site_adapters.services.auth.cookies import (
+        _should_refresh_cookie,
+        verify_and_refresh,
+    )
+
+    cookie_config = config.get("cookie") or {}
+    if not cookie_config or cookie_config.get("type") != "auto":
+        return
+    if not cookie_config.get("refresh"):
+        return
+    domain_key = config.get("_domain_key")
+    if not domain_key:
+        return
+    scope = config.get("_effective_cookie_scope", "")
+    hostname = urlparse(url).hostname or domain_key
+    existing, _ = get_shared_cookie(hostname=hostname, scope=scope)
+    if existing:
+        return
+    if not _should_refresh_cookie(cookie_config):
+        return
+    new_cookie = verify_and_refresh(
+        cookie_config=cookie_config,
+        url=url,
+        domain_key=domain_key,
+        verify_context={"url": url, "status": 0, "title": "", "body_preview": ""},
+        username=username,
+        scope=scope,
+    )
+    if new_cookie:
+        config["_user_cookie"] = new_cookie
 
 
 def _apply_custom_reason(result: dict, resolved_config: dict) -> None:
@@ -569,24 +759,27 @@ def _check_url(url: str, resolved_config: dict) -> dict:
 
     try:
         status, final_url, content, probes = _fetch(url, resolved_config)
-    except requests.exceptions.TooManyRedirects:
-        result.update(
-            {
-                "status": HEALTH_STATUS_DEAD,
-                "reason": "redirect loop",
-                "duration_ms": int((time.monotonic() - start) * 1000),
-            }
-        )
-        return result
-    except requests.RequestException as exc:
-        result.update(
-            {
-                "status": HEALTH_STATUS_FAILED,
-                "reason": f"request failed: {exc}",
-                "duration_ms": int((time.monotonic() - start) * 1000),
-            }
-        )
-        return result
+    except Exception as exc:
+        # requests 与 curl_cffi 引擎的重定向环统一 → DEAD "redirect loop"
+        if _is_redirect_loop_exception(exc):
+            result.update(
+                {
+                    "status": HEALTH_STATUS_DEAD,
+                    "reason": "redirect loop",
+                    "duration_ms": int((time.monotonic() - start) * 1000),
+                }
+            )
+            return result
+        if isinstance(exc, requests.RequestException):
+            result.update(
+                {
+                    "status": HEALTH_STATUS_FAILED,
+                    "reason": f"request failed: {exc}",
+                    "duration_ms": int((time.monotonic() - start) * 1000),
+                }
+            )
+            return result
+        raise
 
     result["http_status"] = status
     result["probes"] = probes

@@ -22,10 +22,12 @@
 @import "responsive.css";
 @import "layout.css";
 @import "components.css";
+@import "favicon.css";
 @import "crud.css";
 @import "bookmark-details.css";
 @import "bookmark-form.css";
 @import "bookmark-page.css";
+@import "bookmark-table.css";
 @import "markdown.css";
 @import "reader-mode.css";
 @import "auth.css";

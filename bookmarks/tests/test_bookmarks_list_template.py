@@ -7,6 +7,7 @@ from django.template import RequestContext, Template
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
+from urllib.parse import unquote_plus
 
 from bookmarks.middlewares import LinkdingMiddleware
 from bookmarks.models import Bookmark, BookmarkSearch, User, UserProfile
@@ -305,6 +306,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         soup = self.make_soup(html)
 
         has_description = bool(bookmark.description)
+        has_author = bool(bookmark.author)
         has_tags = len(bookmark.tags.all()) > 0
 
         # inline description block exists
@@ -317,11 +319,36 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         separate_description = soup.select_one(".description.separate")
         self.assertIsNone(separate_description)
 
-        # one direct child element per description, tags, and optional separator
+        # author 位于标题行（title-link 之后），不在描述行内
+        title = soup.select_one(".title")
+        self.assertIsNotNone(title)
+        if has_author:
+            author_span = title.select_one(".author")
+            self.assertIsNotNone(author_span)
+            self.assertEqual(author_span.text, bookmark.author)
+            # author 可点击：链接到 author 搜索（空格等 URL 编码后仍可还原）
+            self.assertEqual(author_span.name, "a")
+            author_href = unquote_plus(author_span.get("href", ""))
+            self.assertIn(f'q=author:"{bookmark.author}"', author_href)
+            self.assertIsNone(
+                description.select_one(".author"),
+                "author must not render inside the description container",
+            )
+            title_link = title.select_one(".title-link")
+            self.assertIsNotNone(title_link)
+            # author 必须位于 title-link 之后
+            self.assertTrue(
+                list(title.children).index(author_span)
+                > list(title.children).index(title_link)
+            )
+        else:
+            self.assertIsNone(title.select_one(".author"))
+
+        # 描述行：仅 tags、可选分隔符与 description
         expected_selectors = []
         if has_tags:
             expected_selectors.append(".tags")
-        if has_description and has_tags:
+        if has_tags and has_description:
             expected_selectors.append(".description-separator")
         if has_description:
             expected_selectors.append(".description-text")
@@ -331,9 +358,13 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
             [selector.removeprefix(".") for selector in expected_selectors],
         )
 
-        if has_description and has_tags:
-            separator = description.select_one(".description-separator")
-            self.assertIsNotNone(separator)
+        # separators exist between adjacent non-empty segments
+        separators = description.select(".description-separator")
+        segment_count = sum(1 for s in (has_tags, has_description) if s)
+        self.assertEqual(
+            len(separators), segment_count - 1 if segment_count > 1 else 0
+        )
+        for separator in separators:
             self.assertEqual(separator.text, " | ")
 
         # contains description text, without leading/trailing whitespace
@@ -366,24 +397,53 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         )
         profile.save()
 
-        # no description, no tags
+        # no description, no tags, no author
         bookmark = self.setup_bookmark(description="")
         self.inline_bookmark_description_test(bookmark)
 
-        # with description, no tags
+        # with description, no tags, no author
         bookmark = self.setup_bookmark(description="Test description")
         self.inline_bookmark_description_test(bookmark)
 
-        # no description, with tags
+        # with author, no tags, no description
+        Bookmark.objects.all().delete()
+        bookmark = self.setup_bookmark(author="Test author")
+        self.inline_bookmark_description_test(bookmark)
+
+        # with author and description, no tags
+        Bookmark.objects.all().delete()
+        bookmark = self.setup_bookmark(
+            author="Test author", description="Test description"
+        )
+        self.inline_bookmark_description_test(bookmark)
+
+        # no description, no author, with tags
         Bookmark.objects.all().delete()
         bookmark = self.setup_bookmark(
             description="", tags=[self.setup_tag(), self.setup_tag(), self.setup_tag()]
         )
         self.inline_bookmark_description_test(bookmark)
 
-        # with description, with tags
+        # with author, with tags, no description
         Bookmark.objects.all().delete()
         bookmark = self.setup_bookmark(
+            author="Test author",
+            tags=[self.setup_tag(), self.setup_tag(), self.setup_tag()],
+        )
+        self.inline_bookmark_description_test(bookmark)
+
+        # with description, with tags, no author
+        Bookmark.objects.all().delete()
+        bookmark = self.setup_bookmark(
+            description="Test description",
+            tags=[self.setup_tag(), self.setup_tag(), self.setup_tag()],
+        )
+        self.inline_bookmark_description_test(bookmark)
+
+        # with description, with tags, with author
+        Bookmark.objects.all().delete()
+        bookmark = self.setup_bookmark(
+            author="Test author",
             description="Test description",
             tags=[self.setup_tag(), self.setup_tag(), self.setup_tag()],
         )
@@ -394,6 +454,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         soup = self.make_soup(html)
 
         has_description = bool(bookmark.description)
+        has_author = bool(bookmark.author)
         has_tags = len(bookmark.tags.all()) > 0
 
         # inline description block does not exist
@@ -403,13 +464,33 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         description = soup.select_one(".description .description-container.separate")
         self.assertIsNotNone(description)
 
-        if not has_description:
-            description_text = description.select_one(".description-text")
-            self.assertIsNone(description_text)
+        # author 位于标题行，不在描述容器内
+        title = soup.select_one(".title")
+        self.assertIsNotNone(title)
+        if has_author:
+            author_span = title.select_one(".author")
+            self.assertIsNotNone(author_span)
+            self.assertEqual(author_span.text, bookmark.author)
+            title_link = title.select_one(".title-link")
+            self.assertIsNotNone(title_link)
+            # author 必须位于 title-link 之后
+            self.assertTrue(
+                list(title.children).index(author_span)
+                > list(title.children).index(title_link)
+            )
         else:
+            self.assertIsNone(title.select_one(".author"))
+        self.assertIsNone(description.select_one(".author"))
+
+        if has_description:
             description_text = description.select_one(".description-text")
             self.assertIsNotNone(description_text)
             self.assertEqual(description_text.text, bookmark.description)
+        else:
+            self.assertIsNone(description.select_one(".description-text"))
+
+        # 描述容器内不再有作者分隔符
+        self.assertEqual(len(description.select(".description-separator")), 0)
 
         if not has_tags:
             # no tags element
@@ -440,8 +521,19 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         bookmark = self.setup_bookmark(description="")
         self.separate_bookmark_description_test(bookmark)
 
+        # with author, no description, no tags
+        bookmark = self.setup_bookmark(author="Test author")
+        self.separate_bookmark_description_test(bookmark)
+
         # with description, no tags
         bookmark = self.setup_bookmark(description="Test description")
+        self.separate_bookmark_description_test(bookmark)
+
+        # with author and description, no tags
+        Bookmark.objects.all().delete()
+        bookmark = self.setup_bookmark(
+            author="Test author", description="Test description"
+        )
         self.separate_bookmark_description_test(bookmark)
 
         # no description, with tags
@@ -454,6 +546,15 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         # with description, with tags
         Bookmark.objects.all().delete()
         bookmark = self.setup_bookmark(
+            description="Test description",
+            tags=[self.setup_tag(), self.setup_tag(), self.setup_tag()],
+        )
+        self.separate_bookmark_description_test(bookmark)
+
+        # with author and description, with tags
+        Bookmark.objects.all().delete()
+        bookmark = self.setup_bookmark(
+            author="Test author",
             description="Test description",
             tags=[self.setup_tag(), self.setup_tag(), self.setup_tag()],
         )
@@ -662,7 +763,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         html = self.render_template()
         soup = self.make_soup(html)
 
-        list_item = soup.select_one("ul.bookmark-list > li")
+        list_item = soup.select_one("ul.bookmark-list > li[ld-bookmark-item]")
         self.assertIsNotNone(list_item)
         self.assertListEqual(["unread"], list_item["class"])
 
@@ -675,7 +776,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         html = self.render_template()
         soup = self.make_soup(html)
 
-        list_item = soup.select_one("ul.bookmark-list > li")
+        list_item = soup.select_one("ul.bookmark-list > li[ld-bookmark-item]")
         self.assertIsNotNone(list_item)
         self.assertListEqual(["shared"], list_item["class"])
 
@@ -688,7 +789,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         html = self.render_template()
         soup = self.make_soup(html)
 
-        list_item = soup.select_one("ul.bookmark-list > li")
+        list_item = soup.select_one("ul.bookmark-list > li[ld-bookmark-item]")
         self.assertIsNotNone(list_item)
         self.assertListEqual(["unread", "shared"], list_item["class"])
 
@@ -1205,7 +1306,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         html = self.render_template()
 
         soup = self.make_soup(html)
-        bookmarks = soup.select("ul.bookmark-list > li")
+        bookmarks = soup.select("ul.bookmark-list > li[ld-bookmark-item]")
         self.assertEqual(30, len(bookmarks))
 
     def test_items_per_page_is_configurable(self):
@@ -1216,7 +1317,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         html = self.render_template()
 
         soup = self.make_soup(html)
-        bookmarks = soup.select("ul.bookmark-list > li")
+        bookmarks = soup.select("ul.bookmark-list > li[ld-bookmark-item]")
         self.assertEqual(10, len(bookmarks))
 
     def test_no_actions_rendered_when_is_preview(self):
@@ -1251,7 +1352,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         bookmark = self.setup_bookmark()
         bookmark.health_status = "dead"
         bookmark.health_details = {
-            "checked_at": "2026-09-15T16:18:00",
+            "checked_at": timezone.now().isoformat(),
             "http_status": 404,
             "reason": "HTTP 404",
         }
@@ -1274,17 +1375,22 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         )
         self.assertIsNotNone(indicator.select_one("[data-health-check]"))
 
-    def test_health_indicator_hidden_when_unchecked(self):
+    def test_health_indicator_shows_unknown_when_unchecked(self):
+        """未检查：indicator 仍渲染，状态派生为 Unknown（与详情弹层一致）。"""
         bookmark = self.setup_bookmark()  # 从未检查 → health_status 为 NULL
         html = self.render_template()
         soup = self.make_soup(html)
-        self.assertIsNone(soup.select_one("ld-health-indicator"))
+        indicator = soup.select_one("ld-health-indicator")
+        self.assertIsNotNone(indicator)
+        # 默认 icon 模式：只有带颜色 dot（无文字）
+        self.assertIsNotNone(indicator.select_one(".health-dot--unknown"))
+        self.assertIsNone(indicator.select_one(".health-text"))
 
     def test_health_indicator_icon_mode_uses_dot(self):
         # 默认 status_display_mode = icon：只有带颜色 dot（无文字）
         bookmark = self.setup_bookmark()
         bookmark.health_status = "blocked"
-        bookmark.health_details = {"checked_at": "2026-09-15T16:18:00", "http_status": 403}
+        bookmark.health_details = {"checked_at": timezone.now().isoformat(), "http_status": 403}
         bookmark.save()
 
         html = self.render_template()
@@ -1294,3 +1400,384 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         self.assertIn("health-icon-mode", indicator.get("class", []))
         self.assertIsNotNone(indicator.select_one(".health-dot--blocked"))
         self.assertIsNone(indicator.select_one(".health-text"))
+
+    def test_compact_view_renders_compact_row_without_expanded_blocks(self):
+        user = self.get_or_create_test_user()
+        user.profile.bookmark_view_mode = UserProfile.BOOKMARK_VIEW_MODE_COMPACT
+        user.profile.save()
+
+        tag = self.setup_tag(name="tag1")
+        bookmark = self.setup_bookmark(
+            description="A long description that must not render in compact",
+            author="Test author",
+            tags=[tag],
+            notes="Secret note",
+        )
+
+        html = self.render_template()
+        soup = self.make_soup(html)
+
+        ul = soup.select_one("ul.bookmark-list")
+        self.assertIn("view-compact", ul.get("class", []))
+
+        # 非表格视图不包裹表格横向轨道
+        self.assertIsNone(soup.select_one(".table-body-scroll"))
+        self.assertIsNone(soup.select_one(".table-header-sticky"))
+        self.assertIsNone(soup.select_one(".table-footer-scroll"))
+
+        # 紧凑分支：不渲染 URL 行与预览图；描述/笔记/动作留在 DOM 中由 CSS 收起
+        self.assertIsNone(soup.select_one(".url-path"))
+        self.assertIsNone(soup.select_one(".preview-image"))
+
+        # 常驻渲染标题 + 作者名，不渲染独立日期；健康指示器由 CSS 隐藏
+        self.assertIsNotNone(soup.select_one(".compact-head"))
+        # 紧凑视图不渲染标签（右侧组留给展开按钮，作者名在标题行展示）
+        self.assertIsNone(soup.select_one(".compact-tags"))
+        author = soup.select_one(".compact-head .title .author")
+        self.assertIsNotNone(author)
+        self.assertEqual(author.get_text(strip=True), bookmark.author)
+        self.assertIsNone(soup.select_one(".compact-date"))
+
+        # 展开折叠按钮：移动端与桌面端常驻渲染，携带展开/折叠两套 tooltip 文案
+        toggle_btn = soup.select_one(".compact-toggle-btn")
+        self.assertIsNotNone(toggle_btn)
+        self.assertEqual(toggle_btn.get("aria-expanded"), "false")
+        self.assertEqual(toggle_btn.get("title"), "Expand")
+        self.assertEqual(toggle_btn.get("data-title-expand"), "Expand")
+        self.assertEqual(toggle_btn.get("data-title-collapse"), "Collapse")
+
+        # 标题链接与动作（含详情入口）仍然存在
+        self.assertIsNotNone(
+            soup.select_one(f'a.title-link[href="{bookmark.url}"]')
+        )
+        self.assertIsNotNone(soup.select_one("a.view-action"))
+
+        # 描述、笔记片段仍在 DOM 中，hover/点行展开时按 list 样式显示
+        self.assertIsNotNone(soup.select_one(".description"))
+        self.assertIsNotNone(soup.select_one(".inline-edit-notes"))
+
+    def test_default_profile_uses_list_view(self):
+        self.setup_bookmark(description="A description")
+
+        html = self.render_template()
+        soup = self.make_soup(html)
+
+        ul = soup.select_one("ul.bookmark-list")
+        self.assertNotIn("view-compact", ul.get("class", []))
+        self.assertIsNone(soup.select_one(".table-body-scroll"))
+        self.assertIsNone(soup.select_one(".table-header-sticky"))
+        self.assertIsNone(soup.select_one(".table-footer-scroll"))
+        self.assertIsNotNone(soup.select_one(".content"))
+        self.assertIsNotNone(soup.select_one(".description"))
+
+    # ---- 按日期分组（与视图模式正交） ----
+
+    def test_group_by_date_renders_group_headers_by_default(self):
+        self.setup_numbered_bookmarks(5)
+
+        html = self.render_template()
+        soup = self.make_soup(html)
+
+        headers = soup.select("ul.bookmark-list > li.group-header")
+        self.assertEqual(len(headers), 1)
+        self.assertEqual(headers[0].get("data-group-key"), "today")
+        self.assertEqual(
+            headers[0].select_one(".group-title").get_text(strip=True), "Today"
+        )
+        # 组内数量
+        self.assertEqual(
+            headers[0].select_one(".group-count").get_text(strip=True), "5"
+        )
+        # 折叠交互结构
+        self.assertEqual(headers[0].select_one(".group-toggle").get("aria-expanded"), "true")
+        self.assertIsNotNone(headers[0].select_one(".group-chevron"))
+
+    def test_group_by_date_disabled_hides_group_headers(self):
+        profile = self.get_or_create_test_user().profile
+        profile.group_by_date = False
+        profile.save()
+        self.setup_numbered_bookmarks(5)
+
+        html = self.render_template()
+        soup = self.make_soup(html)
+
+        self.assertIsNone(soup.select_one("ul.bookmark-list > li.group-header"))
+        self.assertEqual(len(soup.select("ul.bookmark-list > li[ld-bookmark-item]")), 5)
+
+    def test_group_by_date_splits_into_date_groups(self):
+        now = timezone.now()
+        self.setup_bookmark(url="https://today.example", added=now)
+        self.setup_bookmark(url="https://yesterday.example", added=now - datetime.timedelta(days=1))
+        # 40 天前必然跨月，归入按月分组
+        month_ago = now - datetime.timedelta(days=40)
+        self.setup_bookmark(url="https://month.example", added=month_ago)
+
+        html = self.render_template()
+        soup = self.make_soup(html)
+
+        headers = soup.select("ul.bookmark-list > li.group-header")
+        self.assertEqual(
+            [h.get("data-group-key") for h in headers],
+            ["today", "yesterday", timezone.localdate(month_ago).strftime("%Y-%m")],
+        )
+        # 月份组标题按本地化月格式显示
+        month_title = headers[2].select_one(".group-title").get_text(strip=True)
+        self.assertEqual(month_title, timezone.localdate(month_ago).strftime("%Y年%m月"))
+        # 各组数量
+        counts = [h.select_one(".group-count").get_text(strip=True) for h in headers]
+        self.assertEqual(counts, ["1", "1", "1"])
+
+    def test_group_count_shows_total_across_pages_with_hint(self):
+        profile = self.get_or_create_test_user().profile
+        profile.items_per_page = 3
+        profile.save()
+        self.setup_numbered_bookmarks(7)
+
+        # 第 1 页：主数字 = 本页 3 条，引导提示为组内区间 + 总数（1-3，共 7）
+        html = self.render_template(url="/bookmarks?page=1")
+        soup = self.make_soup(html)
+        header = soup.select_one("ul.bookmark-list > li.group-header")
+        self.assertEqual(header.select_one(".group-count").get_text(strip=True), "3")
+        more = header.select_one(".group-more")
+        self.assertIsNotNone(more)
+        text = more.get_text(strip=True)
+        self.assertIn("1-3", text)
+        self.assertIn("7", text)
+
+        # 第 3 页：本页 1 条，区间为该组第 7 条（7 = 3 + 3 + 1）
+        html = self.render_template(url="/bookmarks?page=3")
+        soup = self.make_soup(html)
+        header = soup.select_one("ul.bookmark-list > li.group-header")
+        self.assertEqual(header.select_one(".group-count").get_text(strip=True), "1")
+        more = header.select_one(".group-more")
+        self.assertIsNotNone(more)
+        text = more.get_text(strip=True)
+        self.assertIn("7-7", text)
+        self.assertIn("7", text)
+
+    def test_group_count_hides_hint_when_group_fully_on_page(self):
+        # 组在单页内显示全：无引导提示
+        self.setup_numbered_bookmarks(3)
+        html = self.render_template()
+        soup = self.make_soup(html)
+        header = soup.select_one("ul.bookmark-list > li.group-header")
+        self.assertEqual(header.select_one(".group-count").get_text(strip=True), "3")
+        self.assertIsNone(header.select_one(".group-more"))
+
+    def test_group_key_computation(self):
+        from bookmarks.views.contexts import _bookmark_group_key
+
+        today = timezone.localdate()
+        midnight = timezone.make_aware(
+            datetime.datetime.combine(today, datetime.time.min)
+        )
+
+        self.assertEqual(_bookmark_group_key(midnight), "today")
+        self.assertEqual(
+            _bookmark_group_key(midnight - datetime.timedelta(days=1)), "yesterday"
+        )
+        # 40 天前必然跨月 -> 按月分组键
+        month_ago = today - datetime.timedelta(days=40)
+        self.assertEqual(
+            _bookmark_group_key(midnight - datetime.timedelta(days=40)),
+            month_ago.strftime("%Y-%m"),
+        )
+        # this_week：本周一至昨天；若该区间存在（今天非周一/周二）
+        monday = today - datetime.timedelta(days=today.weekday())
+        if monday <= today - datetime.timedelta(days=2):
+            monday_dt = timezone.make_aware(
+                datetime.datetime.combine(monday, datetime.time.min)
+            )
+            self.assertEqual(_bookmark_group_key(monday_dt), "this_week")
+        # this_month：本月 1 号起至本周一之前；若该区间存在（月初不在本周内）
+        month_first = today.replace(day=1)
+        if month_first < monday and month_first != today - datetime.timedelta(days=1):
+            month_first_dt = timezone.make_aware(
+                datetime.datetime.combine(month_first, datetime.time.min)
+            )
+            self.assertEqual(_bookmark_group_key(month_first_dt), "this_month")
+
+
+class BookmarkTableViewTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
+    # 复用列表模板的渲染辅助，但不继承其测试用例（那些断言的是 list/compact 标记）
+    render_template = BookmarkListTemplateTest.render_template
+
+    def setUp(self):
+        profile = self.get_or_create_test_user().profile
+        profile.bookmark_view_mode = UserProfile.BOOKMARK_VIEW_MODE_TABLE
+        profile.save()
+
+    def test_table_view_renders_header_and_rows(self):
+        bookmark = self.setup_bookmark(
+            description="Some description", tags=[self.setup_tag()]
+        )
+        html = self.render_template()
+        soup = self.make_soup(html)
+
+        # Django 的 {# #} 注释不支持换行，写多行会原样渲染成文本（曾把注释打进表头）
+        self.assertNotIn("{#", html)
+
+        headerList = soup.select_one("ul.table-header-list")
+        bodyUl = soup.select_one(".table-body-scroll ul.bookmark-list.view-table")
+        self.assertIsNotNone(headerList)
+        self.assertIsNotNone(bodyUl)
+        self.assertIn("view-table", bodyUl.get("class", []))
+
+        header = headerList.select_one("li.table-header")
+        self.assertIsNotNone(header)
+        labels = [
+            el.get_text(strip=True) for el in header.select(".th .th-label")
+        ]
+        self.assertEqual(
+            labels,
+            ["Title", "Author", "Date", "Tags", "Description", "Notes", "Status"],
+        )
+
+        row = bodyUl.select_one("li[ld-bookmark-item]")
+        self.assertIsNotNone(row)
+        self.assertIn(bookmark.resolved_title, row.select_one(".cell-title").text)
+        self.assertIsNotNone(row.select_one(".cell-tags .tags a"))
+        self.assertIn("Some description", row.select_one(".cell-desc").text)
+        # state/health 不在默认列配置中
+        self.assertIsNone(row.select_one(".cell-state"))
+        self.assertIsNone(row.select_one(".cell-health"))
+
+        # 表格视图：表头独立 sticky 轨道，主体数据由横向轨道 .table-body-scroll 包裹，
+        # 底部常驻横滚条轨道 .table-footer-scroll 位于主体轨道之后，分页器留在三条轨道之外
+        sticky = soup.select_one(".table-header-sticky")
+        bodyScroll = soup.select_one(".table-body-scroll")
+        footerScroll = soup.select_one(".table-footer-scroll")
+        self.assertIsNotNone(sticky)
+        self.assertIsNotNone(bodyScroll)
+        self.assertIsNotNone(footerScroll)
+        self.assertIsNotNone(sticky.select_one("ul.table-header-list"))
+        self.assertIsNotNone(bodyScroll.select_one("ul.bookmark-list.view-table"))
+        self.assertIsNotNone(footerScroll.select_one("ul.table-footer-list"))
+        self.assertIsNone(bodyScroll.select_one(".bookmark-pagination"))
+
+    def test_table_view_keeps_single_data_list(self):
+        """两条轨道带各自的标记类，前端靠它们排除，取数据列表只能命中一个。"""
+        self.setup_bookmark()
+        soup = self.make_soup(self.render_template())
+
+        data_lists = soup.select(
+            "ul.bookmark-list:not(.table-header-list):not(.table-footer-list)"
+        )
+        self.assertEqual(len(data_lists), 1)
+        self.assertIn("view-table", data_lists[0].get("class", []))
+        self.assertIn("table-header-list", soup.select_one(".table-header-sticky ul").get("class", []))
+        self.assertIn("table-footer-list", soup.select_one(".table-footer-scroll ul").get("class", []))
+
+    def test_table_view_row_has_ops_slot(self):
+        """行尾操作列是行内最后一条网格轨道（吸附靠 sticky），悬停操作栏挂在它上面。"""
+        self.setup_bookmark()
+        soup = self.make_soup(self.render_template())
+
+        row = soup.select_one(".table-body-scroll li[ld-bookmark-item]")
+        cells = row.select(":scope > .cell")
+        ops = row.select_one(":scope > .cell-ops")
+        self.assertIsNotNone(ops)
+        # 轨道号 = 选择框列 + 可见列 + 操作列，即最后一个
+        self.assertEqual(
+            (ops.get("style") or "").strip(),
+            f"grid-column: {len(cells)}",
+        )
+        self.assertIsNotNone(ops.select_one(".row-ops-btn"))
+        self.assertIsNotNone(ops.select_one(".actions"))
+
+    def test_table_view_column_grid_uses_server_side_widths(self):
+        """首帧列宽由服务端渲染，与前端 resize 口径同源。"""
+        self.setup_bookmark()
+        soup = self.make_soup(self.render_template())
+
+        for selector in (
+            ".table-header-sticky ul",
+            ".table-body-scroll ul",
+            ".table-footer-scroll ul",
+        ):
+            style = soup.select_one(selector).get("style", "")
+            self.assertIn("minmax(", style)
+            self.assertNotIn("minmax(0,", style)
+
+    def test_table_view_date_grouping(self):
+        profile = self.get_or_create_test_user().profile
+        profile.group_by_date = True
+        profile.save()
+        self.setup_bookmark()
+        html = self.render_template()
+        soup = self.make_soup(html)
+        # 组头在表格内跨全行渲染，不再强制关闭
+        header = soup.select_one("ul.view-table li.group-header.table-group-header")
+        self.assertIsNotNone(header)
+
+    def test_table_view_sort_links(self):
+        self.setup_bookmark()
+        html = self.render_template(url="/bookmarks?sort=added_desc")
+        soup = self.make_soup(html)
+
+        # 当前按 added_desc 排序：date 列点击切到 asc，title 列默认 asc
+        date_link = soup.select_one('li.table-header .th[data-key="date"] a')
+        self.assertIn("sort=added_asc", date_link["href"])
+        title_link = soup.select_one('li.table-header .th[data-key="title"] a')
+        self.assertIn("sort=title_asc", title_link["href"])
+
+        html = self.render_template(url="/bookmarks?sort=title_asc")
+        soup = self.make_soup(html)
+        title_link = soup.select_one('li.table-header .th[data-key="title"] a')
+        self.assertIn("sort=title_desc", title_link["href"])
+
+    def test_table_view_sort_resets_page(self):
+        self.setup_bookmark()
+        html = self.render_template(url="/bookmarks?page=3")
+        soup = self.make_soup(html)
+        date_link = soup.select_one('li.table-header .th[data-key="date"] a')
+        self.assertNotIn("page=3", date_link["href"])
+
+    def test_table_view_column_config(self):
+        profile = self.get_or_create_test_user().profile
+        profile.bookmark_table_columns = [
+            {"key": "date", "w": 1},
+            {"key": "domain", "w": 1},
+            {"key": "bogus", "w": 1},
+        ]
+        profile.save()
+        self.setup_bookmark()
+
+        html = self.render_template()
+        soup = self.make_soup(html)
+        labels = [
+            el.get_text(strip=True)
+            for el in soup.select("li.table-header .th .th-label")
+        ]
+        # 非法 key 被丢弃；title 列被强制保留并排在最前
+        self.assertEqual(labels, ["Title", "Date", "Domain"])
+
+
+class BookmarkTableStatusColumnTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
+    """状态列：直接复用书签工具栏的状态按钮。"""
+
+    render_template = BookmarkListTemplateTest.render_template
+
+    def setUp(self):
+        profile = self.get_or_create_test_user().profile
+        profile.bookmark_view_mode = UserProfile.BOOKMARK_VIEW_MODE_TABLE
+        profile.bookmark_table_columns = [
+            {"key": "title", "w": 2.4, "on": True},
+            {"key": "status", "w": 1.4, "on": True},
+        ]
+        profile.save()
+
+    def test_status_cell_renders_toolbar_buttons(self):
+        self.setup_bookmark(unread=True)
+        soup = self.make_soup(self.render_template())
+        cell = soup.select_one("li[ld-bookmark-item] .cell-status")
+        self.assertIsNotNone(cell)
+        # 未读书签：工具栏的「标记为已读」按钮出现在状态列里
+        self.assertIsNotNone(cell.select_one('[data-action="mark_as_read"]'))
+
+    def test_read_bookmark_shows_mark_unread_button(self):
+        self.setup_bookmark(unread=False)
+        soup = self.make_soup(self.render_template())
+        cell = soup.select_one("li[ld-bookmark-item] .cell-status")
+        self.assertIsNotNone(cell)
+        self.assertIsNotNone(cell.select_one('[data-action="mark_as_unread"]'))

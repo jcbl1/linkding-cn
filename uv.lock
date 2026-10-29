@@ -343,10 +343,14 @@ wheels = [
 
 [[package]]
 name = "djangorestframework"
-version = "3.18.0"
-source = { git = "https://github.com/encode/django-rest-framework.git#751a19fe1b237beca9af7d587fce55d3e09d3741" }
+version = "3.18.3"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8d/b2/1cee76b188301f7d03169ca77fab2b3d3ec5d01b3469189f944af2d7f11a/djangorestframework-3.18.3.tar.gz", hash = "sha256:446a9b352e7eff630421ab3f2328bd2401b109a9470afa4a31189994911ed030", size = 923563, upload-time = "2026-10-06T21:33:51.521Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c4/dd/de5f4543765bec94e036a5e9593a42f8fa7efec8de78eb56b9ca834385f3/djangorestframework-3.18.3-py3-none-any.whl", hash = "sha256:8544bb674846731b1e3c9b309236ee1dc412905a0aa725be2ec193ca950a7d12", size = 903986, upload-time = "2026-10-06T21:33:49.917Z" },
 ]
 
 [[package]]
@@ -496,7 +500,7 @@ wheels = [
 
 [[package]]
 name = "linkding-cn"
-version = "1.3.1"
+version = "1.3.2"
 source = { virtual = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -551,7 +555,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=41.0.0" },
     { name = "curl-cffi", specifier = ">=0.16.3" },
     { name = "django", specifier = ">=6.0.7" },
-    { name = "djangorestframework", git = "https://github.com/encode/django-rest-framework.git" },
+    { name = "djangorestframework", specifier = ">=3.18.3" },
     { name = "elementpath", specifier = ">=5.1.4" },
     { name = "huey", specifier = ">=3.0.0" },
     { name = "jsonpath-rfc9535", specifier = ">=1.0.0" },

@@ -11,7 +11,7 @@ from contextlib import suppress
 
 from django.conf import settings
 
-from site_adapters.services.auth.credentials import get_shared_cookie
+from site_adapters.services.auth.credentials import get_implicit_manual_cookie
 from site_adapters.services.auth.cookies import (
     copy_cookie_file_to_temp,
     generate_temp_cookies_file,
@@ -159,10 +159,22 @@ _BROWSER_HOOK_BOILERPLATE = r"""
 
 
 _WAIT_ELEMENTS_TIMEOUT_CAP = 30  # seconds
+# Bounded default when neither wait_elements_timeout nor section timeout is set.
+# Prevents a stray wait_elements selector from hanging the capture forever.
+_DEFAULT_WAIT_ELEMENTS_TIMEOUT = 10  # seconds
 
 
 def _resolve_wait_elements_timeout(config: dict) -> int:
-    """Resolve wait_elements_timeout: explicit value, or min(timeout, 30), or 0."""
+    """Resolve wait_elements_timeout: explicit value, min(timeout, 30), or a bounded default.
+
+    Resolution chain (first matching branch wins):
+    1. Explicit ``wait_elements_timeout``: a positive int is used as-is; a
+       non-positive value means "no wait timeout" → 0 (the browser script then
+       waits unbounded by design).
+    2. Section ``timeout``: positive → min(value, 30); non-positive → 0.
+    3. Neither configured → the bounded default (10 s). Explicit 0 (from either
+       source) stays unbounded; only the truly-unconfigured case is capped.
+    """
     if not config:
         return 0
     explicit = config.get("wait_elements_timeout")
@@ -176,11 +188,10 @@ def _resolve_wait_elements_timeout(config: dict) -> int:
     if section_timeout is not None:
         try:
             val = int(section_timeout)
-            if val > 0:
-                return min(val, _WAIT_ELEMENTS_TIMEOUT_CAP)
+            return min(val, _WAIT_ELEMENTS_TIMEOUT_CAP) if val > 0 else 0
         except (TypeError, ValueError):
             pass
-    return 0
+    return _DEFAULT_WAIT_ELEMENTS_TIMEOUT
 
 
 def _wrap_user_hook_script(source: str) -> str:
@@ -257,6 +268,13 @@ def _build_site_adapter_options(url: str, config: dict) -> tuple[list[str], list
         if value is None or name.lower() == "cookie":
             continue
         if name.lower() == "user-agent":
+            # 仅显式配置的 UA 注入快照浏览器；默认无 UA 时使用引擎自身 UA
+            # （全局 UA 与运行引擎平台失配会被反爬站点拦截）。
+            # 延迟导入避免 engine → singlefile → website_loader 循环导入。
+            from bookmarks.services.website_loader import _has_explicit_user_agent
+
+            if not _has_explicit_user_agent(config):
+                continue
             options.append(f"--user-agent={value}")
         else:
             options.append(f"--http-header={name}: {value}")
@@ -271,11 +289,17 @@ def _build_site_adapter_options(url: str, config: dict) -> tuple[list[str], list
             cookie_str=user_cookie, scope=snapshot_scope)
         if cookie_file:
             temp_files.append(cookie_file)
+    # Implicit injection for sections without an auth config: only
+    # user-provided (manual) cookies qualify. Auto cookies are config-driven
+    # and must not bleed into sections that never declared auth, or stale
+    # refresh leftovers would be forced onto every snapshot.
     if not cookie_file and (config.get("_domain_key") or config.get("domain_key")):
         domain_key = config.get("_domain_key") or config.get("domain_key")
-        best, _ = get_shared_cookie(hostname=domain_key, scope=snapshot_scope)
-        if best:
-            cookie_file = generate_temp_cookies_file(domain_key=domain_key, cookie_str=best, scope=snapshot_scope)
+        manual_cookie = get_implicit_manual_cookie(
+            hostname=domain_key, section_scope=snapshot_scope)
+        if manual_cookie:
+            cookie_file = generate_temp_cookies_file(
+                domain_key=domain_key, cookie_str=manual_cookie, scope=snapshot_scope)
             if cookie_file:
                 temp_files.append(cookie_file)
     if cookie_file:
@@ -287,15 +311,153 @@ def _build_site_adapter_options(url: str, config: dict) -> tuple[list[str], list
     return options, temp_files
 
 
+def _strip_user_agent(options: list[str]) -> list[str]:
+    """剔除框架级选项（env）中的 --user-agent。
+
+    全局 UA 无法匹配运行环境引擎，注入会导致反爬站点拦截快照；
+    UA 只允许来自适配器显式配置，或由浏览器使用引擎自身 UA。
+    """
+    out = []
+    i = 0
+    while i < len(options):
+        opt = options[i]
+        if opt.startswith("--user-agent"):
+            # 支持 --user-agent=VALUE 与 --user-agent VALUE 两种形式
+            if "=" not in opt:
+                i += 1  # 跳过值 token
+            i += 1
+            continue
+        out.append(opt)
+        i += 1
+    return out
+
+
+_PROFILE_ARG_STRIPPED_WARNED = False
+
+
+def _tail(text, limit: int = 2000) -> str:
+    """取子进程输出的尾部若干字符——浏览器把真正的报错打在最后几行。"""
+    text = str(text or "").strip()
+    if len(text) <= limit:
+        return text
+    return "…" + text[-limit:]
+
+
+def _with_tail(message: str, output) -> str:
+    output = _tail(output)
+    return f"{message}: {output}" if output else message
+
+
+def _describe_owner(path: str) -> tuple[int | None, str]:
+    """返回目录 (属主 uid, 权限串)，用于"为什么不可写"的报错。"""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None, "unknown"
+    return stat.st_uid, oct(stat.st_mode & 0o777)
+
+
+def resolve_profile_dir() -> str:
+    """解析并校验 Chromium profile 目录；不可用即失败，不做降级。
+
+    必须绝对路径：相对路径按 CWD 解析，会让不同用户命中同一目录、互相夺走属主，
+    浏览器随即建不出 ProcessSingleton 而退出。
+    """
+    configured = getattr(settings, "LD_CHROMIUM_PROFILE_DIR", "")
+    if not configured:
+        raise SingleFileError(
+            "LD_CHROMIUM_PROFILE_DIR is empty. Set it to an absolute, writable "
+            "directory, e.g. /etc/linkding/data/chromium-profile."
+        )
+    if not os.path.isabs(configured):
+        raise SingleFileError(
+            f"LD_CHROMIUM_PROFILE_DIR must be an absolute path, got {configured!r}. "
+            "A relative path is resolved against the process working directory, "
+            "which lets processes running as different users share the same profile "
+            "dir and take ownership of each other's files. "
+            "Use e.g. /etc/linkding/data/chromium-profile."
+        )
+    try:
+        os.makedirs(configured, mode=0o700, exist_ok=True)
+    except OSError as error:
+        raise SingleFileError(
+            f"Cannot create LD_CHROMIUM_PROFILE_DIR {configured!r}: {error}. "
+            "Point it at a writable directory, e.g. /etc/linkding/data/chromium-profile."
+        ) from None
+    if not os.access(configured, os.R_OK | os.W_OK | os.X_OK):
+        uid = getattr(os, "getuid", lambda: 0)()
+        owner_uid, mode = _describe_owner(configured)
+        if owner_uid is not None and owner_uid != uid:
+            hint = (
+                "It is most likely owned by another user, e.g. created by a root "
+                "shell inside the container. Fix the ownership or point the setting "
+                "at a writable directory."
+            )
+        else:
+            hint = (
+                "Its mode does not grant read/write/traverse access to this user. "
+                "Fix the permissions or point the setting at a writable directory."
+            )
+        raise SingleFileError(
+            f"LD_CHROMIUM_PROFILE_DIR {configured!r} is not accessible by the current "
+            f"user (uid={uid}); directory is owner uid={owner_uid} mode={mode}. {hint}"
+        )
+    return configured
+
+
+def _strip_browser_profile_dir(options: list[str]) -> list[str]:
+    """剔除 env 选项里的 --user-data-dir：profile 只由 resolve_profile_dir 决定。"""
+    global _PROFILE_ARG_STRIPPED_WARNED
+
+    out = []
+    for opt in options:
+        if opt.startswith("--browser-arg=--user-data-dir"):
+            if not _PROFILE_ARG_STRIPPED_WARNED:
+                _PROFILE_ARG_STRIPPED_WARNED = True
+                logger.warning(
+                    "Ignoring %s from LD_SINGLEFILE_*_OPTIONS; the profile dir is "
+                    "managed by LD_CHROMIUM_PROFILE_DIR.",
+                    opt,
+                )
+            continue
+        out.append(opt)
+    return out
+
+
+def _terminate_process(process) -> str:
+    """超时收尾：先 SIGTERM，必要时杀掉整个进程组，并回收残留输出。"""
+    logger.error("Timeout expired while creating snapshot. Terminating process...")
+    try:
+        process.terminate()
+        output, _ = process.communicate(timeout=20)
+        return output or ""
+    except subprocess.TimeoutExpired:
+        # Kill the whole process group, which should also clean up any chromium
+        # processes spawned by single-file
+        logger.error("Timeout expired while terminating. Killing process group...")
+        with suppress(OSError):
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        with suppress(Exception):
+            output, _ = process.communicate(timeout=5)
+            return output or ""
+    return ""
+
+
 def create_snapshot(url: str, filepath: str, config: dict = None):
     singlefile_path = settings.LD_SINGLEFILE_PATH
+    profile_dir = resolve_profile_dir()
 
     custom_options = get_custom_options(config)
     injected_options, temp_files = _build_site_adapter_options(url, config)
-    global_options = shlex.split(settings.LD_SINGLEFILE_OPTIONS)
-    ublock_options = shlex.split(settings.LD_SINGLEFILE_UBLOCK_OPTIONS)
+    global_options = _strip_browser_profile_dir(
+        _strip_user_agent(shlex.split(settings.LD_SINGLEFILE_OPTIONS))
+    )
+    ublock_options = _strip_browser_profile_dir(
+        _strip_user_agent(shlex.split(settings.LD_SINGLEFILE_UBLOCK_OPTIONS))
+    )
     required_options = [
         # see the field `_builtin.snapshot.single_args` in `site_adapters/services/config/adapters/defaults/adapters.jsonc`
+        f"--browser-arg=--user-data-dir={profile_dir}",
     ]
     # 自动解析 cloakbrowser 路径（最低优先级，允许显式覆盖）
     browser_path = _resolve_browser_path()
@@ -351,12 +513,41 @@ def create_snapshot(url: str, filepath: str, config: dict = None):
     try:
         with suppress(OSError):
             os.remove(filepath)
-        # Use start_new_session=True to create a new process group
-        process = subprocess.Popen(args, start_new_session=True)
-        process.wait(timeout=(config.get("timeout") if config else None) or settings.LD_SINGLEFILE_TIMEOUT_SEC)
+        # Use start_new_session=True to create a new process group.
+        # 捕获输出：浏览器退出的真实原因在 stderr，必须带进失败信息。
+        process = subprocess.Popen(
+            args,
+            start_new_session=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+        )
+        try:
+            output, _ = process.communicate(
+                timeout=(config.get("timeout") if config else None)
+                or settings.LD_SINGLEFILE_TIMEOUT_SEC
+            )
+        except subprocess.TimeoutExpired:
+            output = _terminate_process(process)
+            log_execution(
+                url=snapshot_url,
+                domain_key=(config or {}).get("_domain_key", ""),
+                step="snapshot",
+                cmd=args,
+                returncode=-1,
+                stderr=_with_tail("Timeout expired while creating snapshot", output),
+                duration_ms=int((time.monotonic() - start) * 1000),
+                config_snapshot=config,
+            )
+            raise SingleFileError("Timeout expired while creating snapshot") from None
 
         if not os.path.exists(filepath):
-            raise SingleFileError("Failed to create snapshot")
+            raise SingleFileError(
+                "Failed to create snapshot "
+                f"(exit={process.returncode}): {_tail(output) or 'no output'}"
+            )
+        logger.debug("SingleFile output: %s", _tail(output, 500))
         log_execution(
             url=snapshot_url,
             domain_key=(config or {}).get("_domain_key", ""),
@@ -366,31 +557,6 @@ def create_snapshot(url: str, filepath: str, config: dict = None):
             duration_ms=int((time.monotonic() - start) * 1000),
             config_snapshot=config,
         )
-    except subprocess.TimeoutExpired:
-        log_execution(
-            url=snapshot_url,
-            domain_key=(config or {}).get("_domain_key", ""),
-            step="snapshot",
-            cmd=args,
-            returncode=-1,
-            stderr="Timeout expired while creating snapshot",
-            duration_ms=int((time.monotonic() - start) * 1000),
-            config_snapshot=config,
-        )
-        # First try to terminate properly
-        try:
-            logger.error("Timeout expired while creating snapshot. Terminating process...")
-            process.terminate()
-            process.wait(timeout=20)
-            raise SingleFileError("Timeout expired while creating snapshot") from None
-        except subprocess.TimeoutExpired:
-            # Kill the whole process group, which should also clean up any chromium
-            # processes spawned by single-file
-            logger.error("Timeout expired while terminating. Killing process group...")
-            if process:
-                with suppress(OSError):
-                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            raise SingleFileError("Timeout expired while creating snapshot") from None
     except OSError as error:
         log_execution(
             url=snapshot_url,

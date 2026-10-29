@@ -95,6 +95,8 @@ def _check_type(value, type_str: str) -> bool:
         return isinstance(value, list) and all(isinstance(i, str) for i in value)
     if type_str == 'array<str>':
         return isinstance(value, list) and all(isinstance(i, str) for i in value)
+    if type_str == 'array<int>':
+        return isinstance(value, list) and all(isinstance(i, int) and not isinstance(i, bool) for i in value)
     if type_str == 'object<string, string>':
         return isinstance(value, dict) and all(
             isinstance(k, str) and isinstance(v, str) for k, v in value.items()
@@ -113,15 +115,20 @@ def _check_type(value, type_str: str) -> bool:
         )
     if type_str == 'auth':
         return value is None or isinstance(value, dict)
-    if type_str == 'array<{path, hook}>':
+    # 标记类型：与 fields.py 的 "array<{path, hook, timeout?}>" 保持一致；
+    # scripts 的逐项结构由 _validate_domain_config 内的专门校验负责，这里只做存在性豁免。
+    if type_str == 'array<{path, hook, timeout?}>':
         if not isinstance(value, list):
             return False
         return all(isinstance(item, dict) for item in value)
     # Enum types: "html"|"xml"|"json" or "auto"|"login" etc.
-    if '|' in type_str and '<' not in type_str:
+    if '|' in type_str:
         import re
         options = re.findall(r'"([^"]+)"', type_str)
         if options:
+            if type_str.startswith('array<'):
+                # array<"title" | "body">：元素须为枚举值之一的数组
+                return isinstance(value, list) and all(i in options for i in value)
             return value in options
     # Fallback: no type check available
     return True
@@ -134,7 +141,7 @@ def _auto_type_check(issues, label, section, key, value, file, adapter):
     if not type_str:
         return
     # Skip types handled by special validators
-    if type_str in ('auth', 'array<{path, hook}>', 'rewrite'):
+    if type_str in ('auth', 'array<{path, hook, timeout?}>', 'rewrite'):
         return
     if not _check_type(value, type_str):
         issues.append(_issue(
@@ -203,6 +210,12 @@ def classify_field(section: str, key: str) -> str:
     fields = _SECTION_FIELDS.get(section, set())
     if key in fields:
         return "field"
+    # Nested container keys (e.g. `http_head_probe`, `content_check`) are
+    # declared in the schema with dotted paths (`http_head_probe.enabled`),
+    # so the bare top-level key must be recognized as a known container.
+    prefix = key + "."
+    if any(f.startswith(prefix) for f in fields):
+        return "field"
     return "unknown"
 
 
@@ -234,9 +247,8 @@ def separate_http_fields(data: dict) -> tuple[dict, dict]:
 def validate_section_fields(section: str, data: dict) -> list[dict]:
     """Validate section fields, return issues. Unknown fields are discarded."""
     issues = []
-    fields = _SECTION_FIELDS.get(section, set())
     for key in data:
-        if key not in fields:
+        if classify_field(section, key) != "field":
             issues.append(_issue('warning', 'unknown_field', f"{section}.{key} is unknown, discarded"))
     return issues
 
@@ -277,7 +289,8 @@ def _validate_subscriptions(issues: list[dict], adapters, file: str | None = Non
                 if not os.path.exists(resolved):
                     issues.append(_issue('warning', 'adapter_source_not_found', f"{label}.source local file not found: {source}", file=file, path=f"{label}.source"))
         interval = adp.get('update_interval', 86400)
-        if not isinstance(interval, int) or interval <= 0:
+        # bool 是 int 的子类，必须显式排除（True/False 不得作为合法间隔）
+        if isinstance(interval, bool) or not isinstance(interval, int) or interval <= 0:
             issues.append(_issue('error', 'update_interval_invalid', f"{label}.update_interval must be a positive integer", file=file, path=f"{label}.update_interval"))
 
 
@@ -403,11 +416,28 @@ def _validate_auth_block(issues: list[dict], label: str, auth: dict, file_dir: s
             if extra_params is not None:
                 if not isinstance(extra_params, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in extra_params.items()):
                     issues.append(_issue('error', 'auth_block_error', f"{prefix}.extra_params must be a string map", file=file, adapter=adapter, path=f"{prefix}.extra_params"))
+            # 已知键（access_path/refresh_path/expires_path 为 *_token_path/*_in_path 的别名，
+            # 与 auth/oauth2.py 的消费键保持一致），其余键报 unknown 警告。
+            known_oauth2_keys = (
+                "enabled", "endpoint", "client_id", "client_secret", "grant_type", "format",
+                "access_token_path", "access_path",
+                "refresh_token_path", "refresh_path",
+                "expires_in_path", "expires_path",
+                "header", "header_format", "extra_params",
+            )
+            for key in oauth2:
+                if key not in known_oauth2_keys:
+                    issues.append(_issue('warning', 'unknown_field', f"{prefix}.{key} is unknown, will be ignored", file=file, adapter=adapter, path=f"{prefix}.{key}"))
     # Validate basic_auth sub-block
     basic_auth = auth.get('basic_auth')
     if basic_auth is not None:
         if not isinstance(basic_auth, dict):
             issues.append(_issue('error', 'auth_block_error', f"{label}.basic_auth must be an object", file=file, adapter=adapter, path=f"{label}.basic_auth"))
+        else:
+            for key in ("username", "password"):
+                value = basic_auth.get(key)
+                if value is not None and not isinstance(value, str):
+                    issues.append(_issue('error', 'auth_block_error', f"{label}.basic_auth.{key} must be a string", file=file, adapter=adapter, path=f"{label}.basic_auth.{key}"))
     # Warn about unknown keys
     for key in auth:
         if key not in ('cookie', 'headers', 'oauth2', 'basic_auth'):
@@ -498,6 +528,18 @@ def _validate_domain_config(issues: list[dict], label: str, data: dict, file_dir
                 issues.append(_issue('warning', 'unknown_field', f"{label}.{section}.{key} is unknown, will be ignored at runtime", file=file, adapter=adapter, path=f"{label}.{section}.{key}"))
             else:
                 _auto_type_check(issues, label, section, key, value, file, adapter)
+                # health 段的嵌套容器（http_head_probe.* / content_check.*）按
+                # fields.py 的点路径类型表递归校验内层键；容器本身已识别，
+                # 不再对其裸 key 报 unknown。
+                if section == 'health' and key in ('http_head_probe', 'content_check') \
+                        and isinstance(value, dict):
+                    known = ALL_SECTIONS.get(section, {})
+                    for inner_key, inner_value in value.items():
+                        dotted = f"{key}.{inner_key}"
+                        if dotted in known:
+                            _auto_type_check(issues, label, section, dotted, inner_value, file, adapter)
+                        else:
+                            issues.append(_issue('warning', 'unknown_field', f"{label}.{section}.{dotted} is unknown, will be ignored at runtime", file=file, adapter=adapter, path=f"{label}.{section}.{dotted}"))
             if key == 'scripts':
                 if not isinstance(value, list):
                     issues.append(_issue('error', 'scripts_not_array', f"{label}.{section}.scripts must be an array", file=file, adapter=adapter, path=f"{label}.{section}.scripts"))

@@ -119,6 +119,10 @@
     order: 55;
   }
 
+  .settings-content > #settings-shortcuts {
+    order: 56;
+  }
+
   .settings-content > #settings-user {
     order: 60;
   }
@@ -823,21 +827,6 @@
     color: var(--error-color);
   }
 
-  .settings-field-errors {
-    display: none;
-    color: var(--error-color);
-    font-size: var(--font-size-sm);
-    /* 独占一行，位于输入框正下方（右对齐贴近控件列） */
-    flex-basis: 100%;
-    max-width: 100%;
-    text-align: right;
-    margin-top: var(--unit-3);
-
-    &.is-visible {
-      display: block;
-    }
-  }
-
   .settings-file-controls {
     --settings-file-control-height: var(--settings-button-height);
     width: min(200px, 100%);
@@ -930,6 +919,11 @@
 
     &[aria-expanded="true"] svg {
       transform: rotate(90deg);
+    }
+
+    /* display: inline-grid 会盖掉 UA 的 [hidden] */
+    &[hidden] {
+      display: none;
     }
   }
 

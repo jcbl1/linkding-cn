@@ -24,7 +24,10 @@ from site_adapters.services.auth.cookies import (
     verify_and_refresh,
 )
 from site_adapters.services.auth.cookies import _should_refresh_cookie
-from site_adapters.services.auth.credentials import get_shared_cookie
+from site_adapters.services.auth.credentials import (
+    get_implicit_manual_cookie,
+    get_shared_cookie,
+)
 from site_adapters.services.config import (
     apply_request_url,
     apply_rewrite,
@@ -68,34 +71,26 @@ def _is_transport_exception(exc) -> bool:
 
 
 def _has_explicit_user_agent(config) -> bool:
-    """True when the site adapter explicitly configures a User-Agent.
+    """True when the merged config carries an explicit User-Agent.
 
-    Only explicit configs (in the adapter's http/headers, visible in the raw
-    merged config) should override the impersonated Chrome UA; the _builtin
-    global default UA (Edge) would otherwise conflict with the Chrome TLS
-    fingerprint and get rejected by fingerprint-checking sites.
+    The _builtin baseline provides no default UA anymore, so any UA in the
+    merged headers comes from an explicit site adapter (domain config or
+    _builtin_overrides) and must be honored.
     """
-    raw = (config or {}).get("_raw") or {}
-    for section in ("defaults", "metadata", "snapshot", "reader"):
-        sec = raw.get(section)
-        if isinstance(sec, dict):
-            h = sec.get("http") or sec.get("headers")
-            if isinstance(h, dict) and h.get("User-Agent"):
-                return True
-    h = raw.get("http") or raw.get("headers")
-    if isinstance(h, dict) and h.get("User-Agent"):
-        return True
-    return False
+    return bool((config or {}).get("headers", {}).get("User-Agent"))
 
 
-def _open_http_stream(url: str, timeout, headers, cookies, proxies, config=None):
-    """Open a streaming GET for page loading.
+def _open_http_stream(url: str, timeout, headers, cookies, proxies, config=None,
+                      method: str = "GET"):
+    """Open a streaming request for page loading.
 
+    method: "GET" (default) or "HEAD"; dispatched onto the selected engine.
     Engine selection: per-domain config ``http_engine`` > ``LD_HTTP_ENGINE``
     env var > default "requests". When curl_cffi is selected it impersonates a
     Chrome TLS/HTTP2 fingerprint (required by anti-bot sites such as zhihu) and
     falls back to the classic requests engine on transport failure.
     """
+    method = (method or "GET").upper()
     if _http_engine(config) == "curl_cffi":
         try:
             from curl_cffi import requests as chttp
@@ -106,13 +101,15 @@ def _open_http_stream(url: str, timeout, headers, cookies, proxies, config=None)
             # 会让反爬站点拒绝请求，因此默认交给 impersonate 注入的 Chrome UA。
             if not c_headers.get("User-Agent") or not _has_explicit_user_agent(config):
                 c_headers.pop("User-Agent", None)
-            resp = chttp.get(
+            sender = getattr(chttp, method.lower())
+            resp = sender(
                 url,
                 timeout=timeout,
                 headers=c_headers,
                 cookies=cookies,
                 proxies=proxies,
                 stream=True,
+                allow_redirects=True,
                 impersonate="chrome",
             )
             resp._http_engine = "curl_cffi"
@@ -122,13 +119,21 @@ def _open_http_stream(url: str, timeout, headers, cookies, proxies, config=None)
                 "curl_cffi request failed, falling back to requests. url=%s: %s",
                 url, exc,
             )
-    resp = requests.get(
+    sender = getattr(requests, method.lower())
+    # requests 引擎无 TLS 指纹伪装：非显式 UA 回落内置默认；显式 UA 保留。
+    if not _has_explicit_user_agent(config):
+        headers = {
+            k: v for k, v in (headers or {}).items() if k.lower() != "user-agent"
+        }
+        headers["User-Agent"] = settings.LD_DEFAULT_USER_AGENT
+    resp = sender(
         url,
         timeout=timeout,
         headers=headers,
         cookies=cookies,
         proxies=proxies,
         stream=True,
+        allow_redirects=True,
     )
     resp._http_engine = "requests"
     return resp
@@ -183,9 +188,6 @@ def _wait_for_domain(domain: str):
     if wait > 0:
         logger.debug('Rate limit: sleeping %.1fs for %s', wait, domain)
         time.sleep(wait)
-    if wait > 0:
-        logger.debug('Rate limit: sleeping %.1fs for %s', wait, domain)
-        time.sleep(wait)
 
 
 
@@ -204,25 +206,47 @@ class NonRetryableMetadataError(Exception):
         self.status_code = status_code
 
 
+def _clean_text(value):
+    """空串与纯空白等同于未抓到：抓取链路里“空”只保留 None 一种表示。"""
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
 @dataclass
 class WebsiteMetadata:
     url: str
     title: str | None
     description: str | None
-    preview_image: str | None
+    preview_image: str | None = None
+    # 注意：author 放在 preview_image 之后，保持旧的 4 位置参数调用
+    # WebsiteMetadata(url, title, description, preview_image) 语义不变
+    author: str | None = None
+
+    def __post_init__(self):
+        # 在构造处归一：解析器、loader 脚本、before/after hook 都绕不过这里，
+        # 于是写入侧可以放心用 `is not None` 判断“抓到了”
+        self.title = _clean_text(self.title)
+        self.description = _clean_text(self.description)
+        self.author = _clean_text(self.author)
+        self.preview_image = _clean_text(self.preview_image)
 
     def to_dict(self):
         return {
             "url": self.url,
             "title": self.title,
             "description": self.description,
+            "author": self.author,
             "preview_image": self.preview_image,
         }
 
 
 
 def _empty_metadata(url: str):
-    return WebsiteMetadata(url=url, title=None, description=None, preview_image=None)
+    return WebsiteMetadata(
+        url=url, title=None, description=None, author=None, preview_image=None
+    )
 
 
 def _apply_metadata_before_result(url: str, config: dict, result) -> None:
@@ -262,6 +286,7 @@ def _normalize_metadata_result(url: str, metadata, source: str):
             url=metadata.get('url') or url,
             title=metadata.get('title'),
             description=metadata.get('description'),
+            author=metadata.get('author'),
             preview_image=metadata.get('image') or metadata.get('preview_image'),
         )
 
@@ -280,7 +305,7 @@ def _metadata_dict_is_empty(result: dict) -> bool:
     """Return True when a replace-hook result carries no extractable fields."""
     return not any(
         result.get(key)
-        for key in ("title", "description", "image", "preview_image")
+        for key in ("title", "description", "author", "image", "preview_image")
     )
 
 
@@ -298,7 +323,7 @@ def _load_with_hooks(url: str, config: dict, scripts: list, username: str = '',
                 cookie_config=config.get("cookie"),
                 url=config.get("_request_url", url),
                 domain_key=config.get("_domain_key"),
-                verify_context={"url": url, "status": 0, "title": "", "body_preview": ""},
+                verify_context={"url": url, "status": 0, "title": "", "body_preview": "", "http_engine": config.get("http_engine")},
                 username=username,
                 scope=config.get("_effective_cookie_scope", ""),
             )
@@ -359,7 +384,7 @@ def _load_with_hooks(url: str, config: dict, scripts: list, username: str = '',
                         cookie_config=cookie_config,
                         url=config.get("_request_url", url),
                         domain_key=config.get("_domain_key"),
-                        verify_context={"url": url, "status": 0, "title": "", "body_preview": ""},
+                        verify_context={"url": url, "status": 0, "title": "", "body_preview": "", "http_engine": config.get("http_engine")},
                         username=username,
                         scope=config.get("_effective_cookie_scope", ""),
                         force_refresh=True,
@@ -378,19 +403,18 @@ def _load_with_hooks(url: str, config: dict, scripts: list, username: str = '',
             if isinstance(result, dict):
                 result['title'] = apply_rewrite(result.get('title'), config.get('rewrite_title'))
                 result['description'] = apply_rewrite(result.get('description'), config.get('rewrite_description'))
+                result['author'] = apply_rewrite(result.get('author'), config.get('rewrite_author'))
                 result['image'] = apply_rewrite(result.get('image'), config.get('rewrite_image'))
                 metadata = _normalize_metadata_result(url, result, source=script_path)
             else:
                 return _empty_metadata(url)
             break  # Only one replace allowed
     else:
-        # Built-in engine: load page + parse
-        if ignore_cache:
-            metadata = _load_website_metadata(url, config, username=username)
-        else:
-            metadata = _load_website_metadata_config_cached(
-                url, _metadata_config_cache_key(config), username=username
-            )
+        # Built-in engine: load page + parse. 直接传入 config（绕过
+        # _load_website_metadata_config_cached 的深拷贝）：引擎中途刷新出的
+        # cookie 会写回 config，后续 after 钩子必须拿到刷新后的凭据，
+        # 否则钩子侧的 API 调用会一直带着失效 token。
+        metadata = _load_website_metadata(url, config, username=username)
 
     # 3. Run after hooks
     if metadata is None:
@@ -403,6 +427,7 @@ def _load_with_hooks(url: str, config: dict, scripts: list, username: str = '',
     result_dict = {
         'title': metadata.title,
         'description': metadata.description,
+        'author': metadata.author,
         'image': metadata.preview_image,
         'url': metadata.url,
     }
@@ -430,6 +455,7 @@ def _load_with_hooks(url: str, config: dict, scripts: list, username: str = '',
         url=result_dict.get('url') or url,
         title=result_dict.get('title'),
         description=result_dict.get('description'),
+        author=result_dict.get('author'),
         preview_image=result_dict.get('image'),
     )
 
@@ -459,6 +485,7 @@ def load_website_metadata(url: str, ignore_cache: bool = False, username: str = 
                             url=result.get('url') or url,
                             title=apply_rewrite(result.get('title'), config.get('rewrite_title')),
                             description=apply_rewrite(result.get('description'), config.get('rewrite_description')),
+                            author=apply_rewrite(result.get('author'), config.get('rewrite_author')),
                             preview_image=apply_rewrite(
                                 result.get('preview_image') or result.get('image'),
                                 config.get('rewrite_image'),
@@ -470,6 +497,7 @@ def load_website_metadata(url: str, ignore_cache: bool = False, username: str = 
                     if isinstance(result, dict):
                         result['title'] = apply_rewrite(result.get('title'), config.get('rewrite_title'))
                         result['description'] = apply_rewrite(result.get('description'), config.get('rewrite_description'))
+                        result['author'] = apply_rewrite(result.get('author'), config.get('rewrite_author'))
                         result['image'] = apply_rewrite(result.get('image'), config.get('rewrite_image'))
                     return _normalize_metadata_result(url, result, source=loader_path)
                 return _empty_metadata(url)
@@ -493,12 +521,13 @@ def rewrite_website_metadata(
     title: str | None,
     description: str | None,
     username: str = '',
+    author: str | None = None,
 ) -> WebsiteMetadata:
     """对客户端（浏览器）提供的元数据应用站点配置的 rewrite_* 规则。
 
-    仅应用 rewrite_title / rewrite_description / rewrite_image 与 rewrite_url，
-    不重新抓取网页。用于客户端 bookmarklet 流程：浏览器把捕获的元数据交给
-    服务器，由服务器上的站点规则重写后返回。
+    仅应用 rewrite_title / rewrite_description / rewrite_author / rewrite_image
+    与 rewrite_url，不重新抓取网页。用于客户端 bookmarklet 流程：浏览器把捕获
+    的元数据交给服务器，由服务器上的站点规则重写后返回。
 
     注意：预览图不参与客户端链路，始终由服务器重新抓取网页后按
     select_image / rewrite_image 规则处理。
@@ -508,6 +537,7 @@ def rewrite_website_metadata(
         url=config.get("_rewrite_url") or url,
         title=apply_rewrite(title, config.get("rewrite_title")),
         description=apply_rewrite(description, config.get("rewrite_description")),
+        author=apply_rewrite(author, config.get("rewrite_author")),
         preview_image=None,
     )
 
@@ -547,7 +577,7 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
                 logger.info("No cookie for auto site %s, acquiring via browser refresh", domain_key)
                 new_cookie = verify_and_refresh(
                     cookie_config=cookie_config, url=fetch_url, domain_key=domain_key,
-                    verify_context={"url": fetch_url, "status": 0, "title": "", "body_preview": ""},
+                    verify_context={"url": fetch_url, "status": 0, "title": "", "body_preview": "", "http_engine": config.get("http_engine")},
                     username=username,
                     scope=config.get('_effective_cookie_scope', ''),
                 )
@@ -613,9 +643,11 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
                         "status": exc.status_code or 0,
                         "title": "",
                         "body_preview": "",
+                        "http_engine": config.get("http_engine"),
                     },
                     username=username,
                     scope=config.get("_effective_cookie_scope", ""),
+                    force_refresh=True,
                 )
                 if new_cookie:
                     config["_user_cookie"] = new_cookie
@@ -647,7 +679,7 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
 
     try:
         start = timezone.now()
-        title, description, preview_image, sources = _parse_metadata_from_content(
+        title, description, preview_image, author, sources = _parse_metadata_from_content(
             page_text, fetch_url, config, include_sources=True
         )
 
@@ -659,17 +691,18 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
                 "status": 200,
                 "title": title or "",
                 "body_preview": (page_text or "")[:2000],
+                "http_engine": config.get("http_engine"),
             }
             before = _cookie_string_from_config(config)
             after = verify_and_refresh(cookie_config=cookie_config, url=fetch_url,
                                        domain_key=domain_key, verify_context=verify_context,
                                        username=username, scope=config.get('_effective_cookie_scope', ''))
             if after and after != before:
+                # 写回 config：钩子（及调用方）要看到引擎实际使用的最新凭据
+                config["_user_cookie"] = after
                 retry_config = dict(config)
-                # 刷新成功后更新 _user_cookie 为新的 cookie 字符串
-                retry_config["_user_cookie"] = after
                 page_text = load_page(fetch_url, retry_config, load_full_page=load_full)
-                title, description, preview_image, sources = _parse_metadata_from_content(
+                title, description, preview_image, author, sources = _parse_metadata_from_content(
                     page_text, fetch_url, retry_config, include_sources=True
                 )
 
@@ -691,17 +724,77 @@ def _load_website_metadata(url: str, config: dict = None, username: str = '', in
     if config:
         title = apply_rewrite(title, config.get('rewrite_title'))
         description = apply_rewrite(description, config.get('rewrite_description'))
+        author = apply_rewrite(author, config.get('rewrite_author'))
         preview_image = apply_rewrite(preview_image, config.get('rewrite_image'))
 
     metadata = WebsiteMetadata(
         url=(config.get("_rewrite_url") if config else None) or url,
         title=title,
         description=description,
+        author=author,
         preview_image=preview_image,
     )
     if include_sources:
         return metadata, sources
     return metadata
+
+
+def fetch_page_html(url: str, config: dict = None, username: str = '') -> str:
+    """获取页面 HTML 文本供下游解析（如 reader 模式）。
+
+    复用 metadata 抓取通路：http_engine（curl_cffi）、auto cookie 预取、
+    401/403 触发 cookie 自愈刷新——保证 TLS 指纹 / 会话风控站点
+    （如知乎）在各区块行为一致，避免绕过凭据直连被抓。
+    """
+    if config is None:
+        from site_adapters.services.config.resolver import get_reader_config
+        config = get_reader_config(url, username=username) or {}
+    fetch_url = config.get("_request_url") or url
+    load_full = config.get("load_full_page", True)
+    cookie_config = config.get("cookie") or {}
+    scope = config.get("_effective_cookie_scope", "")
+
+    # Pre-flight: auto cookie 站点无凭据时先浏览器刷新
+    if (cookie_config.get("type") == "auto" and cookie_config.get("refresh")
+            and not _cookie_string_from_config(config)):
+        domain_key = config.get("_domain_key")
+        new_cookie = verify_and_refresh(
+            cookie_config=cookie_config, url=fetch_url, domain_key=domain_key,
+            verify_context={"url": fetch_url, "status": 0, "title": "", "body_preview": "", "http_engine": config.get("http_engine")},
+            username=username, scope=scope,
+        )
+        if new_cookie:
+            config["_user_cookie"] = new_cookie
+
+    for attempt in range(_METADATA_MAX_RETRIES + 1):
+        try:
+            return load_page(fetch_url, config, load_full_page=load_full)
+        except NonRetryableMetadataError as exc:
+            invalid_status = (
+                cookie_config.get("verify", {})
+                .get("http_head_probe", {})
+                .get("invalid_status", [401, 403])
+            ) if cookie_config else [401, 403]
+            if (cookie_config and _should_refresh_cookie(cookie_config)
+                    and exc.status_code in invalid_status
+                    and attempt < _METADATA_MAX_RETRIES):
+                domain_key = config.get("_domain_key")
+                new_cookie = verify_and_refresh(
+                    cookie_config=cookie_config, url=fetch_url, domain_key=domain_key,
+                    verify_context={"url": fetch_url, "status": exc.status_code or 0,
+                                    "title": "", "body_preview": "",
+                                    "http_engine": config.get("http_engine")},
+                    username=username, scope=scope, force_refresh=True,
+                )
+                if new_cookie:
+                    config["_user_cookie"] = new_cookie
+                    continue
+            raise
+        except RetryableMetadataError as exc:
+            if attempt < _METADATA_MAX_RETRIES:
+                time.sleep(_METADATA_RETRY_BASE_DELAY * (2 ** attempt))
+                continue
+            raise
 
 
 _JSON_SELECTOR_RE = re.compile(r'^(.*?)(?:::json\((.*)\))$', re.DOTALL)
@@ -869,6 +962,22 @@ def _extract_json_ld(soup) -> dict:
             desc = item.get("description")
             if desc and isinstance(desc, str):
                 result["description"] = desc.strip()
+            # author（可含 name 字段的对象或字符串/列表，仅随内容型节点携带，
+            # 避免 Person/Organization 这类纯作者节点抢占短路口，破坏
+            # 后续内容节点的 title/description/image 兜底）
+            if result:
+                author = item.get("author")
+                if author:
+                    author_str = None
+                    if isinstance(author, dict):
+                        # 对象型作者（如 Person）优先取 name，避免拿到 profile URL
+                        author_str = _json_value_to_string(author.get("name"))
+                        if not author_str:
+                            author_str = _json_value_to_string(author)
+                    else:
+                        author_str = _json_value_to_string(author)
+                    if author_str:
+                        result["author"] = author_str
             # image
             img = item.get("image") or item.get("thumbnailUrl")
             if img:
@@ -903,7 +1012,7 @@ def _selectors_from_config(config: dict | None) -> list[str]:
     if not config:
         return []
     selectors = []
-    for key in ("select_title", "select_description", "select_image"):
+    for key in ("select_title", "select_description", "select_author", "select_image"):
         value = config.get(key)
         if isinstance(value, str):
             value = [value]
@@ -958,6 +1067,7 @@ def _empty_parse_sources():
     return {
         "title": {"value": None, "selector": None},
         "description": {"value": None, "selector": None},
+        "author": {"value": None, "selector": None},
         "preview_image": {"value": None, "selector": None},
     }
 
@@ -989,8 +1099,8 @@ def _parse_metadata_from_json(
         data = json.loads(content)
     except (json.JSONDecodeError, ValueError):
         if include_sources:
-            return None, None, None, _empty_parse_sources()
-        return None, None, None
+            return None, None, None, None, _empty_parse_sources()
+        return None, None, None, None
 
     title, source = _extract_with_json_paths(
         data, (config or {}).get("select_title") or []
@@ -1002,6 +1112,11 @@ def _parse_metadata_from_json(
     )
     sources["description"] = {"value": description, "selector": source}
 
+    author, source = _extract_with_json_paths(
+        data, (config or {}).get("select_author") or []
+    )
+    sources["author"] = {"value": author, "selector": source}
+
     preview_image, source = _extract_with_json_paths(
         data, (config or {}).get("select_image") or []
     )
@@ -1010,8 +1125,8 @@ def _parse_metadata_from_json(
     sources["preview_image"] = {"value": preview_image, "selector": source}
 
     if include_sources:
-        return title, description, preview_image, sources
-    return title, description, preview_image
+        return title, description, preview_image, author, sources
+    return title, description, preview_image, author
 
 
 def _parse_metadata_from_xml(
@@ -1025,8 +1140,8 @@ def _parse_metadata_from_xml(
         root = etree.fromstring(_strip_xml_declaration(content))
     except (etree.XMLSyntaxError, ValueError):
         if include_sources:
-            return None, None, None, _empty_parse_sources()
-        return None, None, None
+            return None, None, None, None, _empty_parse_sources()
+        return None, None, None, None
 
     title, source = _extract_with_xpath(
         root, (config or {}).get("select_title") or [], "title", config
@@ -1038,6 +1153,11 @@ def _parse_metadata_from_xml(
     )
     sources["description"] = {"value": description, "selector": source}
 
+    author, source = _extract_with_xpath(
+        root, (config or {}).get("select_author") or [], "author", config
+    )
+    sources["author"] = {"value": author, "selector": source}
+
     preview_image, source = _extract_with_xpath(
         root, (config or {}).get("select_image") or [], "image", config
     )
@@ -1046,8 +1166,8 @@ def _parse_metadata_from_xml(
     sources["preview_image"] = {"value": preview_image, "selector": source}
 
     if include_sources:
-        return title, description, preview_image, sources
-    return title, description, preview_image
+        return title, description, preview_image, author, sources
+    return title, description, preview_image, author
 
 
 def _strip_xml_declaration(content: str) -> str:
@@ -1079,6 +1199,12 @@ def _parse_metadata_from_soup(
     )
     sources["description"] = {"value": description, "selector": source}
 
+    author_selectors = config.get("select_author") if config else None
+    author, source = _extract_with_selector_source(
+        soup, author_selectors or [], url, "author"
+    )
+    sources["author"] = {"value": author, "selector": source}
+
     image_selectors = config.get("select_image") if config else None
     preview_image, source = _extract_with_selector_source(
         soup, image_selectors or [], url, "image"
@@ -1094,6 +1220,10 @@ def _parse_metadata_from_soup(
         description = json_ld.get("description")
         if description:
             sources["description"] = {"value": description, "selector": "json-ld"}
+    if author is None:
+        author = json_ld.get("author")
+        if author:
+            sources["author"] = {"value": author, "selector": "json-ld"}
     if preview_image is None:
         preview_image = json_ld.get("image")
         if preview_image:
@@ -1111,8 +1241,8 @@ def _parse_metadata_from_soup(
     }
 
     if include_sources:
-        return title, description, preview_image, sources
-    return title, description, preview_image
+        return title, description, preview_image, author, sources
+    return title, description, preview_image, author
 
 
 def _extract_with_selector_source(soup, selectors, url: str = "", field: str = ""):
@@ -1333,6 +1463,7 @@ def load_website_metadata_for_test(url: str, username: str = ''):
                 url=result.get('url') or url,
                 title=apply_rewrite(result.get('title'), config.get('rewrite_title')),
                 description=apply_rewrite(result.get('description'), config.get('rewrite_description')),
+                author=apply_rewrite(result.get('author'), config.get('rewrite_author')),
                 preview_image=apply_rewrite(result.get('preview_image'), config.get('rewrite_image')),
             )
         else:
@@ -1678,9 +1809,19 @@ def _cookie_string_from_config(config: dict = None) -> str | None:
     domain_key = config.get("_domain_key")
     scope = config.get("_effective_cookie_scope", "")
     if domain_key:
-        shared, _ = get_shared_cookie(hostname=domain_key, scope=scope)
-        if shared:
-            return shared
+        if isinstance(cookie_config, dict) and cookie_config:
+            # Auth config declares cookies: look up the configured scope
+            # (both auto and manual credentials qualify).
+            shared, _ = get_shared_cookie(hostname=domain_key, scope=scope)
+            if shared:
+                return shared
+        else:
+            # No auth config: implicitly carry only user-provided (manual)
+            # cookies. Auto cookies are config-driven and must not bleed
+            # into unconfigured sections.
+            manual = get_implicit_manual_cookie(hostname=domain_key, section_scope=scope)
+            if manual:
+                return manual
     cookies_str = config.get("headers", {}).get("Cookie")
     if cookies_str:
         return cookies_str

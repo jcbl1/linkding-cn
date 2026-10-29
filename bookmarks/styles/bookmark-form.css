@@ -3,9 +3,22 @@
     max-width: 550px;
     margin: 0 auto;
   }
+
+  & .section-header .form-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--unit-2);
+    margin-left: auto;
+  }
 }
 
 .bookmarks-form {
+  & .field-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
   & .has-icon-right > input,
   & .has-icon-right > textarea {
     padding-right: 30px;
@@ -22,8 +35,7 @@
     font-size: var(--font-size-sm);
   }
 
-  & .form-group .clear-button,
-  & .form-group #refresh-button {
+  & .form-group .clear-button {
     display: none;
   }
 
@@ -48,15 +60,9 @@
     box-sizing: border-box;
   }
 
-  & details.description summary {
-    position: relative;
-  }
-
-  & details.description summary .clear-button {
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
+  /* summary 必须保留原生折叠三角（list-item），故不能改成 flex 容器 */
+  & details summary .summary-actions {
+    float: right;
   }
 
   & details.preview-image-container {

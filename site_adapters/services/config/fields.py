@@ -116,6 +116,11 @@ METADATA_FIELDS = {
         "en": "Selectors for the description, tried in order. HTML uses standard CSS, including the ::json(path) pseudo-element extension to extract fields from JSON-LD script tags (e.g. 'script[type=\"application/ld+json\"]::json(description)') and the ::attr(name) pseudo-element extension to read an explicit HTML attribute (e.g. 'img::attr(data-src)'); XML uses standard XPath; JSON uses standard JSONPath.",
         "zh": "描述选择器，按顺序尝试。HTML 使用标准 CSS，支持 ::json(path) 伪元素扩展以从 JSON-LD script 标签提取字段（如 'script[type=\"application/ld+json\"]::json(description)'），也支持 ::attr(name) 伪元素扩展读取指定 HTML 属性（如 'img::attr(data-src)'）；XML 使用标准 XPath；JSON 使用标准 JSONPath。",
     },
+    "select_author": {
+        "type": "str|array<str>",
+        "en": "Selectors for the author, tried in order. HTML uses standard CSS, including the ::json(path) pseudo-element extension to extract fields from JSON-LD script tags (e.g. 'script[type=\"application/ld+json\"]::json(author.name)') and the ::attr(name) pseudo-element extension to read an explicit HTML attribute; XML uses standard XPath; JSON uses standard JSONPath. Dict/list JSON values (e.g. {\"name\": \"...\"}) are flattened to a string via the name/title/content keys.",
+        "zh": "作者选择器，按顺序尝试。HTML 使用标准 CSS，支持 ::json(path) 伪元素扩展以从 JSON-LD script 标签提取字段（如 'script[type=\"application/ld+json\"]::json(author.name)'），也支持 ::attr(name) 伪元素扩展读取指定 HTML 属性；XML 使用标准 XPath；JSON 使用标准 JSONPath。JSON 中的字典/数组值（如 {\"name\": \"...\"}）会通过 name/title/content 键扁平化为字符串。",
+    },
     "select_image": {
         "type": "str|array<str>",
         "en": "Selectors for the preview image, tried in order. HTML uses standard CSS, including the ::json(path) pseudo-element extension to extract fields from JSON-LD script tags (e.g. 'script[type=\"application/ld+json\"]::json(image.url)') and the ::attr(name) pseudo-element extension to read an explicit HTML attribute (e.g. 'img::attr(data-src)'); values that are blob:/empty/about:/# or base64 data URIs are skipped so later selectors are tried. XML uses standard XPath; JSON uses standard JSONPath.",
@@ -132,6 +137,12 @@ METADATA_FIELDS = {
         "en": _REWRITE_RULE_EN + " Applied to the extracted description.",
         "zh": _REWRITE_RULE_ZH + "应用于提取到的描述。",
         "example": ["\\[read more\\]", ""],
+    },
+    "rewrite_author": {
+        "type": "rewrite",
+        "en": _REWRITE_RULE_EN + " Applied to the extracted author.",
+        "zh": _REWRITE_RULE_ZH + "应用于提取到的作者。",
+        "example": ["^由", ""],
     },
     "rewrite_image": {
         "type": "rewrite",
@@ -358,8 +369,8 @@ HEALTH_FIELDS = {
     },
     "http_head_probe.timeout": {
         "type": "int",
-        "en": "HEAD probe timeout in seconds. Defaults to 5. Independent of content_check.timeout.",
-        "zh": "HEAD 探测超时（秒）。默认 5。与 content_check.timeout 相互独立。",
+        "en": "HEAD probe timeout in seconds. Defaults to 3. Independent of content_check.timeout.",
+        "zh": "HEAD 探测超时（秒）。默认 3。与 content_check.timeout 相互独立。",
         "example": 3,
     },
     "http_head_probe.accept_status": {
@@ -423,6 +434,10 @@ HEALTH_FIELDS = {
         "zh": "字符串正则数组。title/body 中任一匹配即判定为 missing（软 404；普通关键词按子串匹配同样有效）。",
         "example": ["内容不存在", "该页面已被删除", "文章已下架"],
     },
+    # 注：health 判定字段仅支持嵌套块写法（http_head_probe.* / content_check.*）。
+    # 不再提供与内部归一化结构同名的顶层扁平别名——面向用户的配置从未使用它，
+    # 且与嵌套块并存会产生优先级歧义。内部扁平结构由 health_checker 的
+    # _normalize_config 自行处理，不作为配置字段对外暴露。
     # ── health 特有 ───────────────────────────────────────────────────
     "reason": {
         "type": "str|obj",
@@ -504,8 +519,14 @@ AUTH_COOKIE_FIELDS = {
     },
     "verify.http_head_probe.url": {
         "type": "str",
-        "en": "Override probe URL. Defaults to bookmark URL.",
-        "zh": "覆盖探测 URL。默认使用书签 URL。",
+        "en": "Override probe URL. Defaults to bookmark URL. Pair with method=GET to probe an auth-checking API endpoint (may point at a non-existent resource when the site validates the token before looking up the resource).",
+        "zh": "覆盖探测 URL。默认使用书签 URL。可与 method=GET 搭配探测鉴权型 API 端点；若站点先校验 token 再查找资源，端点可指向一个不存在的资源。",
+    },
+    "verify.http_head_probe.method": {
+        "type": '"HEAD" | "GET"',
+        "en": 'Probe HTTP method. Defaults to HEAD; use GET for sites whose pages are reachable without a valid token but APIs are not (HEAD on such APIs is usually 405 and inconclusive).',
+        "zh": '探针请求方法。默认 HEAD；页面不校验 token 而 API 才校验的站点用 GET（这类 API 的 HEAD 通常是 405，结果不可信）。',
+        "example": "GET",
     },
     "verify.http_head_probe.timeout": {
         "type": "int",
