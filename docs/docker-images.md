@@ -52,7 +52,6 @@ scripts/build-docker.sh --load --platform linux/arm64 \
 GITHUB_TOKEN="$(gh auth token)" docker buildx build \
   --target linkding-plus --platform linux/arm64 \
   -f docker/default.Dockerfile -t woohoodai/linkding-cn:test \
-  --build-arg APT_MIRROR=mirrors.tuna.tsinghua.edu.cn \
   --secret id=github_token,env=GITHUB_TOKEN \
   --pull --load .
 ```
@@ -77,7 +76,7 @@ python3 scripts/verify-docker-image.py test linkding-cn:verify --platform linux/
   --postgres postgres:16-alpine --output-dir tmp/image-test-postgres
 ```
 
-amd64 使用相应的 --platform。基础版在构建命令增加 --base，在测试命令增加 --base；Alpine 再增加 --alpine。本地脚本默认使用清华 APT/APK 镜像源，--no-mirror 使用官方源。--oci 需要支持多输出的 Docker Buildx；当前验证使用 Buildx 的 docker-container builder。
+amd64 使用相应的 --platform。基础版在构建命令增加 --base，在测试命令增加 --base；Alpine 再增加 --alpine。本地脚本默认使用官方 APT/APK 源，--mirror 可切换到清华镜像源。--oci 需要支持多输出的 Docker Buildx；当前验证使用 Buildx 的 docker-container builder。
 
 脚本支持任意顺序的参数；-- 后的参数传给 buildx。--load 只接受一个架构；--push 默认构建两个架构。--print-tags 仅打印标签，可用于检查变体映射。--push 会直接发布，本地使用者应先运行验证；推荐正式发布走 GitHub 工作流。
 

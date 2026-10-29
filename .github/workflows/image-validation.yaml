@@ -8,7 +8,7 @@ on:
         default: false
       baseline:
         type: string
-        default: woohoodai/linkding-cn:latest
+        default: ""
       baseline_base:
         type: string
         default: ""

@@ -433,6 +433,14 @@ msgstr "浅色"
 msgid "Dark"
 msgstr "深色"
 
+#: bookmarks/models.py:996 bookmarks/models.py:1002
+msgid "Nord"
+msgstr "Nord"
+
+#: bookmarks/models.py:997 bookmarks/models.py:1003
+msgid "Wireframe"
+msgstr "Wireframe"
+
 #: bookmarks/models.py:999
 msgid "Hidden"
 msgstr "隐藏"
@@ -697,48 +705,36 @@ msgid "Result validity (days)"
 msgstr "结果有效期（天）"
 
 #: bookmarks/models.py:1372
-#, fuzzy
-#| msgid ""
-#| "How long a health check result stays valid before it is considered "
-#| "expired. Set to 0 to never expire. Leave empty to use the global default "
-#| "(%(default)s days)."
 msgid ""
 "How many days a health check result stays valid before it is considered "
 "expired. Leave empty to use the global default (LINK_HEALTH_MAX_AGE_DAYS, "
 "default 15)."
 msgstr ""
-"健康检查结果的有效期（天）。设为 0 表示永不过期。留空则使用全局默认值（%"
-"(default)s 天）。"
+"健康检查结果的有效期（天）。留空则使用全局默认值（LINK_HEALTH_MAX_AGE_DAYS，"
+"默认 15 天）。"
 
 #: bookmarks/models.py:1380 bookmarks/templates/settings/general.html:1304
 msgid "Check concurrency"
 msgstr "检查并发"
 
 #: bookmarks/models.py:1382
-#, fuzzy
-#| msgid ""
-#| "Number of parallel health check workers. Leave empty to use the global "
-#| "default (%(default)s)."
 msgid ""
 "Number of parallel health check workers. Leave empty to use the global "
 "default (LD_HEALTH_CHECK_WORKERS, default 8)."
-msgstr "并行健康检查 worker 数。留空则使用全局默认值（%(default)s）。"
+msgstr ""
+"并行健康检查 worker 数。留空则使用全局默认值（LD_HEALTH_CHECK_WORKERS，默认 "
+"8）。"
 
 #: bookmarks/models.py:1389 bookmarks/templates/settings/general.html:1320
 msgid "Per-domain interval (seconds)"
 msgstr "每域名间隔（秒）"
 
 #: bookmarks/models.py:1391
-#, fuzzy
-#| msgid ""
-#| "Minimum interval between requests to the same domain. Leave empty to use "
-#| "the global default (%(default)s s; 0 means no rate limiting)."
 msgid ""
 "Minimum interval between requests to the same domain. Leave empty to use the "
 "global default (LD_METADATA_DOMAIN_COOLDOWN_SEC)."
 msgstr ""
-"同一域名请求的最小间隔（秒）。留空则使用全局默认值（%(default)s 秒；0 表示不"
-"限速）。"
+"同一域名请求的最小间隔（秒）。留空则使用全局默认值（LD_METADATA_DOMAIN_COOLDOWN_SEC）。"
 
 #: bookmarks/models.py:1427
 #: bookmarks/templates/bookmarks/header/prefs_panel.html:141
@@ -823,10 +819,8 @@ msgid "Public sharing"
 msgstr "公开分享"
 
 #: bookmarks/models.py:2110
-#, fuzzy
-#| msgid "Invalid toolbar configuration."
 msgid "Invalid table column configuration."
-msgstr "无效的工具栏配置。"
+msgstr "无效的表格列配置。"
 
 #: bookmarks/models.py:2276 bookmarks/models.py:2288
 msgid "Invalid sidebar configuration."
@@ -854,15 +848,15 @@ msgstr "无效的书签快捷标签配置。"
 
 #: bookmarks/models.py:2501
 msgid "Must be at least 0 days (0 = never expires)."
-msgstr ""
+msgstr "必须至少为 0 天（0 表示永不过期）。"
 
 #: bookmarks/models.py:2507
 msgid "Must be at least 1."
-msgstr ""
+msgstr "必须至少为 1。"
 
 #: bookmarks/models.py:2513
 msgid "Must not be negative."
-msgstr ""
+msgstr "不能为负数。"
 
 #: bookmarks/models.py:2542
 msgid "Item format"
@@ -1959,16 +1953,12 @@ msgid "Last check result (expired)"
 msgstr "上次检查结果（已过期）"
 
 #: bookmarks/templates/bookmarks/list/table_row.html:17
-#, fuzzy
-#| msgid "Filter by domain..."
 msgid "Filter by this domain"
-msgstr "按域名筛选…"
+msgstr "按域名筛选"
 
 #: bookmarks/templates/bookmarks/list/table_row.html:81
-#, fuzzy
-#| msgid "Unknown action."
 msgid "Show actions"
-msgstr "未知操作。"
+msgstr "显示操作"
 
 #: bookmarks/templates/bookmarks/nav_menu.html:5
 #: bookmarks/templates/settings/credentials_manage.html:23
@@ -2583,6 +2573,24 @@ msgid ""
 "Choose a light or dark theme, or automatically follow your system setting."
 msgstr "选择浅色或深色主题，或自动跟随系统设置。"
 
+#: bookmarks/templates/settings/general.html:119
+msgid "Auto theme configuration"
+msgstr "自动主题配置"
+
+#: bookmarks/templates/settings/general.html:121
+msgid ""
+"When following system theme, choose which theme to use for light and dark "
+"mode."
+msgstr "跟随系统主题时，分别为浅色模式和深色模式选择使用的主题。"
+
+#: bookmarks/templates/settings/general.html:126
+msgid "Light mode theme"
+msgstr "浅色模式主题"
+
+#: bookmarks/templates/settings/general.html:137
+msgid "Dark mode theme"
+msgstr "深色模式主题"
+
 #: bookmarks/templates/settings/general.html:124
 msgid "Custom CSS"
 msgstr "自定义 CSS"
@@ -3105,10 +3113,7 @@ msgid ""
 msgstr "并行健康检查 worker 数。留空则使用全局默认值（%(default)s）。"
 
 #: bookmarks/templates/settings/general.html:1323
-#, fuzzy, python-format
-#| msgid ""
-#| "Minimum interval between requests to the same domain. Leave empty to use "
-#| "the global default (%(default)s s; 0 means no rate limiting)."
+#, python-format
 msgid ""
 "Minimum interval between requests to the same domain. Leave empty to use the "
 "global default (%(default)ss; 0 means no rate limiting)."

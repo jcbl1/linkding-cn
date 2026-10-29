@@ -10,7 +10,6 @@ on:
       baseline:
         description: Previous full image reference (prefer an immutable digest)
         type: string
-        default: woohoodai/linkding-cn:latest
       baseline_base:
         description: Previous base image, after its first release
         type: string
@@ -38,7 +37,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     strategy:
       matrix:
         variant:
@@ -58,18 +56,13 @@ jobs:
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
       - name: Publish the validated variants
         env:
           BUILD_FLAGS: ${{ matrix.variant.flags }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           read -r -a flags <<< "$BUILD_FLAGS"
-          for repository in woohoodai/linkding-cn ghcr.io/woohoodai/linkding-cn; do
+          for repository in jcbl1/linkding-cn; do
             mapfile -t tags < <(scripts/build-docker.sh "${flags[@]}" --push --print-tags --repository "$repository")
             sources=()
             for arch in amd64 arm64; do

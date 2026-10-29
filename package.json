@@ -4,11 +4,13 @@
   "description": "Self-hosted bookmark manager - Chinese enhanced fork of linkding",
   "main": "index.js",
   "scripts": {
-    "build": "npm run build-js && npm run build-adapters-js && npm run build-theme-light && npm run build-theme-dark && npm run build-defuddle && npm run build-site-adapters-css",
+    "build": "npm run build-js && npm run build-adapters-js && npm run build-theme-light && npm run build-theme-dark && npm run build-theme-nord && npm run build-theme-wireframe && npm run build-defuddle && npm run build-site-adapters-css",
     "build-js": "rollup -c",
     "build-adapters-js": "node site_adapters/frontend/build-adapters.js",
     "build-theme-light": "POSTCSS_DISABLE_CACHE=true postcss -o bookmarks/static/theme-light.css bookmarks/styles/theme-light.css",
     "build-theme-dark": "POSTCSS_DISABLE_CACHE=true postcss -o bookmarks/static/theme-dark.css bookmarks/styles/theme-dark.css",
+    "build-theme-nord": "POSTCSS_DISABLE_CACHE=true postcss -o bookmarks/static/theme-nord.css bookmarks/styles/theme-nord.css",
+    "build-theme-wireframe": "POSTCSS_DISABLE_CACHE=true postcss -o bookmarks/static/theme-wireframe.css bookmarks/styles/theme-wireframe.css",
     "build-defuddle": "node esbuild.config.mjs",
     "dev": "rollup -c -w",
     "test:js": "node --test bookmarks/frontend/utils/*.test.mjs",
@@ -17,15 +19,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/WooHooDai/linkding-cn.git"
+    "url": "git+https://github.com/jcbl1/linkding-cn.git"
   },
   "keywords": [],
-  "author": "WooHooDai",
+  "author": "jcbl1",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/WooHooDai/linkding-cn/issues"
+    "url": "https://github.com/jcbl1/linkding-cn/issues"
   },
-  "homepage": "https://github.com/WooHooDai/linkding-cn#readme",
+  "homepage": "https://github.com/jcbl1/linkding-cn#readme",
   "dependencies": {
     "linkedom": "^0.18.13",
     "playwright-core": "^1.62.1",
