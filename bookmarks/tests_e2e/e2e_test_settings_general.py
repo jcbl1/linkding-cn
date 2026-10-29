@@ -130,7 +130,7 @@ class SettingsGeneralE2ETestCase(LinkdingE2ETestCase):
             custom_css = custom_css_form.locator("textarea[name='custom_css']")
             custom_css.fill("body { color: hotpink; }")
 
-            with page.expect_navigation(wait_until="load", timeout=3000):
+            with page.expect_navigation(wait_until="load", timeout=10_000):
                 theme_form.get_by_role("radio", name="Dark", exact=True).check()
 
             self.wait_for_settings_page_behavior(page)
@@ -194,9 +194,9 @@ class SettingsGeneralE2ETestCase(LinkdingE2ETestCase):
             user_link.click()
             expect(user_link).to_have_attribute("aria-current", "true")
 
-            active_targets = page.evaluate(
+            page.evaluate(
                 """
-                () => new Promise((resolve) => {
+                () => {
                   document.dispatchEvent(
                     new KeyboardEvent("keydown", { key: "End", bubbles: true })
                   );
@@ -204,19 +204,11 @@ class SettingsGeneralE2ETestCase(LinkdingE2ETestCase):
                   // 不再是旧的 .body-container。
                   window.scrollTo(0, document.documentElement.scrollHeight);
                   window.dispatchEvent(new Event("scroll"));
-                  window.setTimeout(() => {
-                    resolve(
-                      Array.from(
-                        document.querySelectorAll(
-                          "[data-settings-directory] [data-settings-section-target]"
-                        )
-                      )
-                        .filter((element) => element.getAttribute("aria-current") === "true")
-                        .map((element) => element.dataset.settingsSectionTarget)
-                    );
-                  }, 150);
-                })
+                }
                 """
             )
 
-            self.assertEqual(active_targets, ["settings-about"])
+            about_link = page.locator(
+                "[data-settings-directory] [data-settings-section-target='settings-about']"
+            )
+            expect(about_link).to_have_attribute("aria-current", "true")

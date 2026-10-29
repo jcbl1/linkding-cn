@@ -3,6 +3,10 @@ from playwright.sync_api import BrowserContext, Page, Playwright, expect
 
 from bookmarks.tests.helpers import BookmarkFactoryMixin
 
+# CI runners are slower than local machines; keep assertions on the same
+# defaults but give late UI updates a bit more headroom.
+expect.set_options(timeout=10_000)
+
 
 class LinkdingE2ETestCase(LiveServerTestCase, BookmarkFactoryMixin):
     def setUp(self) -> None:
