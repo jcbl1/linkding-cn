@@ -590,7 +590,8 @@ class BookmarkArchivedViewTestCase(
             element["data-sidebar-module"]
             for element in soup.select(".sidebar [data-sidebar-module]")
         ]
-        self.assertEqual(module_keys, ["domains", "tags"])
+        # authors 为 profile 未列出时由 normalize_sidebar_modules 追加的默认模块
+        self.assertEqual(module_keys, ["domains", "tags", "authors"])
         self.assertIsNone(
             soup.select_one(".sidebar [data-sidebar-module='bundles']")
         )
