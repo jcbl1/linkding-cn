@@ -33,8 +33,19 @@ export class FocusTrapController {
     this.onKeyDown = this.onKeyDown.bind(this);
 
     // Only auto-focus for keyboard navigation to avoid triggering the mobile virtual keyboard
-    if (keyboardActive) {
-      this.firstFocusableElement?.focus({ focusVisible: true });
+    if (keyboardActive && this.firstFocusableElement) {
+      const focusFirst = () => {
+        const element = this.firstFocusableElement;
+        if (element && element.isConnected && element.getClientRects().length) {
+          element.focus({ focusVisible: true });
+        }
+      };
+      // Modals rendered in a Turbo frame become visible only after the frame
+      // has rendered, so focus on frame load as well.
+      requestAnimationFrame(focusFirst);
+      this.element
+        .closest("turbo-frame")
+        ?.addEventListener("turbo:frame-load", focusFirst, { once: true });
     }
     this.element.addEventListener("keydown", this.onKeyDown);
   }
@@ -61,6 +72,7 @@ export class FocusTrapController {
 
 let afterPageLoadFocusTarget = [];
 let firstPageLoad = true;
+let focusAppliedOnFrameLoad = false;
 
 export function setAfterPageLoadFocusTarget(...targets) {
   afterPageLoadFocusTarget = targets;
@@ -78,20 +90,33 @@ function programmaticFocus(element) {
   });
 }
 
+function applyFocusTargets() {
+  for (const target of afterPageLoadFocusTarget) {
+    const element = document.querySelector(target);
+    if (element) {
+      programmaticFocus(element);
+      afterPageLoadFocusTarget = [];
+      return true;
+    }
+  }
+  afterPageLoadFocusTarget = [];
+  return false;
+}
+
 document.addEventListener("turbo:load", () => {
   if (firstPageLoad) {
     firstPageLoad = false;
     return;
   }
 
-  for (const target of afterPageLoadFocusTarget) {
-    const element = document.querySelector(target);
-    if (element) {
-      programmaticFocus(element);
-      return;
-    }
+  if (focusAppliedOnFrameLoad) {
+    focusAppliedOnFrameLoad = false;
+    return;
   }
-  afterPageLoadFocusTarget = [];
+
+  if (applyFocusTargets()) {
+    return;
+  }
 
   const autofocus = document.querySelector("[autofocus]");
   if (autofocus) {
@@ -107,5 +132,13 @@ document.addEventListener("turbo:load", () => {
   const main = document.querySelector("main");
   if (main) {
     programmaticFocus(main);
+  }
+});
+
+// Details modals are rendered in a Turbo frame. Closing one performs a frame
+// visit, which fires turbo:frame-load instead of turbo:load.
+document.addEventListener("turbo:frame-load", () => {
+  if (applyFocusTargets()) {
+    focusAppliedOnFrameLoad = true;
   }
 });
