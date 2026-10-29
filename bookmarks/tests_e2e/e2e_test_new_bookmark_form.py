@@ -183,19 +183,17 @@ class BookmarkFormE2ETestCase(LinkdingE2ETestCase):
         profile.save()
 
         with sync_playwright() as p:
-            # Open page with URL that should have auto tags
-            url = (
-                reverse("linkding:bookmarks.new")
-                + "?url=https%3A%2F%2Fgithub.com%2Fsissbruecker%2Flinkding"
-            )
-            page = self.open(url, p)
-
+            # 通过输入 URL 触发 check，而不是依赖 ?url= 初始参数的加载时序
+            page = self.open(reverse("linkding:bookmarks.new"), p)
+            url = page.get_by_label("URL")
             auto_tags_hint = page.locator(".form-input-hint.auto-tags")
+
+            url.fill("https://github.com/sissbruecker/linkding")
             expect(auto_tags_hint).to_be_visible()
             expect(auto_tags_hint).to_have_text("Auto tags: dev github")
 
             # Change to URL without auto tags
-            page.get_by_label("URL").fill("https://example.com")
+            url.fill("https://example.com")
 
             expect(auto_tags_hint).to_be_hidden()
 

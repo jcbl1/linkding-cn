@@ -55,6 +55,32 @@ class LinkdingE2ETestCase(LiveServerTestCase, BookmarkFactoryMixin):
     def locate_details_modal(self):
         return self.page.locator(".modal.bookmark-details")
 
+    def locate_confirm_popup(self):
+        # Confirm popups are appended to document.body, so they can never be
+        # located through the bookmark item that triggered them.
+        return self.page.locator("ld-confirm-popup")
+
+    def confirm(self):
+        popup = self.locate_confirm_popup()
+        expect(popup).to_be_visible()
+        popup.locator(".confirm-popup-actions button").last.click()
+
+    def locate_status_chip(self, modal, field: str):
+        return modal.locator(f'.detail-status-chip[data-chip-field="{field}"]')
+
+    def wait_for_behaviors(self, selector: str):
+        self.page.wait_for_function(
+            """
+            (selector) => {
+              const element = document.querySelector(selector);
+              return Boolean(
+                element && element.__behaviors && element.__behaviors.length
+              );
+            }
+            """,
+            arg=selector,
+        )
+
     def open_details_modal(self, bookmark):
         details_button = self.locate_bookmark(bookmark.title).locator("a.view-action")
         details_button.click()

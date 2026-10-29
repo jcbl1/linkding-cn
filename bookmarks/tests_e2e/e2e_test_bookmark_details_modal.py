@@ -5,7 +5,6 @@ from django.test import override_settings
 from django.urls import reverse
 from playwright.sync_api import expect, sync_playwright
 
-from bookmarks.models import Bookmark
 from bookmarks.services import website_loader
 from bookmarks.tests_e2e.helpers import LinkdingE2ETestCase
 
@@ -18,8 +17,8 @@ class BookmarkDetailsModalE2ETestCase(LinkdingE2ETestCase):
             self.open(reverse("linkding:bookmarks.index"), p)
 
             details_modal = self.open_details_modal(bookmark)
-            title = details_modal.locator("h2")
-            expect(title).to_have_text(bookmark.title)
+            title = details_modal.locator("textarea.bookmark-title-input")
+            expect(title).to_have_value(bookmark.title)
 
     def test_close_details(self):
         bookmark = self.setup_bookmark()
@@ -52,7 +51,7 @@ class BookmarkDetailsModalE2ETestCase(LinkdingE2ETestCase):
             self.open(url, p)
 
             details_modal = self.open_details_modal(bookmark)
-            details_modal.get_by_role("checkbox", name="Archived").click()
+            self.locate_status_chip(details_modal, "is_archived").click()
             expect(self.locate_bookmark(bookmark.title)).not_to_be_visible()
             self.assertReloads(0)
 
@@ -62,7 +61,7 @@ class BookmarkDetailsModalE2ETestCase(LinkdingE2ETestCase):
             self.resetReloads()
 
             details_modal = self.open_details_modal(bookmark)
-            details_modal.get_by_role("checkbox", name="Archived").click()
+            self.locate_status_chip(details_modal, "is_archived").click()
             expect(self.locate_bookmark(bookmark.title)).not_to_be_visible()
             self.assertReloads(0)
 
@@ -76,15 +75,15 @@ class BookmarkDetailsModalE2ETestCase(LinkdingE2ETestCase):
 
             details_modal = self.open_details_modal(bookmark)
 
-            details_modal.get_by_role("checkbox", name="Unread").click()
+            self.locate_status_chip(details_modal, "unread").click()
             bookmark_item = self.locate_bookmark(bookmark.title)
-            expect(bookmark_item).to_have_class("unread")
+            expect(bookmark_item).to_have_class(re.compile(r"\bunread\b"))
             self.assertReloads(0)
 
             # mark as read
-            details_modal.get_by_role("checkbox", name="Unread").click()
+            self.locate_status_chip(details_modal, "unread").click()
             bookmark_item = self.locate_bookmark(bookmark.title)
-            expect(bookmark_item).not_to_have_class("unread")
+            expect(bookmark_item).not_to_have_class(re.compile(r"\bunread\b"))
             self.assertReloads(0)
 
     def test_toggle_shared(self):
@@ -100,16 +99,17 @@ class BookmarkDetailsModalE2ETestCase(LinkdingE2ETestCase):
             self.open(url, p)
 
             details_modal = self.open_details_modal(bookmark)
+            shared_chip = self.locate_status_chip(details_modal, "shared")
 
-            details_modal.get_by_role("checkbox", name="Shared").click()
-            bookmark_item = self.locate_bookmark(bookmark.title)
-            expect(bookmark_item).to_have_class("shared")
+            shared_chip.click()
+            expect(shared_chip).to_have_class(re.compile(r"\bactive\b"))
+            expect(shared_chip).to_have_attribute("data-chip-value", "true")
             self.assertReloads(0)
 
             # unshare bookmark
-            details_modal.get_by_role("checkbox", name="Shared").click()
-            bookmark_item = self.locate_bookmark(bookmark.title)
-            expect(bookmark_item).not_to_have_class("shared")
+            shared_chip.click()
+            expect(shared_chip).not_to_have_class(re.compile(r"\bactive\b"))
+            expect(shared_chip).to_have_attribute("data-chip-value", "false")
             self.assertReloads(0)
 
     def test_edit_return_url(self):
@@ -123,7 +123,7 @@ class BookmarkDetailsModalE2ETestCase(LinkdingE2ETestCase):
 
             # Navigate to edit page
             with self.page.expect_navigation():
-                details_modal.get_by_text("Edit").click()
+                details_modal.locator('a[title="Edit"]').click()
 
             # Cancel edit, verify return to details url
             details_url = url + f"&details={bookmark.id}"
@@ -139,13 +139,17 @@ class BookmarkDetailsModalE2ETestCase(LinkdingE2ETestCase):
 
             details_modal = self.open_details_modal(bookmark)
 
-            # Delete bookmark, verify return url
-            details_modal.get_by_text("Delete...").click()
-            self.page.get_by_text("Confirm").wait_for(state="visible")
-            with self.page.expect_navigation(url=self.live_server_url + url):
-                self.page.get_by_text("Confirm").click()
+            # Delete uses the API and closes the modal optimistically; there is
+            # no full page navigation anymore.
+            with self.page.expect_response(
+                lambda response: response.url.endswith(
+                    f"/api/bookmarks/{bookmark.id}/trash/"
+                )
+            ):
+                details_modal.locator(".detail-action-delete").click()
+                self.confirm()
 
-            # verify bookmark is deleted
+            expect(details_modal).to_be_hidden()
             expect(self.locate_bookmark(bookmark.title)).not_to_be_visible()
 
         bookmark.refresh_from_db()
@@ -160,27 +164,27 @@ class BookmarkDetailsModalE2ETestCase(LinkdingE2ETestCase):
             self.open(url, p)
 
             details_modal = self.open_details_modal(bookmark)
-            asset_list = details_modal.locator(".assets")
+            asset_list = details_modal.locator(".info-files")
 
             # No snapshots initially
             snapshot = asset_list.get_by_text(
                 re.compile("snapshot|快照", re.IGNORECASE)
             )
-            expect(snapshot).not_to_be_visible()
+            expect(snapshot).to_have_count(0)
 
             # Create snapshot
-            details_modal.get_by_text("Create HTML snapshot", exact=False).click()
+            details_modal.locator('button[data-action="create-snapshot"]').click()
             self.assertReloads(0)
 
             # Has new snapshots
             expect(snapshot).to_be_visible()
 
             # Remove snapshot
-            asset_list.get_by_text("Remove", exact=False).click()
-            self.page.get_by_text("Confirm", exact=False).click()
+            asset_list.locator('button[name="remove_asset"]').click()
+            self.confirm()
 
             # Snapshot is removed
-            expect(snapshot).not_to_be_visible()
+            expect(snapshot).to_have_count(0)
             self.assertReloads(0)
 
     def test_refresh_metadata_applies_and_can_be_undone(self):

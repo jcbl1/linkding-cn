@@ -75,6 +75,10 @@ class SettingsGeneralE2ETestCase(LinkdingE2ETestCase):
             expect(max_lines_row).to_be_hidden()
 
     def test_should_toggle_refresh_favicons_row_from_favicon_switch(self):
+        profile = self.get_or_create_test_user().profile
+        profile.enable_favicons = False
+        profile.save()
+
         with sync_playwright() as p:
             browser = self.setup_browser(p)
             page = browser.new_page()
@@ -127,7 +131,7 @@ class SettingsGeneralE2ETestCase(LinkdingE2ETestCase):
             custom_css.fill("body { color: hotpink; }")
 
             with page.expect_navigation(wait_until="load", timeout=3000):
-                theme_form.get_by_label("Dark").check()
+                theme_form.get_by_role("radio", name="Dark", exact=True).check()
 
             self.wait_for_settings_page_behavior(page)
             custom_css_form = page.locator(
@@ -196,9 +200,10 @@ class SettingsGeneralE2ETestCase(LinkdingE2ETestCase):
                   document.dispatchEvent(
                     new KeyboardEvent("keydown", { key: "End", bubbles: true })
                   );
-                  const scroller = document.querySelector(".body-container");
-                  scroller.scrollTop = scroller.scrollHeight;
-                  scroller.dispatchEvent(new Event("scroll"));
+                  // Settings 页的滚动容器是 window（SettingsPageBehavior.scrollContainer），
+                  // 不再是旧的 .body-container。
+                  window.scrollTo(0, document.documentElement.scrollHeight);
+                  window.dispatchEvent(new Event("scroll"));
                   window.setTimeout(() => {
                     resolve(
                       Array.from(
