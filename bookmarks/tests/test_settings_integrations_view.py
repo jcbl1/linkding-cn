@@ -39,19 +39,23 @@ class SettingsIntegrationsViewTestCase(TestCase, BookmarkFactoryMixin, HtmlTestM
         self.assertEqual(token.name, "My Test Token")
 
     def test_create_api_token_turbo_post_updates_section_and_closes_modal(self):
-        response = self.client.post(
-            reverse("linkding:settings.integrations.create_api_token"),
-            {"name": "My Turbo Token"},
-            HTTP_ACCEPT="text/vnd.turbo-stream.html",
-            HTTP_TURBO_FRAME="api-modal",
-        )
+        for frame in ("api-modal", "api-section"):
+            with self.subTest(frame=frame):
+                response = self.client.post(
+                    reverse("linkding:settings.integrations.create_api_token"),
+                    {"name": f"My Turbo Token {frame}"},
+                    HTTP_ACCEPT="text/vnd.turbo-stream.html",
+                    HTTP_TURBO_FRAME=frame,
+                )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "text/vnd.turbo-stream.html")
-        content = response.content.decode()
-        self.assertIn('target="api-section"', content)
-        self.assertIn('target="api-modal"', content)
-        self.assertIn('id="new-token-key"', content)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response["Content-Type"], "text/vnd.turbo-stream.html"
+                )
+                content = response.content.decode()
+                self.assertIn('target="api-section"', content)
+                self.assertIn('target="api-modal"', content)
+                self.assertIn('id="new-token-key"', content)
 
     def test_create_api_token_with_empty_name(self):
         self.client.post(
