@@ -37,6 +37,9 @@ class TagAutocompleteE2ETestCase(LinkdingE2ETestCase):
         return page.locator("ld-tag-autocomplete .menu-item a")
 
     def fill_tag_input(self, page, value: str):
+        # Wait for the page's initial focus handler to settle; otherwise it
+        # can steal focus after the tag input was filled and close the menu.
+        expect(page.locator("input[name='url']:focus")).to_be_visible()
         page.locator("#id_tag_string").fill(value)
 
     def test_prefix_matches_ordered_by_frequency(self):

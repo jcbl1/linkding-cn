@@ -283,7 +283,7 @@
       function updatePreviewImageDisplay(overrideSrc) {
         const previewImageImg = document.getElementById('preview-image-img');
         const previewImageDetails = document.querySelector('details.preview-image');
-        const displaySrc = overrideSrc !== undefined ? overrideSrc : (previewImageRemoteUrlInput.value || '');
+        const displaySrc = overrideSrc !== undefined ? overrideSrc : (previewImageRemoteUrlInput?.value || '');
         if (previewImageImg) {
           // Reset fallback attempt flag when src changes
           delete previewImageImg.dataset.fallbackAttempted;

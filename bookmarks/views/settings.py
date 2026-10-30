@@ -547,7 +547,10 @@ def create_api_token(request: HttpRequest):
             "api_success_message",
         )
 
-        if turbo.accept(request) and turbo.is_frame(request, "api-modal"):
+        if turbo.accept(request) and (
+            turbo.is_frame(request, "api-modal")
+            or turbo.is_frame(request, "api-section")
+        ):
             integration_context = {
                 "api_tokens": ApiToken.objects.filter(user=request.user).order_by(
                     "-created"
