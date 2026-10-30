@@ -18,6 +18,10 @@ on:
         description: Previous Alpine base image, after its first release
         type: string
         default: ""
+      rebuild:
+        description: Extra v<version>-rebuild-<value> tag for a rebuilt release, e.g. a commit hash
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -59,9 +63,11 @@ jobs:
       - name: Publish the validated variants
         env:
           BUILD_FLAGS: ${{ matrix.variant.flags }}
+          REBUILD: ${{ inputs.rebuild }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           read -r -a flags <<< "$BUILD_FLAGS"
+          if [[ -n "$REBUILD" ]]; then flags+=(--rebuild "$REBUILD"); fi
           for repository in jcbl1/linkding-cn; do
             mapfile -t tags < <(scripts/build-docker.sh "${flags[@]}" --push --print-tags --repository "$repository")
             sources=()

@@ -11,6 +11,7 @@ Usage: scripts/build-docker.sh [options] [-- additional buildx options]
   --load                 Load locally (default; does not publish)
   --push                 Publish after the release checks have passed
   --repository NAME      Repository for generated tags; repeat for multiple registries
+  --rebuild ID           Also tag v<version>[-variant]-rebuild-ID, e.g. a commit hash
   --tag IMAGE            Override generated tags; repeat for multiple tags
   --print-tags           Print tags without building (used to publish tested artifacts)
   --oci PATH             Also export compressed OCI layers for size checks
@@ -22,6 +23,7 @@ base=false
 alpine=false
 mirror=false
 mode=load
+rebuild=""
 print_tags=false
 platforms=""
 oci=""
@@ -38,6 +40,7 @@ while (($#)); do
         --print-tags) print_tags=true; shift ;;
         --platform) platforms=${2:?Missing platform}; shift 2 ;;
         --repository) repositories+=("${2:?Missing repository}"); shift 2 ;;
+        --rebuild) rebuild=${2:?Missing rebuild ID}; shift 2 ;;
         --tag) tags+=("${2:?Missing image tag}"); shift 2 ;;
         --oci) oci=${2:?Missing OCI path}; shift 2 ;;
         --help|-h) usage; exit 0 ;;
@@ -47,6 +50,10 @@ while (($#)); do
 done
 if $alpine && ! $base; then
     echo "Alpine Plus is unsupported by Python Playwright. Use --base --alpine, or Debian Plus." >&2
+    exit 2
+fi
+if [[ -n "$rebuild" && ! "$rebuild" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    echo "--rebuild accepts only alphanumerics, '.', '_' and '-'." >&2
     exit 2
 fi
 if [[ -z "$platforms" ]]; then
@@ -92,7 +99,12 @@ fi
 if (("${#tags[@]}" == 0)); then
     if (("${#repositories[@]}" == 0)); then repositories=(woohoodai/linkding-cn); fi
     for repository in "${repositories[@]}"; do
-        tags+=("$repository:latest$suffix" "$repository:v$version$suffix")
+        tags+=("$repository:latest$suffix")
+        if [[ -n "$rebuild" ]]; then
+            tags+=("$repository:v$version$suffix-rebuild-$rebuild")
+        else
+            tags+=("$repository:v$version$suffix")
+        fi
     done
 fi
 if $print_tags; then printf '%s\n' "${tags[@]}"; exit 0; fi
