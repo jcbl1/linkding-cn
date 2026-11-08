@@ -1,3 +1,5 @@
+import re
+
 from django.urls import reverse
 from playwright.sync_api import expect, sync_playwright
 
@@ -10,12 +12,12 @@ class CollapseSidePanelE2ETestCase(LinkdingE2ETestCase):
 
     def assertSidePanelIsVisible(self):
         page = self.page.locator(".bookmarks-page")
-        expect(page).to_have_class(lambda c: "sidebar-open" in c)
+        expect(page).to_have_class(re.compile(r"\bsidebar-open\b"))
         expect(self.page.locator(".bookmarks-page .sidebar")).to_be_visible()
 
     def assertSidePanelIsHidden(self):
         page = self.page.locator(".bookmarks-page")
-        expect(page).to_have_class(lambda c: "sidebar-closed" in c)
+        expect(page).to_have_class(re.compile(r"\bsidebar-closed\b"))
         expect(self.page.locator(".bookmarks-page .sidebar")).not_to_be_visible()
         expect(
             self.page.locator(".bookmarks-page [data-sidebar-toggle]")
@@ -66,6 +68,7 @@ class CollapseSidePanelE2ETestCase(LinkdingE2ETestCase):
             self.page.locator("[data-sidebar-toggle]").click()
             self.assertSidePanelIsVisible()
 
-            # Click toggle to hide again
-            self.page.locator("[data-sidebar-toggle]").click()
+            # In overlay mode the toggle is covered by the sidebar; use the
+            # close button that the overlay exposes instead.
+            self.page.locator("[data-sidebar-close]").click()
             self.assertSidePanelIsHidden()

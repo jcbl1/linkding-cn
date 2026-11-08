@@ -515,7 +515,7 @@ def get_version_info(ttl_hash=None):
     latest_version = None
     try:
         latest_version_url = (
-            "https://api.github.com/repos/WooHooDai/linkding-cn/releases/latest"
+            "https://api.github.com/repos/jcbl1/linkding-cn/releases/latest"
         )
         response = requests.get(latest_version_url, timeout=5)
         json = response.json()
@@ -595,7 +595,10 @@ def create_api_token(request: HttpRequest):
             "api_success_message",
         )
 
-        if turbo.accept(request) and turbo.is_frame(request, "api-modal"):
+        if turbo.accept(request) and (
+            turbo.is_frame(request, "api-modal")
+            or turbo.is_frame(request, "api-section")
+        ):
             integration_context = {
                 "api_tokens": ApiToken.objects.filter(user=request.user).order_by(
                     "-created"

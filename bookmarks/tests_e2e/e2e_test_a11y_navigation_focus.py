@@ -22,12 +22,7 @@ class A11yNavigationFocusTest(LinkdingE2ETestCase):
 
             # Bookmark form views should focus the URL input
             page.goto(self.live_server_url + reverse("linkding:bookmarks.new"))
-            # Wait for focusInput's setTimeout(150ms) to fire
-            page.wait_for_timeout(300)
-            focused_tag = page.evaluate(
-                "document.activeElement?.tagName + '|' + document.activeElement?.name"
-            )
-            self.assertEqual("INPUT|url", focused_tag)
+            expect(page.locator("input[name='url']:focus")).to_be_visible()
 
     def test_page_navigation_focus(self):
         bookmark = self.setup_bookmark()
@@ -57,11 +52,19 @@ class A11yNavigationFocusTest(LinkdingE2ETestCase):
             focused = page.locator("input[name='url']:focus")
             expect(focused).to_be_visible()
 
-            # Details modal intentionally avoids stealing focus on open.
+            # Opening details modal via keyboard should focus the first
+            # focusable element (the editable title textarea)
             self.navigate_menu("Bookmarks", "All bookmarks")
-            self.open_details_modal(bookmark)
+            view_action = self.locate_bookmark(bookmark.title).locator("a.view-action")
+            view_action.focus()
+            page.keyboard.press("Enter")
+            details_modal = self.locate_details_modal()
+            expect(details_modal).to_be_visible()
+            focused = page.locator(".modal .bookmark-title-input:focus")
+            expect(focused).to_be_visible()
 
             # Closing modal should move focus back to the bookmark item
+            details_modal.locator("button.close").focus()
             page.keyboard.press("Escape")
             focused = self.locate_bookmark(bookmark.title).locator(
                 "a.view-action:focus"
