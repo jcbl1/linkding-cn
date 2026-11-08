@@ -213,6 +213,47 @@
                 </div>
               </div>
             </div>
+            {# 描述样式仍属于文本排版设置，布局侧边栏暂未提供，这里保留入口 #}
+            <div class="settings-card settings-card-stack">
+              <form action="{% url 'linkding:settings.save' %}" method="post" class="settings-subform" data-settings-save-mode="instant">
+                {% csrf_token %}
+                <input type="hidden" name="form_id" value="profile_quick">
+                <input type="hidden" name="form_fields" value="bookmark_description_display,bookmark_description_max_lines">
+                <div class="settings-row">
+                  <div class="settings-copy">
+                    <label id="settings-bookmark-description-label" class="settings-label">{% translate "Description style" %}</label>
+                    <div class="form-input-hint">
+                      {% translate "Show bookmark descriptions and tags in one line, or render them in separate blocks." %}
+                    </div>
+                  </div>
+                  <div class="settings-control">
+                    <div class="settings-segmented" role="radiogroup" aria-labelledby="settings-bookmark-description-label">
+                      {% for value, label in profile_quick_form.bookmark_description_display.field.choices %}
+                        <label class="settings-segmented-option">
+                          <input type="radio"
+                                 name="{{ profile_quick_form.bookmark_description_display.html_name }}"
+                                 value="{{ value }}"
+                                 {% if profile_quick_form.bookmark_description_display.value == value %}checked{% endif %}>
+                          <span>{{ label }}</span>
+                        </label>
+                      {% endfor %}
+                    </div>
+                  </div>
+                </div>
+                <div class="settings-row{% if profile_quick_form.bookmark_description_display.value == 'inline' %} is-hidden{% endif %}" data-setting-row="bookmark_description_max_lines"{% if profile_quick_form.bookmark_description_display.value == 'inline' %} hidden aria-hidden="true"{% endif %}>
+                  <div class="settings-copy">
+                    <label for="{{ profile_quick_form.bookmark_description_max_lines.id_for_label }}" class="settings-label">{% translate "Description max lines" %}</label>
+                    <div class="form-input-hint">
+                      {% translate "Limit how many lines are shown for bookmark descriptions." %}
+                    </div>
+                  </div>
+                  <div class="settings-control">
+                    {% formfield profile_quick_form.bookmark_description_max_lines class="form-input settings-number-input" min="1" %}
+                    <div class="field-errors" data-field-error-for="bookmark_description_max_lines"></div>
+                  </div>
+                </div>
+              </form>
+            </div>
           </div>
 
           <div class="settings-subsection" id="settings-bookmark-automation">
