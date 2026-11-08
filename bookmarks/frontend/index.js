@@ -3,9 +3,13 @@ import "./init.js";
 import "iconify-icon";
 import "./components/runtime.js";
 import "./components/toast.js";
-import "./components/bookmark-page.js";
+import "./components/bookmark-row.js";
+import "./components/sidebar.js";
+import "./components/bookmark-list-page.js";
+import "./components/bookmark-compact.js";
 import "./components/bookmark-table.js";
 import "./components/bulk-edit.js";
+import "./components/highlights-bulk.js";
 import "./components/asset-rename.js";
 import "./components/sidebar-user-summary.js";
 import "./components/date-filter-fields.js";
@@ -20,7 +24,9 @@ import "./components/health.js";
 import "./components/health-job-progress.js";
 import "./components/dropdown.js";
 import "./components/header-more.js";
-import "./components/toolbar-auto-hide.js";
+import "./components/list-toolbar.js";
+import "./components/layout-drawer.js";
+import "./components/bookmark-list.js";
 import "./components/favicon-contrast.js";
 
 import "./components/form.js";
@@ -38,4 +44,7 @@ setupViewportHeightVar();
 
 export { api } from "./api";
 export { cache } from "./utils/tag-cache.js";
-export { renderCopyText, renderByAction } from "./utils/highlight-copy-format.js";
+export {
+  renderCopyText,
+  renderByAction,
+} from "./utils/highlight-copy-format.js";

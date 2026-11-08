@@ -568,9 +568,87 @@ ul.bookmark-list.view-table .cell-desc .description-container {
   min-width: 0;
 }
 
+/* 笔记原始 Markdown 源只供行内编辑器读取，不参与展示 */
+ul.bookmark-list.view-table .cell-notes .note-source {
+  display: none;
+}
+
+/* 表格里的勾选框可点（切换完成态），只有这里需要可点击提示 */
+ul.bookmark-list.view-table .cell-notes .task-checkbox {
+  cursor: pointer;
+}
+
+/* 折叠态：Markdown 渲染结果压成单行，保留粗体/代码/链接等行内样式；
+   段落、列表、引用、代码块等块级元素全部内联化，由外层 nowrap + 省略号截断。 */
+ul.bookmark-list.view-table .cell-notes .note-markdown {
+  display: block;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown p,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown ul,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown ol,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown pre,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown blockquote,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown h1,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown h2,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown h3,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown h4,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown h5,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown h6,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown div {
+  display: inline;
+  margin: 0;
+  padding: 0;
+}
+
+/* 折叠态标题退化为普通行内文本：浏览器默认标题字号/字重/行距会撑破单行高度 */
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown h1,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown h2,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown h3,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown h4,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown h5,
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown h6 {
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown li {
+  display: inline;
+  list-style: none;
+  margin: 0;
+}
+
+/* 折叠态列表项被压成 inline，勾选框得自成 inline-block 才拿得到宽高（否则只剩边框一条竖线）；
+   折叠态没有 flex gap，用右边距与文字隔开。 */
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown .task-checkbox {
+  display: inline-block;
+  vertical-align: middle;
+  margin-top: 0;
+  margin-right: var(--unit-1);
+}
+
+/* 多个列表项压成一行时用间隔符区分，避免文字粘连 */
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown li + li::before {
+  content: " · ";
+}
+
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown pre {
+  background: none;
+  border-radius: 0;
+}
+
+ul.bookmark-list.view-table > li:not(.is-expanded) .cell-notes .note-markdown br {
+  display: none;
+}
+
 /* 行展开后的文本：换行显示完整内容，超过 15 行在格内滚动（与列表视图同口径） */
 ul.bookmark-list.view-table > li.is-expanded .cell-desc .description-text,
-ul.bookmark-list.view-table > li.is-expanded .cell-notes .note-text,
+ul.bookmark-list.view-table > li.is-expanded .cell-notes .note-markdown,
 ul.bookmark-list.view-table > li.is-expanded .cell-author .author-inner,
 ul.bookmark-list.view-table > li.is-expanded .cell-title .title-link > span {
   display: block;
@@ -582,8 +660,12 @@ ul.bookmark-list.view-table > li.is-expanded .cell-title .title-link > span {
   scrollbar-color: transparent transparent;
 }
 
+ul.bookmark-list.view-table > li.is-expanded .cell-notes .note-markdown {
+  white-space: normal;
+}
+
 ul.bookmark-list.view-table > li.is-expanded .cell-desc .description-text:hover,
-ul.bookmark-list.view-table > li.is-expanded .cell-notes .note-text:hover,
+ul.bookmark-list.view-table > li.is-expanded .cell-notes .note-markdown:hover,
 ul.bookmark-list.view-table > li.is-expanded .cell-author .author-inner:hover,
 ul.bookmark-list.view-table > li.is-expanded .cell-title .title-link > span:hover {
   scrollbar-color: var(--secondary-border-color) transparent;
@@ -761,10 +843,9 @@ ul.bookmark-list.view-table .cell-tags .quick-edit-tags-container .form-autocomp
 /* ── 悬停操作栏：挂在操作列上，整行高、无边框圆角阴影、底色跟行 ── */
 ul.bookmark-list.view-table li[ld-bookmark-item] .actions {
   position: absolute;
-  /* 挂在操作列左缘，随列一起吸附。顶部对齐向下扩展：单行时与居中几乎重合，
-     折行变高时只向下溢出，不会向上探进吸顶表头被遮挡（第一行尤其明显） */
   right: 100%;
-  top: 0;
+  top: 50%;
+  transform: translateY(-50%);
   width: max-content;
   max-width: var(--ld-actions-max-w, 420px);
   /* 不做滚动/裁切：健康检查浮窗挂在面板内，overflow 会把它困在里面 */
@@ -784,6 +865,16 @@ ul.bookmark-list.view-table li[ld-bookmark-item] .actions {
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
 }
 
+@supports (align-self: anchor-center) {
+  ul.bookmark-list.view-table li[ld-bookmark-item] .actions {
+    top: 0;
+    bottom: 0;
+    height: max-content;
+    transform: none;
+    align-self: safe center;
+  }
+}
+
 /* 显隐由行尾操作入口驱动（悬浮/点击），与「自动隐藏工具栏」偏好无关。
    浮层自身接收指针：鼠标在操作栏范围内移动保持显示，离开才消失 */
 ul.bookmark-list.view-table li[ld-bookmark-item]:has(.row-ops-btn:hover) .actions,
@@ -797,15 +888,6 @@ ul.bookmark-list.view-table li[ld-bookmark-item].toolbar-visible .actions {
 ul.bookmark-list.view-table li[ld-bookmark-item].toolbar-suppressed .actions {
   opacity: 0 !important;
   visibility: hidden !important;
-}
-
-/* 「自动隐藏工具栏」的塌缩规则不得作用于表格浮层 */
-ul.bookmark-list.view-table.toolbar-auto-hide li[ld-bookmark-item] .actions > *:not(.toolbar-date):not(.health-status) {
-  max-height: none;
-  opacity: 1;
-  pointer-events: auto;
-  flex: 0 1 auto;
-  min-width: 0;
 }
 
 /* 日期已是独立列，工具栏里的日期项及其分隔线在表格视图中是重复信息 */
@@ -880,6 +962,37 @@ body:not(:has(ul.view-table)):not(:has(ul.view-compact)) #bookmark-list-containe
 /* 批量编辑栏与表格工具条相邻，底部留白是多余的（只影响表格视图） */
 .bookmarks-page.active:has(ul.view-table) .bulk-edit-bar {
   margin-bottom: 0;
+}
+
+/* 表格视图列配置 */
+.header-table-col-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--unit-1) var(--unit-3);
+  padding: var(--unit-1) var(--unit-4) var(--unit-2);
+}
+
+.header-table-col {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--unit-1);
+  font-size: var(--font-size-sm);
+  color: var(--text-color);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.header-table-col input {
+  margin: 0;
+  accent-color: var(--primary-color);
+}
+
+.header-table-col input:disabled {
+  cursor: default;
+}
+
+.header-table-col input:disabled ~ span {
+  color: var(--tertiary-text-color);
 }
 
 /* ── 表格工具条：列显隐 ── */

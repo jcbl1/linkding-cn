@@ -15,10 +15,26 @@ export class PositionController {
     this.placement = options.placement || "bottom";
     this.offsetValue = options.offset;
     this.autoWidth = options.autoWidth || false;
+    this.widthAnchor = options.widthAnchor || this.anchor;
     this.autoUpdateCleanup = null;
   }
 
   enable() {
+    this.overlay.style.position = "fixed";
+    // 面板宽度上下限由 CSS 声明（--overlay-min/max-width），预算一次即可
+    const style = getComputedStyle(this.overlay);
+    const minWidth = parseFloat(style.getPropertyValue("--overlay-min-width"));
+    const maxWidth = parseFloat(style.getPropertyValue("--overlay-max-width"));
+    this.minWidth = Number.isFinite(minWidth) ? minWidth : 0;
+    this.maxWidth = Number.isFinite(maxWidth) ? maxWidth : Infinity;
+    if (typeof this.overlay.showPopover === "function") {
+      this.overlay.setAttribute("popover", "manual");
+      if (!this.overlay.matches(":popover-open")) {
+        this.overlay.showPopover();
+      }
+    }
+
+    this.updatePosition();
     if (!this.autoUpdateCleanup) {
       this.autoUpdateCleanup = autoUpdate(this.anchor, this.overlay, () =>
         this.updatePosition(),
@@ -31,9 +47,29 @@ export class PositionController {
       this.autoUpdateCleanup();
       this.autoUpdateCleanup = null;
     }
+    if (this.overlay.matches(":popover-open")) {
+      this.overlay.hidePopover();
+    }
+    this.overlay.removeAttribute("popover");
+    this.overlay.style.removeProperty("position");
+    this.overlay.style.removeProperty("left");
+    this.overlay.style.removeProperty("top");
+    this.overlay.style.removeProperty("right");
+    this.overlay.style.removeProperty("bottom");
+    if (this.autoWidth) {
+      this.overlay.style.removeProperty("width");
+    }
   }
 
   updatePosition() {
+    if (this.autoWidth) {
+      const width = Math.max(
+        this.minWidth,
+        Math.min(this.widthAnchor.offsetWidth, this.maxWidth),
+      );
+      this.overlay.style.width = `${width}px`;
+    }
+
     const middleware = [flip(), shift()];
     if (this.arrow) {
       middleware.push(arrow({ element: this.arrow }));
@@ -50,6 +86,8 @@ export class PositionController {
       Object.assign(this.overlay.style, {
         left: `${x}px`,
         top: `${y}px`,
+        right: "auto",
+        bottom: "auto",
       });
 
       this.overlay.classList.remove("top-aligned", "bottom-aligned");
@@ -64,8 +102,5 @@ export class PositionController {
       }
     });
 
-    if (this.autoWidth) {
-      this.overlay.style.width = `${this.anchor.offsetWidth}px`;
-    }
   }
 }

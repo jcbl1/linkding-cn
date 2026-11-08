@@ -1083,38 +1083,50 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         )
         self.assertNotes(html, note_html, 1)
 
+    def test_note_renders_tasklist(self):
+        self.setup_bookmark(notes="- [ ] 未完成事项\n- [x] 已完成事项")
+        html = self.render_template()
+
+        note_html = (
+            '<ul>'
+            '<li class="task-list-item"><span class="task-checkbox"></span>未完成事项</li>'
+            '<li class="task-list-item is-done"><span class="task-checkbox checked"></span>已完成事项</li>'
+            '</ul>'
+        )
+        self.assertNotes(html, note_html, 1)
+
     def test_note_renders_markdown_with_linkify(self):
         # Should linkify plain URL
         self.setup_bookmark(notes="Example: https://example.com")
         html = self.render_template()
 
-        note_html = '<p>Example: <a href="https://example.com" rel="nofollow">https://example.com</a></p>'
+        note_html = '<p>Example: <a href="https://example.com" rel="nofollow noopener" target="_blank">https://example.com</a></p>'
         self.assertNotes(html, note_html, 1)
 
         # Should not linkify URL in markdown link
         self.setup_bookmark(notes="[https://example.com](https://example.com)")
         html = self.render_template()
 
-        note_html = '<p><a href="https://example.com" rel="nofollow">https://example.com</a></p>'
+        note_html = '<p><a href="https://example.com" rel="nofollow noopener" target="_blank">https://example.com</a></p>'
         self.assertNotes(html, note_html, 1)
 
     def test_note_linkify_converts_schemeless_urls_to_https(self):
         self.setup_bookmark(notes="Example: example.com")
         html = self.render_template()
 
-        note_html = '<p>Example: <a href="https://example.com" rel="nofollow">example.com</a></p>'
+        note_html = '<p>Example: <a href="https://example.com" rel="nofollow noopener" target="_blank">example.com</a></p>'
         self.assertNotes(html, note_html, 1)
 
         self.setup_bookmark(notes="Example: http://example.com")
         html = self.render_template()
 
-        note_html = '<p>Example: <a href="http://example.com" rel="nofollow">http://example.com</a></p>'
+        note_html = '<p>Example: <a href="http://example.com" rel="nofollow noopener" target="_blank">http://example.com</a></p>'
         self.assertNotes(html, note_html, 1)
 
         self.setup_bookmark(notes="Example: https://example.com")
         html = self.render_template()
 
-        note_html = '<p>Example: <a href="https://example.com" rel="nofollow">https://example.com</a></p>'
+        note_html = '<p>Example: <a href="https://example.com" rel="nofollow noopener" target="_blank">https://example.com</a></p>'
         self.assertNotes(html, note_html, 1)
 
         self.setup_bookmark(notes="Contact: hello@example.com")
@@ -1126,7 +1138,19 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         self.setup_bookmark(notes="FTP: ftp://ftp.example.com")
         html = self.render_template()
 
-        note_html = '<p>FTP: <a href="ftp://ftp.example.com" rel="nofollow">ftp://ftp.example.com</a></p>'
+        note_html = '<p>FTP: <a href="ftp://ftp.example.com" rel="nofollow noopener" target="_blank">ftp://ftp.example.com</a></p>'
+        self.assertNotes(html, note_html, 1)
+
+    def test_note_link_target_should_respect_user_profile(self):
+        # 笔记里的链接与书签链接同一份「打开方式」设置
+        profile = self.get_or_create_test_user().profile
+        profile.bookmark_link_target = UserProfile.BOOKMARK_LINK_TARGET_SELF
+        profile.save()
+
+        self.setup_bookmark(notes="Example: https://example.com")
+        html = self.render_template()
+
+        note_html = '<p>Example: <a href="https://example.com" rel="nofollow" target="_self">https://example.com</a></p>'
         self.assertNotes(html, note_html, 1)
 
     def test_note_cleans_html(self):
@@ -1255,7 +1279,7 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         self.assertInHTML('<p class="empty-title h5">Invalid search query</p>', html)
         self.assertIn("Expected RPAREN", html)
 
-    def test_empty_state_with_legacy_search(self):
+    def test_empty_state_ignores_legacy_search_setting(self):
         profile = self.get_or_create_test_user().profile
         profile.legacy_search = True
         profile.save()
@@ -1263,10 +1287,8 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         self.setup_bookmark()
         html = self.render_template(url="/bookmarks?q=(test")
 
-        # With legacy search, search queries are not validated
-        self.assertInHTML(
-            '<p class="empty-title h5">You have no bookmarks yet</p>', html
-        )
+        # 兼容模式已停用：配置为 True 也按新版引擎解析并校验查询
+        self.assertInHTML('<p class="empty-title h5">Invalid search query</p>', html)
 
     def test_pagination_is_sticky_by_default(self):
         self.setup_bookmark()
@@ -1400,6 +1422,58 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         self.assertIn("health-icon-mode", indicator.get("class", []))
         self.assertIsNotNone(indicator.select_one(".health-dot--blocked"))
         self.assertIsNone(indicator.select_one(".health-text"))
+
+    # ---- 状态显示模式：文字模式文案 ----
+
+    def test_status_text_mode_labels_follow_state(self):
+        """文字模式：文案表示当前状态，另一状态的文案放在 data-toggle-label 供脚本对调"""
+        profile = self.get_or_create_test_user().profile
+        profile.bookmark_status_display_mode = UserProfile.ACTION_DISPLAY_MODE_TEXT
+        profile.enable_sharing = True
+        profile.save()
+
+        bookmark = self.setup_bookmark(unread=True, shared=True)
+        soup = self.make_soup(self.render_template())
+
+        share_button = soup.select_one('button[data-action="unshare"]')
+        self.assertIsNotNone(share_button)
+        self.assertEqual(share_button.get_text(strip=True), "Shared")
+        self.assertEqual(share_button["data-toggle-label"], "Share")
+
+        read_button = soup.select_one('button[data-action="mark_as_read"]')
+        self.assertIsNotNone(read_button)
+        self.assertEqual(read_button.get_text(strip=True), "Unread")
+        self.assertEqual(read_button["data-toggle-label"], "Read")
+
+        # 已读 + 未分享：文案与待切换文案整体反过来
+        bookmark.unread = False
+        bookmark.shared = False
+        bookmark.save()
+        soup = self.make_soup(self.render_template())
+
+        share_button = soup.select_one('button[data-action="share"]')
+        self.assertIsNotNone(share_button)
+        self.assertEqual(share_button.get_text(strip=True), "Share")
+        self.assertEqual(share_button["data-toggle-label"], "Shared")
+
+        read_button = soup.select_one('button[data-action="mark_as_unread"]')
+        self.assertIsNotNone(read_button)
+        self.assertEqual(read_button.get_text(strip=True), "Read")
+        self.assertEqual(read_button["data-toggle-label"], "Unread")
+
+    def test_status_icon_mode_has_no_toggle_label(self):
+        """图标模式靠换图标表达状态，不需要待切换文案"""
+        profile = self.get_or_create_test_user().profile
+        profile.enable_sharing = True
+        profile.save()
+
+        self.setup_bookmark(unread=True)
+        soup = self.make_soup(self.render_template())
+
+        read_button = soup.select_one('button[data-action="mark_as_read"]')
+        self.assertIsNotNone(read_button)
+        self.assertIsNone(read_button.get("data-toggle-label"))
+        self.assertIsNotNone(read_button.select_one("svg.action-icon"))
 
     def test_compact_view_renders_compact_row_without_expanded_blocks(self):
         user = self.get_or_create_test_user()
@@ -1563,6 +1637,102 @@ class BookmarkListTemplateTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         header = soup.select_one("ul.bookmark-list > li.group-header")
         self.assertEqual(header.select_one(".group-count").get_text(strip=True), "3")
         self.assertIsNone(header.select_one(".group-more"))
+
+    def test_group_by_date_keeps_groups_contiguous_under_other_sorts(self):
+        # 分组是主序：按标题排序时同月条目仍聚成一段，月份只会出现一次，
+        # 组头计数等于该段条目数（组内再按标题升序）；两组条数相同 → 日期序兜底
+        now = timezone.now()
+        month_ago = now - datetime.timedelta(days=40)
+        self.setup_bookmark(title="a old", added=month_ago)
+        self.setup_bookmark(title="b old", added=month_ago)
+        self.setup_bookmark(title="a new", added=now)
+        self.setup_bookmark(title="b new", added=now)
+
+        html = self.render_template(url="/bookmarks?sort=title_asc")
+        soup = self.make_soup(html)
+
+        headers = soup.select("ul.bookmark-list > li.group-header")
+        keys = [h.get("data-group-key") for h in headers]
+        self.assertEqual(keys, ["today", timezone.localdate(month_ago).strftime("%Y-%m")])
+
+        for header in headers:
+            titles = []
+            for el in header.find_next_siblings():
+                if "group-header" in (el.get("class") or []):
+                    break
+                if el.has_attr("ld-bookmark-item"):
+                    titles.append(el.select_one(".title-link").get_text(strip=True))
+            count = int(header.select_one(".group-count").get_text(strip=True))
+            self.assertEqual(count, len(titles))
+            self.assertEqual(titles, sorted(titles))
+
+    def test_group_order_sorts_by_group_size_desc_when_filtered(self):
+        # 筛选之后组序按组内条数降序：更早的月份条数多就排在 today 之前
+        now = timezone.now()
+        month_ago = now - datetime.timedelta(days=40)
+        self.setup_bookmark(title="today", added=now, unread=True)
+        self.setup_bookmark(title="old a", added=month_ago, unread=True)
+        self.setup_bookmark(title="old b", added=month_ago, unread=True)
+
+        html = self.render_template(url="/bookmarks?unread=yes&sort=title_asc")
+        soup = self.make_soup(html)
+
+        keys = [
+            h.get("data-group-key")
+            for h in soup.select("ul.bookmark-list > li.group-header")
+        ]
+        self.assertEqual(keys, [timezone.localdate(month_ago).strftime("%Y-%m"), "today"])
+
+    def test_group_order_keeps_date_order_when_sorting_by_date(self):
+        # 即使有筛选，按添加时间排序时组序仍跟着时间走
+        now = timezone.now()
+        month_ago = now - datetime.timedelta(days=40)
+        self.setup_bookmark(title="today", added=now, unread=True)
+        self.setup_bookmark(title="old a", added=month_ago, unread=True)
+        self.setup_bookmark(title="old b", added=month_ago, unread=True)
+
+        html = self.render_template(url="/bookmarks?unread=yes")
+        soup = self.make_soup(html)
+
+        keys = [
+            h.get("data-group-key")
+            for h in soup.select("ul.bookmark-list > li.group-header")
+        ]
+        self.assertEqual(keys, ["today", timezone.localdate(month_ago).strftime("%Y-%m")])
+
+    def test_group_order_keeps_date_order_when_unfiltered(self):
+        # 无筛选（纯浏览）时即使排序不是日期，组序也按日期
+        now = timezone.now()
+        month_ago = now - datetime.timedelta(days=40)
+        self.setup_bookmark(title="today", added=now)
+        self.setup_bookmark(title="old a", added=month_ago)
+        self.setup_bookmark(title="old b", added=month_ago)
+
+        html = self.render_template(url="/bookmarks?sort=title_asc")
+        soup = self.make_soup(html)
+
+        keys = [
+            h.get("data-group-key")
+            for h in soup.select("ul.bookmark-list > li.group-header")
+        ]
+        self.assertEqual(keys, ["today", timezone.localdate(month_ago).strftime("%Y-%m")])
+
+    def test_group_order_keeps_future_dated_items_in_one_group(self):
+        # 未来日期会被 _bookmark_group_key 归入 this_week，SQL 分组区间必须与之一致，
+        # 否则同组被拆到两个排序位置上（出现重复组头）
+        now = timezone.now()
+        month_ago = now - datetime.timedelta(days=40)
+        self.setup_bookmark(title="week", added=now - datetime.timedelta(days=3))
+        self.setup_bookmark(title="future", added=now + datetime.timedelta(days=1))
+        self.setup_bookmark(title="old", added=month_ago)
+
+        soup = self.make_soup(self.render_template())
+        keys = [
+            h.get("data-group-key")
+            for h in soup.select("ul.bookmark-list > li.group-header")
+        ]
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertIn("this_week", keys)
 
     def test_group_key_computation(self):
         from bookmarks.views.contexts import _bookmark_group_key
@@ -1752,6 +1922,94 @@ class BookmarkTableViewTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         # 非法 key 被丢弃；title 列被强制保留并排在最前
         self.assertEqual(labels, ["Title", "Date", "Domain"])
 
+    def test_table_view_notes_render_markdown(self):
+        """表格笔记列：渲染层输出解析后的 Markdown，隐藏源保留原始语法，提示用纯文本。"""
+        self.setup_bookmark(notes='**Example:** `print("Hello world!")`')
+        soup = self.make_soup(self.render_template())
+
+        cell = soup.select_one(".table-body-scroll .cell-notes")
+        self.assertIsNotNone(cell)
+
+        rendered = cell.select_one(".note-markdown")
+        self.assertIsNotNone(rendered)
+        self.assertIsNotNone(rendered.select_one("strong"))
+        self.assertEqual(rendered.select_one("strong").get_text(strip=True), "Example:")
+        self.assertIsNotNone(rendered.select_one("code"))
+        self.assertEqual(
+            rendered.select_one("code").get_text(strip=True),
+            'print("Hello world!")',
+        )
+
+        source = cell.select_one(".note-source")
+        self.assertIsNotNone(source)
+        self.assertIn("**Example:**", source.text)
+
+        tooltip = cell.select_one(".note.inline")["title"]
+        self.assertNotIn("**", tooltip)
+        self.assertNotIn("`", tooltip)
+        self.assertEqual(tooltip, 'Example: print("Hello world!")')
+
+    def test_table_view_notes_renders_list(self):
+        """多行列表在展开层渲染为 ul/li；折叠提示合并为纯文本、去掉列表符号。"""
+        self.setup_bookmark(notes="- 第一项\n- 第二项")
+        soup = self.make_soup(self.render_template())
+
+        rendered = soup.select_one(".cell-notes .note-markdown")
+        items = rendered.select("ul li")
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0].get_text(strip=True), "第一项")
+        self.assertEqual(items[1].get_text(strip=True), "第二项")
+
+        tooltip = soup.select_one(".cell-notes .note.inline")["title"]
+        self.assertNotIn("-", tooltip)
+        self.assertIn("第一项", tooltip)
+        self.assertIn("第二项", tooltip)
+
+    def test_table_view_notes_renders_tasklist(self):
+        """待办语法渲染为复选框列表：未完成/已完成类名与勾选状态正确，普通列表不受影响。"""
+        self.setup_bookmark(
+            notes="- [ ] 未完成事项\n- [x] 已完成事项\n- 普通列表项",
+        )
+        soup = self.make_soup(self.render_template())
+        rendered = soup.select_one(".cell-notes .note-markdown")
+
+        task_items = rendered.select("li.task-list-item")
+        self.assertEqual(len(task_items), 2)
+
+        pending = task_items[0]
+        self.assertFalse(pending.has_attr("class") and "is-done" in pending["class"])
+        self.assertIsNotNone(pending.select_one(".task-checkbox:not(.checked)"))
+        self.assertEqual(pending.get_text(strip=True), "未完成事项")
+
+        done = task_items[1]
+        self.assertIn("is-done", done["class"])
+        self.assertIsNotNone(done.select_one(".task-checkbox.checked"))
+        self.assertEqual(done.get_text(strip=True), "已完成事项")
+
+        plain = rendered.select("li:not(.task-list-item)")
+        self.assertEqual(len(plain), 1)
+        self.assertEqual(plain[0].get_text(strip=True), "普通列表项")
+
+    def test_table_view_notes_sanitizes_html(self):
+        """表格笔记列复用同一清洗管线，脚本等危险 HTML 不进入渲染层。"""
+        self.setup_bookmark(notes='<script>alert("test")</script> **bold**')
+        soup = self.make_soup(self.render_template())
+
+        rendered = soup.select_one(".cell-notes .note-markdown")
+        self.assertIsNone(rendered.select_one("script"))
+        self.assertIsNotNone(rendered.select_one("strong"))
+
+    def test_table_view_notes_empty(self):
+        """无笔记：渲染层为空、隐藏源为空、不输出提示标题。"""
+        self.setup_bookmark()
+        soup = self.make_soup(self.render_template())
+
+        cell = soup.select_one(".table-body-scroll .cell-notes")
+        self.assertIsNotNone(cell)
+        self.assertEqual(cell.select_one(".note-markdown").text.strip(), "")
+        self.assertEqual(cell.select_one(".note-source").text.strip(), "")
+        self.assertNotIn("title", cell.select_one(".note.inline").attrs)
+
 
 class BookmarkTableStatusColumnTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
     """状态列：直接复用书签工具栏的状态按钮。"""
@@ -1781,3 +2039,40 @@ class BookmarkTableStatusColumnTest(TestCase, BookmarkFactoryMixin, HtmlTestMixi
         cell = soup.select_one("li[ld-bookmark-item] .cell-status")
         self.assertIsNotNone(cell)
         self.assertIsNotNone(cell.select_one('[data-action="mark_as_unread"]'))
+
+
+class BookmarkTableTagsColumnTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
+    """标签列被隐藏时不应再提供标签编辑入口，否则编辑器会落到描述格里。"""
+
+    render_template = BookmarkListTemplateTest.render_template
+
+    def setUp(self):
+        profile = self.get_or_create_test_user().profile
+        profile.bookmark_view_mode = UserProfile.BOOKMARK_VIEW_MODE_TABLE
+        profile.save()
+
+    def test_tags_edit_hidden_when_tags_column_hidden(self):
+        self.get_or_create_test_user().profile.bookmark_table_columns = [
+            {"key": "title", "w": 2.4, "on": True},
+            {"key": "desc", "w": 2.2, "on": True},
+            {"key": "tags", "w": 1.2, "on": False},
+        ]
+        self.get_or_create_test_user().profile.save()
+        self.setup_bookmark()
+
+        soup = self.make_soup(self.render_template())
+        self.assertIsNone(soup.select_one(".cell-tags"))
+        self.assertIsNone(soup.select_one('[data-quick-edit="tags"]'))
+        self.assertIsNone(soup.select_one(".quick-tag-btn"))
+
+    def test_tags_edit_available_when_tags_column_visible(self):
+        self.get_or_create_test_user().profile.bookmark_table_columns = [
+            {"key": "title", "w": 2.4, "on": True},
+            {"key": "tags", "w": 1.2, "on": True},
+        ]
+        self.get_or_create_test_user().profile.save()
+        self.setup_bookmark()
+
+        soup = self.make_soup(self.render_template())
+        self.assertIsNotNone(soup.select_one(".cell-tags"))
+        self.assertIsNotNone(soup.select_one('[data-quick-edit="tags"]'))

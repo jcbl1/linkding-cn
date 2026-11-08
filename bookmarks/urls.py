@@ -22,6 +22,11 @@ urlpatterns = [
         views.bookmarks.archived_action,
         name="bookmarks.archived.action",
     ),
+    path(
+        "bookmarks/metadata/preview",
+        views.bookmarks.metadata_preview,
+        name="bookmarks.metadata.preview",
+    ),
     path("bookmarks/shared", views.bookmarks.shared, name="bookmarks.shared"),
     path(
         "bookmarks/shared/action",
@@ -84,6 +89,11 @@ urlpatterns = [
         views.highlights.index,
         name="bookmarks.highlights",
     ),
+    path(
+        "bookmarks/highlights/copy-payload",
+        views.highlights.copy_payload,
+        name="bookmarks.highlights_copy_payload",
+    ),
     # Bookmark health check（任务进度与单条检查 API；页面/入口已并入书签列表与 bundle 列表）
     path(
         "bookmarks/health/<int:job_id>/status",
@@ -107,6 +117,11 @@ urlpatterns = [
     path("settings", views.settings.general, name="settings.index"),
     path("settings/general", views.settings.general, name="settings.general"),
     path("settings/save", views.settings.save, name="settings.save"),
+    path(
+        "settings/quick-tags",
+        views.settings.quick_tags_fragment,
+        name="settings.quick_tags_fragment",
+    ),
     path("settings/update", views.settings.update, name="settings.update"),
     path(
         "settings/integrations",

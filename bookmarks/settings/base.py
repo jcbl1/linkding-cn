@@ -300,6 +300,9 @@ else:
     default_database = {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": os.path.join(BASE_DIR, "data", "db.sqlite3"),
+        # 测试用文件库：LiveServer 的请求线程可能在用例 teardown 后仍持有连接，
+        # 内存库随主连接销毁会让这些请求报 InterfaceError 并污染后续用例
+        "TEST": {"NAME": os.path.join(BASE_DIR, "data", "test_db.sqlite3")},
         "OPTIONS": LD_DB_OPTIONS,
         # Creating a connection loads the ICU extension into the SQLite
         # connection, and also loads an ICU collation. The latter causes a

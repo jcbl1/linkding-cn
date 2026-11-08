@@ -837,26 +837,28 @@ class BookmarkSearchForm(forms.Form):
         (BookmarkSearch.SORT_MODIFIED_DESC, _("Modified ↓")),
         (BookmarkSearch.SORT_TITLE_ASC, _("Title ↑")),
         (BookmarkSearch.SORT_TITLE_DESC, _("Title ↓")),
-        (BookmarkSearch.SORT_HIGHLIGHTS_DESC, _("Highlights ↓")),
-        (BookmarkSearch.SORT_HIGHLIGHTS_ASC, _("Highlights ↑")),
-        (BookmarkSearch.SORT_ANNOTATIONS_DESC, _("Annotations ↓")),
-        (BookmarkSearch.SORT_ANNOTATIONS_ASC, _("Annotations ↑")),
+        (BookmarkSearch.SORT_HIGHLIGHTS_DESC, _("Highlight count ↓")),
+        (BookmarkSearch.SORT_HIGHLIGHTS_ASC, _("Highlight count ↑")),
+        (BookmarkSearch.SORT_ANNOTATIONS_DESC, _("Annotation count ↓")),
+        (BookmarkSearch.SORT_ANNOTATIONS_ASC, _("Annotation count ↑")),
         (BookmarkSearch.SORT_RANDOM, _("Random")),
     ]
+    # 筛选面板把这三态渲染成分段控件，标签只留「是/否」，
+    # 「不限」由分段控件的第一项表达。
     FILTER_SHARED_CHOICES = [
-        (BookmarkSearch.FILTER_SHARED_OFF, _("Off")),
-        (BookmarkSearch.FILTER_SHARED_SHARED, _("Shared")),
-        (BookmarkSearch.FILTER_SHARED_UNSHARED, _("Unshared")),
+        (BookmarkSearch.FILTER_SHARED_OFF, _("Any")),
+        (BookmarkSearch.FILTER_SHARED_SHARED, _("Yes")),
+        (BookmarkSearch.FILTER_SHARED_UNSHARED, _("No")),
     ]
     FILTER_UNREAD_CHOICES = [
-        (BookmarkSearch.FILTER_UNREAD_OFF, _("Off")),
-        (BookmarkSearch.FILTER_UNREAD_YES, pgettext_lazy("bookmark_status", "Unread")),
-        (BookmarkSearch.FILTER_UNREAD_NO, pgettext_lazy("bookmark_status", "Read")),
+        (BookmarkSearch.FILTER_UNREAD_OFF, _("Any")),
+        (BookmarkSearch.FILTER_UNREAD_YES, _("Yes")),
+        (BookmarkSearch.FILTER_UNREAD_NO, _("No")),
     ]
     FILTER_TAGGED_CHOICES = [
-        (BookmarkSearch.FILTER_TAGGED_OFF, _("Off")),
-        (BookmarkSearch.FILTER_TAGGED_TAGGED, _("Tagged")),
-        (BookmarkSearch.FILTER_TAGGED_UNTAGGED, _("Untagged")),
+        (BookmarkSearch.FILTER_TAGGED_OFF, _("Any")),
+        (BookmarkSearch.FILTER_TAGGED_TAGGED, _("Yes")),
+        (BookmarkSearch.FILTER_TAGGED_UNTAGGED, _("No")),
     ]
     FILTER_ASSET_CHOICES = [
         (BookmarkSearch.FILTER_ASSET_OFF, _("Off")),
@@ -864,17 +866,17 @@ class BookmarkSearchForm(forms.Form):
         (BookmarkSearch.FILTER_ASSET_NO, _("Missing")),
     ]
     FILTER_HIGHLIGHT_CHOICES = [
-        (BookmarkSearch.FILTER_HIGHLIGHT_OFF, _("Off")),
-        (BookmarkSearch.FILTER_HIGHLIGHT_YES, _("Has")),
-        (BookmarkSearch.FILTER_HIGHLIGHT_NO, _("None")),
+        (BookmarkSearch.FILTER_HIGHLIGHT_OFF, _("Any")),
+        (BookmarkSearch.FILTER_HIGHLIGHT_YES, _("Yes")),
+        (BookmarkSearch.FILTER_HIGHLIGHT_NO, _("No")),
     ]
     FILTER_ANNOTATION_CHOICES = [
-        (BookmarkSearch.FILTER_ANNOTATION_OFF, _("Off")),
+        (BookmarkSearch.FILTER_ANNOTATION_OFF, _("Any")),
         (BookmarkSearch.FILTER_ANNOTATION_YES, _("Has")),
         (BookmarkSearch.FILTER_ANNOTATION_NO, _("None")),
     ]
     FILTER_DATE_BY_CHOICES = [
-        (BookmarkSearch.FILTER_DATE_OFF, _("Off")),
+        (BookmarkSearch.FILTER_DATE_OFF, _("Any")),
         (BookmarkSearch.FILTER_DATE_BY_ADDED, pgettext_lazy("date_filter", "Added")),
         (BookmarkSearch.FILTER_DATE_BY_MODIFIED, pgettext_lazy("date_filter", "Modified")),
         (BookmarkSearch.FILTER_DATE_BY_HIGHLIGHT, _("Highlighted")),
@@ -897,7 +899,7 @@ class BookmarkSearchForm(forms.Form):
     added_since = forms.CharField(required=False)
     deleted_since = forms.CharField(required=False)
     date_filter_by = forms.ChoiceField(
-        choices=FILTER_DATE_BY_CHOICES, widget=forms.RadioSelect
+        choices=FILTER_DATE_BY_CHOICES, widget=forms.Select
     )
     date_filter_type = forms.ChoiceField(
         choices=FILTER_DATE_TYPE_CHOICES, widget=forms.RadioSelect
@@ -975,6 +977,11 @@ class BookmarkSearchForm(forms.Form):
             # all necessary search options are kept when submitting the form.
             if search.is_modified(param) and param not in editable_fields:
                 self.fields[param].widget = forms.HiddenInput()
+
+
+# 搜索「兼容模式」（旧版搜索引擎）总开关。停用期间无论 legacy_search 配置为何，一律按新版
+# 逻辑解析查询；字段、表单与旧的解析实现全部保留，后续要恢复只需把此值改回 True。
+LEGACY_SEARCH_ENABLED = False
 
 
 class UserProfile(models.Model):
@@ -1512,11 +1519,36 @@ class UserProfile(models.Model):
         blank=False,
         default=TAG_GROUPING_ALPHABETICAL,
     )
+    # 高亮页侧边栏「作者」模块的显示模式，与书签页的 author_grouping/author_sort 分开：
+    # 两个页面的作者聚合口径不同（书签条数 vs 高亮条数），改动其中一个不应影响另一个。
+    highlights_author_mode = models.CharField(
+        max_length=12,
+        choices=AUTHOR_MODE_CHOICES,
+        blank=False,
+        default=AUTHOR_MODE_ALPHABETICAL,
+    )
     show_highlights_sidebar = models.BooleanField(default=True, null=False)
     highlights_sticky_header_controls = models.BooleanField(default=True, null=False)
     highlights_sticky_pagination = models.BooleanField(default=True, null=False)
     highlights_sticky_side_panel = models.BooleanField(default=True, null=False)
+    highlights_enable_random_button = models.BooleanField(default=True, null=False)
     highlight_copy_format = models.JSONField(default=dict, blank=True, null=False)
+
+    # 高亮列表的聚合方式（布局抽屉里的「高亮分组」）：
+    # 值存进 highlights_search_preferences["group_by"]，与筛选面板的
+    # 「保存为默认」共用同一份存储，避免同一个偏好有两处真相。
+    HIGHLIGHT_GROUP_NONE = "none"
+    HIGHLIGHT_GROUP_BOOKMARK = "bookmark"
+    HIGHLIGHT_GROUP_AUTHOR = "author"
+    HIGHLIGHT_GROUP_DOMAIN = "domain"
+    HIGHLIGHT_GROUP_COLOR = "color"
+    HIGHLIGHT_GROUP_CHOICES = [
+        (HIGHLIGHT_GROUP_NONE, _("None")),
+        (HIGHLIGHT_GROUP_BOOKMARK, _("Bookmark")),
+        (HIGHLIGHT_GROUP_AUTHOR, _("Author")),
+        (HIGHLIGHT_GROUP_DOMAIN, _("Domain")),
+        (HIGHLIGHT_GROUP_COLOR, _("Color")),
+    ]
 
     HIGHLIGHT_COPY_ACTION_BOTH = "both"
     HIGHLIGHT_COPY_ACTION_HIGHLIGHT = "highlight"
@@ -1792,6 +1824,7 @@ class UserProfile(models.Model):
             {"key": cls.SIDEBAR_MODULE_COLORS, "enabled": True},
             {"key": cls.SIDEBAR_MODULE_DOMAINS, "enabled": True},
             {"key": cls.SIDEBAR_MODULE_TAGS, "enabled": True},
+            {"key": cls.SIDEBAR_MODULE_AUTHORS, "enabled": True},
         ]
 
     @staticmethod
@@ -1945,6 +1978,11 @@ class UserProfile(models.Model):
         if self.health_max_age_days is not None:
             return self.health_max_age_days
         return getattr(settings, "LINK_HEALTH_MAX_AGE_DAYS", 15)
+
+    @property
+    def uses_legacy_search(self) -> bool:
+        """实际生效的搜索模式：兼容模式总开关关闭时，用户配置被忽略。"""
+        return self.legacy_search and LEGACY_SEARCH_ENABLED
 
     @classmethod
     def default_bookmark_statuses(cls) -> list[dict]:
@@ -2203,6 +2241,7 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
             "highlights_sticky_header_controls",
             "highlights_sticky_pagination",
             "highlights_sticky_side_panel",
+            "highlights_enable_random_button",
             "sticky_header_controls",
             "sticky_pagination",
             "sticky_side_panel",

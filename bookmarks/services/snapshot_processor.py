@@ -16,6 +16,17 @@ from site_adapters.services.engine.script_runner import run_script, resolve_hook
 logger = logging.getLogger(__name__)
 
 
+class SnapshotRejectedError(singlefile.SingleFileError):
+    """The snapshot was rejected with a user-facing reason."""
+
+    def __init__(self, status: str, reason: str,
+                 source: str = "preflight health check"):
+        self.status = status
+        self.reason = reason
+        self.source = source
+        super().__init__(
+            f"snapshot rejected by {source} ({status}): {reason}"
+        )
 
 
 def _snapshot_format(config: dict | None) -> str:
@@ -132,6 +143,12 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
             before_temp_paths.append(tmp.name)
             logger.debug("Before hook returned content, saved to: %s", before_content_path)
         elif isinstance(result, dict):
+            if result.get("error"):
+                raise SnapshotRejectedError(
+                    str(result.get("status") or "failed"),
+                    str(result["error"]),
+                    source="adapter hook",
+                )
             # Before hook returned config overrides (e.g. dynamic User-Agent).
             # Deep-merge into config so SingleFile picks up the changes.
             _apply_snapshot_before_result(url, config, result)
@@ -148,8 +165,18 @@ def _run_snapshot_with_hooks(url: str, filepath: str, config: dict, scripts: lis
                 script_path = entry_replace.get('path', '')
                 hook_timeout = resolve_hook_timeout(entry_replace, config)
                 logger.debug("Running snapshot replace hook: %s (timeout=%ds)", script_path, hook_timeout)
-                run_script(script_path, hook_name='replace', url=url,
-                           config=dict(config), output_path=filepath, timeout=hook_timeout)
+                hook_result = run_script(script_path, hook_name='replace', url=url,
+                                         config=dict(config), output_path=filepath,
+                                         timeout=hook_timeout)
+                # A replace hook may reject with a reason instead of leaving
+                # the output empty; surface it through the same channel as
+                # precheck_health so the admin panel can show it.
+                if isinstance(hook_result, dict) and hook_result.get("error"):
+                    raise SnapshotRejectedError(
+                        str(hook_result.get("status") or "failed"),
+                        str(hook_result["error"]),
+                        source="adapter hook",
+                    )
                 break  # Only one replace allowed
             # run_script only logs on failure; verify the replace hook actually
             # produced a non-empty file, matching the built-in engine validation.
@@ -259,6 +286,38 @@ def _verify_snapshot_cookie(url: str, filepath: str, config: dict) -> bool:
     return False
 
 
+def _reject_by_health(url: str, config: dict | None, username: str = '') -> None:
+    """Reuse the health section's verdict and reason before any browser starts.
+
+    Health checks already follow redirects, inspect content and apply the
+    adapter's ``reason`` text, so page signals stay in one place. A probe that
+    fails (or health being disabled / ok) must never block a snapshot.
+    """
+    if not (config or {}).get("precheck_health"):
+        return
+    # Lazy import: health_checker pulls in the ORM, which the snapshot engine
+    # does not otherwise need at module load time.
+    from bookmarks.models import (
+        HEALTH_STATUS_BLOCKED,
+        HEALTH_STATUS_DEAD,
+        HEALTH_STATUS_MISSING,
+    )
+    from bookmarks.services.health_checker import check_url
+
+    try:
+        result = check_url(url, username=username)
+    except Exception as exc:  # noqa: BLE001 - a failed probe must not block snapshots
+        logger.warning("preflight health check failed, continuing: %s", exc)
+        return
+
+    status = result.get("status")
+    if status not in {
+        HEALTH_STATUS_BLOCKED, HEALTH_STATUS_DEAD, HEALTH_STATUS_MISSING,
+    }:
+        return
+    raise SnapshotRejectedError(status, result.get("reason") or status)
+
+
 def create_snapshot(
     url: str,
     filepath: str,
@@ -268,6 +327,7 @@ def create_snapshot(
     config = get_snapshot_config(url, username=username)
     if config and content_type:
         config["_response_content_type"] = content_type
+    _reject_by_health(url, config, username)
     # Pre-flight: for auto-type cookie sites without cookies, acquire via browser first.
     try:
         cookie_config = config.get("cookie") if config else {}

@@ -458,7 +458,7 @@ def _apply_filters(
             query_set = query_set.filter(date_deleted__gt=search.deleted_since)
 
     # Filter by search query
-    if profile.legacy_search:
+    if profile.uses_legacy_search:
         parsed_query = parse_query_string(search.q)
         query_set = _filter_search_query_legacy(query_set, search.q, profile)
         # 在 legacy 模式下保留 field-term 查询能力
@@ -731,18 +731,19 @@ def _base_bookmarks_query(
                 )
             )
 
+            descending = search.sort == BookmarkSearch.SORT_TITLE_DESC
             # For SQLite, if the ICU extension is loaded, use the custom collation
             # loaded into the connection. This results in an improved sort order for
             # unicode characters (umlauts, etc.)
+            # 方向写在排序项上，不用 order_by().reverse()：reverse() 翻转的是整个查询，
+            # 分组视图要在排序键之前插入分组键，不能被连带翻转。
             if settings.USE_SQLITE and settings.USE_SQLITE_ICU_EXTENSION:
-                order_field = Collate("effective_title", "ICU")
+                collation = Collate("effective_title", "ICU")
+                order_field = collation.desc() if descending else collation.asc()
             else:
-                order_field = "effective_title"
+                order_field = "-effective_title" if descending else "effective_title"
 
-            if search.sort == BookmarkSearch.SORT_TITLE_ASC:
-                query_set = query_set.order_by(order_field)
-            elif search.sort == BookmarkSearch.SORT_TITLE_DESC:
-                query_set = query_set.order_by(order_field).reverse()
+            query_set = query_set.order_by(order_field)
         elif search.sort == BookmarkSearch.SORT_ADDED_ASC:
             query_set = query_set.order_by("date_added")
         elif search.sort == BookmarkSearch.SORT_ADDED_DESC:
@@ -879,6 +880,9 @@ def query_annotations(
     # 聚合排序：根据 group_by 决定主排序和次排序
     if group_by == "bookmark":
         order_fields = ["bookmark__title", sort]
+    elif group_by == "author":
+        # 按书签作者分组（空作者排在最后，由视图归入「未标注作者」组）
+        order_fields = ["bookmark__author", sort]
     elif group_by == "domain":
         # 按 URL 域名分组
         from django.db.models.functions import Lower

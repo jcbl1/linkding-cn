@@ -1,0 +1,40 @@
+{% load i18n %}
+{% comment %}
+左侧「布局」抽屉：列表页显示偏好的唯一入口。桌面端让位、窄屏全宽 + 遮罩。
+两个页签按「页面级设置」与「书签级设置」分，行一律 label 与控件同行、控件右对齐。
+{% endcomment %}
+<aside id="layout-drawer" class="layout-drawer" data-layout-drawer
+       data-save-url="{% url 'linkding:settings.save' %}"
+       data-quick-tags-url="{% url 'linkding:settings.quick_tags_fragment' %}"
+       data-label-quick-tags="{% translate 'Manage quick tags' %}"
+       data-help-quick-tags="{% translate 'Quick tags allow adding one or more specified tags to a bookmark with a single click.' %}§{% translate 'Quick tags can be displayed directly on the bookmark action bar, or collected in a quick tags submenu.' %}§{% translate 'When displayed directly, quick tags can be shown as icons or text.' %}§{% translate 'You can search with English keywords to find more relevant icons.' %}"
+       data-label-close="{% translate 'Close' %}"
+       data-label-more-info="{% translate 'More info' %}"
+       data-label-more-info="{% translate 'More info' %}"
+       aria-label="{% translate 'Layout' %}"
+       aria-hidden="true" inert>
+  {% include 'bookmarks/header/layout_drawer_header.html' %}
+
+  <div class="layout-drawer-tabs" role="tablist" aria-label="{% translate 'Layout' %}">
+    <button type="button" role="tab" class="layout-drawer-tab is-active"
+            id="layout-tab-page" aria-controls="layout-panel-page" aria-selected="true"
+            data-layout-tab="page">{% translate "Page" %}</button>
+    <button type="button" role="tab" class="layout-drawer-tab"
+            id="layout-tab-bookmark" aria-controls="layout-panel-bookmark" aria-selected="false"
+            tabindex="-1" data-layout-tab="bookmark">{% translate "Bookmarks" %}</button>
+  </div>
+
+  <div class="layout-drawer-body" data-layout-scroll>
+    <div class="layout-drawer-panel" role="tabpanel" id="layout-panel-page"
+         aria-labelledby="layout-tab-page" data-layout-panel="page">
+      {% include 'bookmarks/header/layout_drawer_page.html' %}
+    </div>
+    <div class="layout-drawer-panel" role="tabpanel" id="layout-panel-bookmark"
+         aria-labelledby="layout-tab-bookmark" data-layout-panel="bookmark" hidden>
+      {% include 'bookmarks/header/layout_drawer_bookmark.html' %}
+    </div>
+  </div>
+
+</aside>
+{# 遮罩只在窄屏出现；点它不关闭抽屉，关闭只走标题栏的关闭按钮 #}
+<div class="layout-drawer-scrim" aria-hidden="true"></div>

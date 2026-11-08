@@ -22,6 +22,7 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
+from django.views.decorators.http import require_POST
 
 from bookmarks import queries, utils
 from bookmarks.forms import BookmarkForm
@@ -36,6 +37,9 @@ from bookmarks.middlewares import (
 from bookmarks.models import (
     Bookmark,
     BookmarkSearch,
+    BookmarkSearchForm,
+    GlobalSettings,
+    GlobalSettingsForm,
     UserProfile,
 )
 from bookmarks.services import assets as asset_actions
@@ -45,14 +49,18 @@ from bookmarks.services import (
     tasks,
 )
 from bookmarks.services.bookmarks import (
+    METADATA_EDIT_LIMIT,
     archive_bookmark,
     archive_bookmarks,
+    bulk_edit_metadata,
     create_html_articles,
     create_html_snapshots,
     delete_bookmarks,
     enrich_bookmarks_metadata,
     mark_bookmarks_as_read,
     mark_bookmarks_as_unread,
+    parse_metadata_ops,
+    preview_metadata_edits,
     refresh_bookmarks_favicons,
     refresh_bookmarks_metadata,
     remove_all_html_articles,
@@ -71,20 +79,18 @@ from bookmarks.services.bookmarks import (
 from bookmarks.type_defs import HttpRequest
 from bookmarks.utils import get_safe_return_url
 from bookmarks.views import access, contexts, partials, turbo
+from bookmarks.views.sidebar_content import (
+    SIDEBAR_SCOPE_BOOKMARKS,
+    SIDEBAR_MODULE_TEMPLATES,
+    enabled_module_keys,
+    sidebar_module_state,
+)
 from bookmarks.views.health_check import (
     get_active_check_job,
     start_ids_job,
 )
 
 logger = logging.getLogger(__name__)
-
-SIDEBAR_MODULE_TEMPLATES = {
-    UserProfile.SIDEBAR_MODULE_SUMMARY: "bookmarks/sidebar/modules/summary/index.html",
-    UserProfile.SIDEBAR_MODULE_BUNDLES: "bookmarks/sidebar/modules/bundles/index.html",
-    UserProfile.SIDEBAR_MODULE_DOMAINS: "bookmarks/sidebar/modules/domains/index.html",
-    UserProfile.SIDEBAR_MODULE_TAGS: "bookmarks/sidebar/modules/tags/index.html",
-    UserProfile.SIDEBAR_MODULE_AUTHORS: "bookmarks/sidebar/modules/authors/index.html",
-}
 
 
 def _build_sidebar_modules(request: HttpRequest, context: dict) -> list[dict]:
@@ -270,6 +276,8 @@ def index(request: HttpRequest):
     )
     create_bundle_query_string = _get_create_bundle_query_string(search)
     bookmark_list = contexts.ActiveBookmarkListContext(request, search)
+    if _is_list_partial_request(request):
+        return _render_list_partial(request, bookmark_list)
     sidebar_summary = contexts.SidebarUserSummaryContext(request, search)
     bundles = contexts.BundlesContext(request)
     domains = contexts.ActiveDomainsContext(request, search)
@@ -285,6 +293,7 @@ def index(request: HttpRequest):
         {
             "page_title": _("Bookmarks - Linkding"),
             "bookmark_list": bookmark_list,
+            "sort_choices": BookmarkSearchForm.SORT_CHOICES,
             "sidebar_summary": sidebar_summary,
             "bundles": bundles,
             "domains": domains,
@@ -294,6 +303,32 @@ def index(request: HttpRequest):
             "create_bundle_query_string": create_bundle_query_string,
         },
     )
+
+
+# 布局抽屉改完偏好后只换列表：请求页面自己的 URL 并带上这个头，
+# 页面里只渲染列表容器。片段与页面共用同一个地址，片段内的链接才不会再指回一个
+# 只有列表的端点（分页器按 request.path 生成链接）。
+LIST_PARTIAL_HEADER = "X-LD-List-Partial"
+
+
+def _is_list_partial_request(request: HttpRequest) -> bool:
+    return request.headers.get(LIST_PARTIAL_HEADER) == "1"
+
+
+def _render_list_partial(request: HttpRequest, bookmark_list):
+    response = render(
+        request,
+        "bookmarks/list/container.html",
+        {
+            "bookmark_list": bookmark_list,
+            "is_trash_page": getattr(bookmark_list, "is_trash_page", False),
+            "sticky_pagination": request.user_profile.sticky_pagination,
+            "active_check_job": get_active_check_job(request.user),
+        },
+    )
+    # 同一个 URL 有两种表示，不能让缓存把片段发给整页导航
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @login_required
@@ -318,6 +353,8 @@ def archived(request: HttpRequest):
     )
     create_bundle_query_string = _get_create_bundle_query_string(search)
     bookmark_list = contexts.ArchivedBookmarkListContext(request, search)
+    if _is_list_partial_request(request):
+        return _render_list_partial(request, bookmark_list)
     bundles = contexts.BundlesContext(request)
     domains = contexts.ArchivedDomainsContext(request, search)
     tag_cloud = contexts.ArchivedTagCloudContext(request, search)
@@ -332,6 +369,7 @@ def archived(request: HttpRequest):
         {
             "page_title": _("Archived bookmarks - Linkding"),
             "bookmark_list": bookmark_list,
+            "sort_choices": BookmarkSearchForm.SORT_CHOICES,
             "bundles": bundles,
             "domains": domains,
             "tag_cloud": tag_cloud,
@@ -363,6 +401,8 @@ def shared(request: HttpRequest):
     )
     create_bundle_query_string = _get_create_bundle_query_string(search)
     bookmark_list = contexts.SharedBookmarkListContext(request, search)
+    if _is_list_partial_request(request):
+        return _render_list_partial(request, bookmark_list)
     domains = contexts.SharedDomainsContext(request, search)
     tag_cloud = contexts.SharedTagCloudContext(request, search)
     author_cloud = contexts.SharedAuthorCloudContext(request, search)
@@ -379,6 +419,7 @@ def shared(request: HttpRequest):
         {
             "page_title": _("Shared bookmarks - Linkding"),
             "bookmark_list": bookmark_list,
+            "sort_choices": BookmarkSearchForm.SORT_CHOICES,
             "domains": domains,
             "tag_cloud": tag_cloud,
             "author_cloud": author_cloud,
@@ -417,6 +458,8 @@ def trashed(request: HttpRequest):
     )
     create_bundle_query_string = _get_create_bundle_query_string(search)
     bookmark_list = contexts.TrashedBookmarkListContext(request, search)
+    if _is_list_partial_request(request):
+        return _render_list_partial(request, bookmark_list)
     bundles = contexts.BundlesContext(request)
     domains = contexts.TrashedDomainsContext(request, search)
     tag_cloud = contexts.TrashedTagCloudContext(request, search)
@@ -424,6 +467,11 @@ def trashed(request: HttpRequest):
     bookmark_details = contexts.get_details_context(
         request, contexts.TrashedBookmarkDetailsContext
     )
+    deleted_date_label = _("Date deleted")
+    sort_choices = [
+        (BookmarkSearch.SORT_DELETED_ASC, f"{deleted_date_label} ↑"),
+        (BookmarkSearch.SORT_DELETED_DESC, f"{deleted_date_label} ↓"),
+    ] + list(BookmarkSearchForm.SORT_CHOICES)
 
     return render_bookmarks_view(
         request,
@@ -431,6 +479,7 @@ def trashed(request: HttpRequest):
         {
             "page_title": _("Trash - Linkding"),
             "bookmark_list": bookmark_list,
+            "sort_choices": sort_choices,
             "bundles": bundles,
             "domains": domains,
             "tag_cloud": tag_cloud,
@@ -478,6 +527,14 @@ def render_bookmarks_view(request: HttpRequest, template_name, context):
     context["domain_config_fingerprint"] = hashlib.md5(raw.encode()).hexdigest()[:12] if raw else "default"
     
     context["sidebar_modules"] = _build_sidebar_modules(request, context)
+    context["sidebar_module_state"] = sidebar_module_state(
+        request.user_profile, SIDEBAR_SCOPE_BOOKMARKS
+    )
+    if context.get("sidebar_lazy_load"):
+        # 懒加载占位只列 key：内容由 /sidebar-content 按同一顺序补齐
+        context["sidebar_lazy_modules"] = ",".join(
+            enabled_module_keys(request.user_profile, SIDEBAR_SCOPE_BOOKMARKS)
+        )
 
     # 活跃健康检查任务（供前端轮询、完成时 toast 通知）
 
@@ -486,6 +543,17 @@ def render_bookmarks_view(request: HttpRequest, template_name, context):
         context["active_check_job"] = get_active_check_job(request.user)
 
     profile = request.user_profile
+    # 抽屉里的语言分段控件：与设置页同一套「常用语言 + 其他」逻辑
+    from bookmarks.views.settings import build_language_segment_context
+
+    for key, value in build_language_segment_context(profile).items():
+        context.setdefault(key, value)
+
+    # 抽屉「预取内部链接」是全局设置，只有超级管理员能改
+    if request.user.is_superuser:
+        context.setdefault(
+            "global_settings_form", GlobalSettingsForm(instance=GlobalSettings.get())
+        )
     context.setdefault("show_sidebar", profile.show_sidebar)
     context.setdefault("sticky_side_panel", profile.sticky_side_panel)
     context.setdefault("sticky_pagination", profile.sticky_pagination)
@@ -1066,6 +1134,87 @@ def trashed_action(request: HttpRequest):
     return utils.redirect_with_query(request, reverse("linkding:bookmarks.trashed"))
 
 
+def _resolve_bulk_selection(request: HttpRequest, query: QuerySet[Bookmark]) -> list:
+    if request.POST.get("bulk_select_across") == "on":
+        # Query full list of bookmarks across all pages
+        bookmark_ids = list(query.only("id").values_list("id", flat=True))
+        # Exclude bookmarks that were explicitly unchecked while selecting all
+        exclude_ids = {
+            int(x)
+            for x in request.POST.getlist("bulk_exclude_id")
+            if x.lstrip("-").isdigit()
+        }
+        if exclude_ids:
+            bookmark_ids = [i for i in bookmark_ids if i not in exclude_ids]
+    else:
+        # Use only selected bookmarks
+        bookmark_ids = request.POST.getlist("bookmark_id")
+
+    # Guard against duplicate ids: the bulk edit form submits checkboxes
+    # together with injected hidden fields for selections on other pages,
+    # so the same id can arrive twice. Deduplicate to keep toast counts
+    # and job totals accurate.
+    return list(dict.fromkeys(bookmark_ids))
+
+
+def _metadata_edit_message(stats: dict) -> str:
+    labels = {
+        "title": _("Title"),
+        "description": _("Description"),
+        "author": _("Author"),
+        "notes": _("Notes"),
+    }
+    details = [
+        f"{label} {stats['fields'].get(field, 0)}"
+        for field, label in labels.items()
+        if stats["fields"].get(field, 0)
+    ]
+
+    tags = stats["tags"]
+    if tags["added"]:
+        details.append(f"{_('Tags')} +{tags['added']}")
+    if tags["removed"]:
+        details.append(f"{_('Tags')} -{tags['removed']}")
+    if tags["cleared"]:
+        details.append(f"{_('Tags cleared')} {tags['cleared']}")
+
+    if not details:
+        return _("No metadata was changed.")
+
+    return _("Updated %(count)s bookmarks: %(details)s") % {
+        "count": stats["updated"],
+        "details": ", ".join(details),
+    }
+
+
+@login_required
+@require_POST
+def metadata_preview(request: HttpRequest):
+    mode = request.POST.get("mode", "index")
+    search = BookmarkSearch.from_request(
+        request, request.GET, request.user_profile.search_preferences
+    )
+    if mode == "archived":
+        query = queries.query_archived_bookmarks(
+            request.user, request.user_profile, search
+        )
+    else:
+        query = queries.query_bookmarks(request.user, request.user_profile, search)
+
+    bookmark_ids = _resolve_bulk_selection(request, query)
+    ops = parse_metadata_ops(request.POST.get("bulk_metadata_ops"))
+    stats = preview_metadata_edits(bookmark_ids, ops, request.user)
+
+    return JsonResponse(
+        {
+            "stats": stats,
+            "count": len(bookmark_ids),
+            "limit": METADATA_EDIT_LIMIT,
+            "exceeded": len(bookmark_ids) > METADATA_EDIT_LIMIT,
+        }
+    )
+
+
 def handle_action(request: HttpRequest, query: QuerySet[Bookmark] = None):
     # Single bookmark actions
     if "archive" in request.POST:
@@ -1106,27 +1255,7 @@ def handle_action(request: HttpRequest, query: QuerySet[Bookmark] = None):
 
         bulk_action = request.POST["bulk_action"]
 
-        # Determine set of bookmarks
-        if request.POST.get("bulk_select_across") == "on":
-            # Query full list of bookmarks across all pages
-            bookmark_ids = list(query.only("id").values_list("id", flat=True))
-            # Exclude bookmarks that were explicitly unchecked while selecting all
-            exclude_ids = {
-                int(x)
-                for x in request.POST.getlist("bulk_exclude_id")
-                if x.lstrip("-").isdigit()
-            }
-            if exclude_ids:
-                bookmark_ids = [i for i in bookmark_ids if i not in exclude_ids]
-        else:
-            # Use only selected bookmarks
-            bookmark_ids = request.POST.getlist("bookmark_id")
-
-        # Guard against duplicate ids: the bulk edit form submits checkboxes
-        # together with injected hidden fields for selections on other pages,
-        # so the same id can arrive twice. Deduplicate to keep toast counts
-        # and job totals accurate.
-        bookmark_ids = list(dict.fromkeys(bookmark_ids))
+        bookmark_ids = _resolve_bulk_selection(request, query)
 
         if bulk_action == "bulk_archive":
             return archive_bookmarks(bookmark_ids, request.user)
@@ -1152,6 +1281,28 @@ def handle_action(request: HttpRequest, query: QuerySet[Bookmark] = None):
             return enrich_bookmarks_metadata(bookmark_ids, request.user)
         if bulk_action == "bulk_refresh_metadata":
             return refresh_bookmarks_metadata(bookmark_ids, request.user)
+        if bulk_action == "bulk_edit_metadata":
+            # 超限直接整体拒绝：不可逆改写不能以"只改了一部分"收场
+            if len(bookmark_ids) > METADATA_EDIT_LIMIT:
+                messages.error(
+                    request,
+                    _(
+                        "Selected %(count)s bookmarks exceed the limit of %(limit)s. Narrow the selection and try again."
+                    )
+                    % {"count": len(bookmark_ids), "limit": METADATA_EDIT_LIMIT},
+                )
+            else:
+                ops = parse_metadata_ops(request.POST.get("bulk_metadata_ops"))
+                stats = bulk_edit_metadata(bookmark_ids, ops, request.user)
+                if stats["updated"]:
+                    messages.success(request, _metadata_edit_message(stats))
+                else:
+                    messages.info(request, _metadata_edit_message(stats))
+
+            return redirect(
+                request.META.get("HTTP_REFERER")
+                or reverse("linkding:bookmarks.index")
+            )
         if bulk_action == "bulk_refresh_favicon":
             return refresh_bookmarks_favicons(bookmark_ids, request.user)
         if bulk_action == "bulk_trash":

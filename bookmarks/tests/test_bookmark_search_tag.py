@@ -187,7 +187,7 @@ class BookmarkSearchTagTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         url = "/test"
         rendered_template = self.render_template(url)
         soup = self.make_soup(rendered_template)
-        button = soup.select_one("button[aria-label='Search preferences']")
+        button = soup.select_one(".search-options button")
 
         self.assertNotIn("badge", button["class"])
 
@@ -195,7 +195,7 @@ class BookmarkSearchTagTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         url = "/test?sort=title_asc"
         rendered_template = self.render_template(url)
         soup = self.make_soup(rendered_template)
-        button = soup.select_one("button[aria-label='Search preferences']")
+        button = soup.select_one(".search-options button")
 
         self.assertIn("badge", button["class"])
 
@@ -203,7 +203,7 @@ class BookmarkSearchTagTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         url = "/test?q=foo&user=john"
         rendered_template = self.render_template(url)
         soup = self.make_soup(rendered_template)
-        button = soup.select_one("button[aria-label='Search preferences']")
+        button = soup.select_one(".search-options button")
 
         self.assertNotIn("badge", button["class"])
 
@@ -213,26 +213,26 @@ class BookmarkSearchTagTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         rendered_template = self.render_template(url)
 
         self.assertUnmodifiedLabel(rendered_template, "Sort by")
-        self.assertUnmodifiedLabel(rendered_template, "Shared filter")
-        self.assertUnmodifiedLabel(rendered_template, "Unread filter")
+        self.assertUnmodifiedLabel(rendered_template, "Shared")
+        self.assertUnmodifiedLabel(rendered_template, "Unread")
 
         # Modified sort
         url = "/test?sort=title_asc"
         rendered_template = self.render_template(url)
         self.assertModifiedLabel(rendered_template, "Sort by")
-        self.assertUnmodifiedLabel(rendered_template, "Shared filter")
-        self.assertUnmodifiedLabel(rendered_template, "Unread filter")
+        self.assertUnmodifiedLabel(rendered_template, "Shared")
+        self.assertUnmodifiedLabel(rendered_template, "Unread")
 
         # Modified shared
         url = "/test?shared=yes"
         rendered_template = self.render_template(url)
         self.assertUnmodifiedLabel(rendered_template, "Sort by")
-        self.assertModifiedLabel(rendered_template, "Shared filter")
-        self.assertUnmodifiedLabel(rendered_template, "Unread filter")
+        self.assertModifiedLabel(rendered_template, "Shared")
+        self.assertUnmodifiedLabel(rendered_template, "Unread")
 
         # Modified unread
         url = "/test?unread=yes"
         rendered_template = self.render_template(url)
         self.assertUnmodifiedLabel(rendered_template, "Sort by")
-        self.assertUnmodifiedLabel(rendered_template, "Shared filter")
-        self.assertModifiedLabel(rendered_template, "Unread filter")
+        self.assertUnmodifiedLabel(rendered_template, "Shared")
+        self.assertModifiedLabel(rendered_template, "Unread")

@@ -3,14 +3,15 @@ import calendar
 import json
 import re
 import urllib.parse
+from collections import Counter
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.core.paginator import Paginator
 from django.db import models
-from django.db.models import Count
-from django.db.models.functions import TruncDate
+from django.db.models import Case, Count, Q, Subquery, When
+from django.db.models.functions import TruncDate, TruncMonth
 from django.http import Http404, QueryDict
 from django.urls import reverse
 from django.utils import timezone
@@ -88,9 +89,7 @@ def _is_health_stale(checked_at: str, max_age_days: int) -> bool:
 def _health_status_display(health_status) -> str:
     """NULL（未检查）派生为 unknown，其余映射 CHOICES 显示名。"""
     if health_status is None:
-        return dict(HEALTH_STATUS_CHOICES).get(
-            HEALTH_STATUS_UNKNOWN, "Unknown"
-        )
+        return dict(HEALTH_STATUS_CHOICES).get(HEALTH_STATUS_UNKNOWN, "Unknown")
     return dict(HEALTH_STATUS_CHOICES).get(health_status, health_status)
 
 
@@ -120,6 +119,210 @@ def _bookmark_group_key(date_added) -> str:
     if d.year == today.year and d.month == today.month:
         return "this_month"
     return d.strftime("%Y-%m")
+
+
+_GROUP_SUB_KEYS = ("today", "yesterday", "this_week", "this_month")
+
+# 这些排序会给查询加聚合注解（并且 JOIN annotations），组计数不能直接在其上聚合
+_AGGREGATE_SORTS = (
+    BookmarkSearch.SORT_HIGHLIGHTS_ASC,
+    BookmarkSearch.SORT_HIGHLIGHTS_DESC,
+    BookmarkSearch.SORT_ANNOTATIONS_ASC,
+    BookmarkSearch.SORT_ANNOTATIONS_DESC,
+)
+
+
+def _bookmark_group_interval(key: str, today: date, tzinfo):
+    """分组键 → 本地时间区间 [start, end)，end 为 None 表示只有下界。
+
+    区间必须和 _bookmark_group_key 的判定逐条对齐，否则同一个组会被拆到两个
+    排序位置上。
+    """
+    monday = today - timedelta(days=today.weekday())
+
+    def at_midnight(day):
+        return datetime.combine(day, datetime.min.time(), tzinfo=tzinfo)
+
+    if key == "today":
+        return at_midnight(today), at_midnight(today + timedelta(days=1))
+    if key == "yesterday":
+        return at_midnight(today - timedelta(days=1)), at_midnight(today)
+    if key == "this_week":
+        # 周一及以后、且不属于今天/昨天的都算 this_week（含未来日期），故只有下界，
+        # 互斥靠 CASE 里先排 today / yesterday
+        return at_midnight(monday), None
+    if key == "this_month":
+        return at_midnight(today.replace(day=1)), at_midnight(monday)
+
+    year, month = (int(part) for part in key.split("-"))
+    next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return at_midnight(date(year, month, 1)), at_midnight(
+        date(next_year, next_month, 1)
+    )
+
+
+def _bookmark_group_order_keys(search: BookmarkSearch, ordered_keys):
+    """分组键前置到排序键之前，组内再按所选排序。
+
+    - 按条数排（见 _group_order_by_size）：用「分组区间 → 组序号」的 CASE，序号与
+      ordered_keys 一一对应，组序因此只在一处定义。
+    - 按日期排且排序本身就是添加时间：原排序已经满足组序，不加键（保留索引路径）。
+    - 按日期排但排序是别的字段：补「月 + 组内秩」两个键（秩 0=today … 3=this_month、
+      4=更早的自然月），把同组聚成连续一段。
+    """
+    if _group_order_by_size(search):
+        whens = []
+        for position, key in enumerate(ordered_keys):
+            condition = _bookmark_group_condition(key)
+            if condition is not None:
+                whens.append(When(condition, then=position))
+        position_key = Case(
+            *whens, default=len(ordered_keys), output_field=models.IntegerField()
+        )
+        return [position_key.asc()]
+
+    if search.sort in (
+        BookmarkSearch.SORT_ADDED_ASC,
+        BookmarkSearch.SORT_ADDED_DESC,
+    ):
+        return []
+
+    return _bookmark_group_date_keys(search.sort == BookmarkSearch.SORT_ADDED_ASC)
+
+
+def _bookmark_group_condition(key: str):
+    """分组键 → Q 条件，认不出（区间为空）时返回 None。"""
+    today = timezone.localdate()
+    start, end = _bookmark_group_interval(key, today, timezone.get_current_timezone())
+    if end is not None and start >= end:
+        return None
+    condition = Q(date_added__gte=start)
+    if end is not None:
+        condition &= Q(date_added__lt=end)
+    return condition
+
+
+def _bookmark_group_date_keys(ascending: bool):
+    month = TruncMonth("date_added", tzinfo=timezone.get_current_timezone())
+    rank = _bookmark_group_rank()
+    if ascending:
+        return [month.asc(), rank.desc()]
+    return [month.desc(), rank.asc()]
+
+
+def _bookmark_group_sort_order(search: BookmarkSearch, group_counts):
+    """分组的先后顺序（唯一真相）：先按日期序排，再按条数稳定排序。
+
+    日期序默认新组在前、added_asc 时老组在前；按条数排时同数保留日期序。
+    """
+    ascending = search.sort == BookmarkSearch.SORT_ADDED_ASC
+    ordered = sorted(
+        group_counts, key=lambda key: _bookmark_group_date_order(key, ascending)
+    )
+    if _group_order_by_size(search):
+        ordered.sort(key=lambda key: -group_counts[key])
+    return ordered
+
+
+def _bookmark_group_date_order(key: str, ascending: bool):
+    """分组键在日期序中的位置，口径与 _bookmark_group_date_keys 一致。"""
+    if key in _GROUP_SUB_KEYS:
+        rank = _GROUP_SUB_KEYS.index(key)
+        return (1, -rank) if ascending else (0, rank)
+    year, month = (int(part) for part in key.split("-"))
+    month_index = year * 12 + month
+    return (0, month_index) if ascending else (1, -month_index)
+
+
+def _bookmark_group_counts(query_set, search: BookmarkSearch) -> Counter:
+    """各组在完整结果集里的条数。
+
+    在 SQL 里聚合，不把每行拉进 Python。清掉排序是因为 values()+annotate() 会把
+    order_by 的字段带进 GROUP BY；按高亮/批注数排序时查询还带聚合注解和
+    annotations 的 JOIN，直接聚合会重复计数，改走一层 id 子查询。
+    """
+    base = query_set.order_by()
+    if search.sort in _AGGREGATE_SORTS:
+        base = Bookmark.objects.filter(
+            id__in=Subquery(query_set.order_by().values("id"))
+        )
+
+    rows = (
+        base.annotate(
+            _group_month=TruncMonth(
+                "date_added", tzinfo=timezone.get_current_timezone()
+            ),
+            _group_rank=_bookmark_group_rank(),
+        )
+        .values("_group_month", "_group_rank")
+        .annotate(total=Count("id"))
+        .values_list("_group_month", "_group_rank", "total")
+    )
+    counts = Counter()
+    for month, rank, total in rows:
+        key = _GROUP_SUB_KEYS[rank] if rank < len(_GROUP_SUB_KEYS) else f"{month:%Y-%m}"
+        counts[key] += total
+    return counts
+
+
+def _bookmark_group_rank():
+    """分组键的秩：0=today … 3=this_month、4=更早的自然月（靠月份键区分）。"""
+    today = timezone.localdate()
+    tz = timezone.get_current_timezone()
+
+    def at_midnight(day):
+        return datetime.combine(day, datetime.min.time(), tzinfo=tz)
+
+    return Case(
+        When(date_added__gte=at_midnight(today), then=0),
+        When(date_added__gte=at_midnight(today - timedelta(days=1)), then=1),
+        When(
+            date_added__gte=at_midnight(today - timedelta(days=today.weekday())), then=2
+        ),
+        When(date_added__gte=at_midnight(today.replace(day=1)), then=3),
+        default=4,
+        output_field=models.IntegerField(),
+    )
+
+
+# 判定「结果被筛过」的参数（排序、分页、集内浏览不算）
+_GROUP_FILTER_KEYS = (
+    "q",
+    "shared",
+    "unread",
+    "tagged",
+    "date_filter_by",
+    "date_filter_start",
+    "date_filter_end",
+    "modified_since",
+    "added_since",
+    "deleted_since",
+    "html_snapshot",
+    "preview_image",
+    "favicon",
+    "highlight",
+    "annotation",
+    "health_status",
+)
+
+
+def _search_has_filters(search: BookmarkSearch) -> bool:
+    return any(
+        getattr(search, key) != BookmarkSearch.defaults[key]
+        for key in _GROUP_FILTER_KEYS
+    )
+
+
+def _group_order_by_size(search: BookmarkSearch) -> bool:
+    """组序按组内条数降序（把命中最多的组提到最前）。
+
+    只在结果被筛过、且排序不是按添加时间时启用：按添加时间排时列表本身就是时间序，
+    组序必须跟着时间走，否则组间与组内两条时间线会互相矛盾。
+    """
+    return _search_has_filters(search) and search.sort not in (
+        BookmarkSearch.SORT_ADDED_ASC,
+        BookmarkSearch.SORT_ADDED_DESC,
+    )
 
 
 from bookmarks.views import access
@@ -176,7 +379,7 @@ class RequestContext:
         self.query_is_valid = True
         self.query_error_message = None
         self.search_expression = None
-        if not request.user_profile.legacy_search:
+        if not request.user_profile.uses_legacy_search:
             try:
                 self.search_expression = parse_search_query(request.GET.get("q"))
             except SearchQueryParseError as e:
@@ -321,7 +524,9 @@ class BookmarkItem:
         )
         self.health_checked_at = _health_details.get("checked_at", "")
         self.health_http_status = _health_details.get("http_status")
-        self.health_checked_at_display = format_health_checked_at(self.health_checked_at)
+        self.health_checked_at_display = format_health_checked_at(
+            self.health_checked_at
+        )
         self.health_status_display = _health_status_display(self.health_status)
         self.health_stale = _is_health_stale(
             self.health_checked_at, profile.health_max_age
@@ -329,7 +534,9 @@ class BookmarkItem:
         self.health_display_status = (
             HEALTH_STATUS_UNKNOWN if self.health_stale else self.health_status
         )
-        self.health_display_status_display = _health_status_display(self.health_display_status)
+        self.health_display_status_display = _health_status_display(
+            self.health_display_status
+        )
         self.details_url = context.details(bookmark.id)
         self.highlight_count = getattr(bookmark, "annotation_count", 0)
         self.annotation_note_count = getattr(bookmark, "annotation_note_count", 0)
@@ -1376,6 +1583,44 @@ class SidebarUserSummaryContext:
         return base_url + "?" + encoded_params if encoded_params else base_url
 
 
+# 列表视图注册表：新增视图只改这里 + 加一个模板。template 是该视图的完整模板，
+# settings 是布局菜单在该视图下展示的偏好项（与视图无关的项对所有视图都生效）。
+_VIEW_SETTINGS_COMMON = {
+    "theme",
+    "bookmark_view_mode",
+    "group_by_date",
+    "items_per_page",
+    "show_sidebar",
+    "enable_random_button",
+    "random_mode",
+    "random_target",
+    "sticky_header_controls",
+    "sticky_pagination",
+}
+
+BOOKMARK_VIEWS = {
+    UserProfile.BOOKMARK_VIEW_MODE_LIST: {
+        "template": "bookmarks/list/views/list.html",
+        "settings": _VIEW_SETTINGS_COMMON
+        | {"enable_preview_images", "bookmark_toolbar_auto_hide"},
+    },
+    UserProfile.BOOKMARK_VIEW_MODE_COMPACT: {
+        "template": "bookmarks/list/views/compact.html",
+        "settings": _VIEW_SETTINGS_COMMON,
+    },
+    UserProfile.BOOKMARK_VIEW_MODE_TABLE: {
+        "template": "bookmarks/list/views/table.html",
+        "settings": _VIEW_SETTINGS_COMMON,
+        # 列配置：服务端首帧即按「基准宽 + 权重」渲染，避免加载后列宽跳变
+        "columns": True,
+        # 高亮数/批注数列需要聚合计数
+        "needs_annotation_counts": True,
+        # 行高 34px，文字按钮会把悬停操作栏撑宽盖住末列，强制图标模式
+        "force_icon_actions": True,
+    },
+}
+
+
 class BookmarkListContext:
     request_context = RequestContext
 
@@ -1389,7 +1634,31 @@ class BookmarkListContext:
         self.query_is_valid = request_context.query_is_valid
         self.query_error_message = request_context.query_error_message
 
+        self.view_mode = (
+            user_profile.bookmark_view_mode
+            if user_profile.bookmark_view_mode
+            in (
+                UserProfile.BOOKMARK_VIEW_MODE_LIST,
+                UserProfile.BOOKMARK_VIEW_MODE_COMPACT,
+                UserProfile.BOOKMARK_VIEW_MODE_TABLE,
+            )
+            else UserProfile.BOOKMARK_VIEW_MODE_LIST
+        )
+        self.view = BOOKMARK_VIEWS[self.view_mode]
+
         query_set = request_context.get_bookmark_query_set(self.search)
+        # 分组优先于排序：组序由 _bookmark_group_sort_order 决定（筛过按条数降序，
+        # 否则按日期序），组内再按所选排序。组头计数、「第 x-y 条 / 共 N 条」都建立
+        # 在「同组连续」这个前提上。
+        self.group_by_date = user_profile.group_by_date
+        group_counts = Counter()
+        group_order = []
+        if self.group_by_date:
+            group_counts = _bookmark_group_counts(query_set, self.search)
+            group_order = _bookmark_group_sort_order(self.search, group_counts)
+            group_keys = _bookmark_group_order_keys(self.search, group_order)
+            if group_keys:
+                query_set = query_set.order_by(*group_keys, *query_set.query.order_by)
         page_number = request.GET.get("page")
         paginator = Paginator(query_set, user_profile.items_per_page)
         bookmarks_page = paginator.get_page(page_number)
@@ -1400,7 +1669,7 @@ class BookmarkListContext:
         needs_annotation_counts = (
             user_profile.bookmark_date_route
             == UserProfile.BOOKMARK_DATE_ROUTE_HIGHLIGHTS
-            or user_profile.bookmark_view_mode == UserProfile.BOOKMARK_VIEW_MODE_TABLE
+            or self.view.get("needs_annotation_counts", False)
         )
         if needs_annotation_counts and bookmarks_page.object_list:
             from django.db.models import Count, Q
@@ -1430,26 +1699,21 @@ class BookmarkListContext:
         ]
         # 表格视图下日期是列，分组头与它抢同一层语义 → 自动关闭
         # 日期分组在表格视图同样生效：组头行跨全行渲染
-        self.group_by_date = user_profile.group_by_date
-        # 组计数：总数统计自完整结果集（跨页），本页数量用于判断是否需要翻页引导
+        # 组计数：总数统计自完整结果集（跨页），本页数量用于判断是否需要翻页引导。
+        # 组起点由「组序 + 各组条数」累加得出，不必再扫一遍结果集。
         if self.group_by_date:
-            from collections import Counter
-
             page_counts = Counter(item.group_key for item in self.items)
             group_starts = {}
-            total_counts = Counter()
-            for idx, added in enumerate(query_set.values_list("date_added", flat=True)):
-                key = _bookmark_group_key(added)
-                total_counts[key] += 1
-                if key not in group_starts:
-                    # 该组第一条在完整结果集中的全局序号（1-based）
-                    group_starts[key] = idx + 1
+            position = 1
+            for key in group_order:
+                group_starts[key] = position
+                position += group_counts[key]
             # 本页第一条的全局序号；组首条之前的条目数即其在 items 中的下标
             page_start = bookmarks_page.start_index()
             seen_keys = set()
             for page_idx, item in enumerate(self.items):
                 key = item.group_key
-                item.group_total = total_counts[key]
+                item.group_total = group_counts[key]
                 item.group_page_count = page_counts[key]
                 if key not in seen_keys:
                     seen_keys.add(key)
@@ -1468,18 +1732,8 @@ class BookmarkListContext:
         self.date_display = user_profile.bookmark_date_display
         self.date_route = user_profile.bookmark_date_route
         self.description_display = user_profile.bookmark_description_display
-        self.view_mode = (
-            user_profile.bookmark_view_mode
-            if user_profile.bookmark_view_mode
-            in (
-                UserProfile.BOOKMARK_VIEW_MODE_LIST,
-                UserProfile.BOOKMARK_VIEW_MODE_COMPACT,
-                UserProfile.BOOKMARK_VIEW_MODE_TABLE,
-            )
-            else UserProfile.BOOKMARK_VIEW_MODE_LIST
-        )
         self.description_max_lines = user_profile.bookmark_description_max_lines
-        if self.view_mode == UserProfile.BOOKMARK_VIEW_MODE_TABLE:
+        if self.view.get("columns"):
             self.table_columns = user_profile.get_bookmark_table_columns()
             # 首帧即按「基准宽 + 权重」渲染，与前端同源，避免加载后列宽跳变
             self.table_columns_grid = " ".join(
@@ -1508,12 +1762,20 @@ class BookmarkListContext:
                     continue
                 asc_key, desc_key = pair
                 if current_sort == asc_key:
-                    column["sort_dir"], column["sort_url"] = "asc", _table_sort_query(self.request, desc_key)
+                    column["sort_dir"], column["sort_url"] = (
+                        "asc",
+                        _table_sort_query(self.request, desc_key),
+                    )
                 elif current_sort == desc_key:
-                    column["sort_dir"], column["sort_url"] = "desc", _table_sort_query(self.request, asc_key)
+                    column["sort_dir"], column["sort_url"] = (
+                        "desc",
+                        _table_sort_query(self.request, asc_key),
+                    )
                 else:
                     column["sort_dir"] = None
-                    column["sort_url"] = _table_sort_query(self.request, asc_key if column["key"] == "title" else desc_key)
+                    column["sort_url"] = _table_sort_query(
+                        self.request, asc_key if column["key"] == "title" else desc_key
+                    )
         self.show_url = user_profile.display_url
         self.action_list = [
             {
@@ -1526,9 +1788,7 @@ class BookmarkListContext:
         self.action_display_mode = user_profile.bookmark_action_display_mode
         self.status_display_mode = user_profile.bookmark_status_display_mode
         self.quick_edit_display_mode = user_profile.bookmark_quick_edit_display_mode
-        if self.view_mode == UserProfile.BOOKMARK_VIEW_MODE_TABLE:
-            # 表格行高 34px，文字按钮会把悬停操作栏撑到 400px 宽、盖住末列内容；
-            # 表格上下文强制图标模式
+        if self.view.get("force_icon_actions"):
             self.action_display_mode = UserProfile.ACTION_DISPLAY_MODE_ICON
             self.status_display_mode = UserProfile.ACTION_DISPLAY_MODE_ICON
             self.quick_edit_display_mode = UserProfile.ACTION_DISPLAY_MODE_ICON
@@ -1550,6 +1810,16 @@ class BookmarkListContext:
             }
             for item in user_profile.get_bookmark_quick_edits()
         ]
+        # 表格视图隐藏标签列时没有标签单元格可编辑，标签编辑与快捷标签一并关闭，
+        # 否则编辑框会落到描述格里
+        # 只有带列的视图才可能因为隐藏标签列而失去标签编辑入口
+        self.tags_editable = not self.view.get("columns") or (
+            "tags" in [c["key"] for c in self.table_columns]
+        )
+        if not self.tags_editable:
+            self.quick_edit_list = [
+                item for item in self.quick_edit_list if item["key"] != "tags"
+            ]
         self.has_visible_quick_edits = any(
             item["enabled"] for item in self.quick_edit_list
         )
@@ -1564,6 +1834,9 @@ class BookmarkListContext:
             for i, qt in enumerate(quick_tags)
             if qt["enabled"] and qt["tag_names"] and qt["display_position"] == "submenu"
         ]
+        if not self.tags_editable:
+            self.quick_tags_direct = []
+            self.quick_tags_submenu = []
         self.has_quick_tags = bool(self.quick_tags_direct or self.quick_tags_submenu)
         # 为所有快捷标签加载图标 SVG 数据（内存缓存 → 本地文件 → API）
         icon_data_map = {}
@@ -1671,7 +1944,7 @@ class AddTagItem:
         self.tag = tag
         self.name = tag.name
 
-        if context.request.user_profile.legacy_search:
+        if context.request.user_profile.uses_legacy_search:
             self.query_string = self._generate_query_string_legacy(context, tag)
         else:
             self.query_string = self._generate_query_string(context, tag)
@@ -1725,7 +1998,7 @@ class RemoveTagItem:
         self.tag = tag
         self.name = tag.name
 
-        if context.request.user_profile.legacy_search:
+        if context.request.user_profile.uses_legacy_search:
             self.query_string = self._generate_query_string_legacy(context, tag)
         else:
             self.query_string = self._generate_query_string(context, tag)
@@ -2588,7 +2861,9 @@ class BookmarkDetailsContext:
         self.health_reason = _health_reason_display(
             _hd.get("reason", ""), _hd.get("http_status")
         )
-        self.health_checked_at_display = format_health_checked_at(self.health_checked_at)
+        self.health_checked_at_display = format_health_checked_at(
+            self.health_checked_at
+        )
         self.health_status_display = _health_status_display(self.health_status)
         self.health_stale = _is_health_stale(
             self.health_checked_at, user_profile.health_max_age
@@ -2596,7 +2871,9 @@ class BookmarkDetailsContext:
         self.health_display_status = (
             HEALTH_STATUS_UNKNOWN if self.health_stale else self.health_status
         )
-        self.health_display_status_display = _health_status_display(self.health_display_status)
+        self.health_display_status_display = _health_status_display(
+            self.health_display_status
+        )
         self.has_pending_assets = any(
             asset.status == BookmarkAsset.STATUS_PENDING for asset in self.assets
         )
@@ -2710,31 +2987,19 @@ class AuthorCloudContext:
     """侧边栏作者模块：当前搜索范围下按作者聚合计数；支持按计数/名称排序，按首字母分组或平铺"""
 
     request_context = RequestContext
+    # 聚合用的字段路径：书签页是 "author"，高亮页是 "bookmark__author"
+    author_field = "author"
 
-    def __init__(self, request: HttpRequest, search: BookmarkSearch) -> None:
+    def __init__(self, request: HttpRequest, search) -> None:
         self.request = request
         self.search = search
-        self.grouping = request.user_profile.author_grouping
-        self.sort = request.user_profile.author_sort
+        self.grouping, self.sort = self.resolve_mode(request)
         self.mode = UserProfile.author_mode_for(self.grouping, self.sort)
 
         request_context = self.request_context(request)
-        query_set = request_context.get_bookmark_query_set(search)
-
-        if self.sort == UserProfile.AUTHOR_SORT_NAME:
-            ordering = ("author",)
-        else:
-            ordering = ("-count", "author")
-        author_counts = (
-            query_set.exclude(author__isnull=True)
-            .exclude(author="")
-            .values("author")
-            .annotate(count=Count("id"))
-            .order_by(*ordering)
-        )
         items = [
-            AuthorItem(request_context, row["author"], row["count"])
-            for row in author_counts
+            AuthorItem(request_context, row[self.author_field], row["count"])
+            for row in self.get_author_counts(request_context, search)
         ]
 
         self.authors = items
@@ -2758,6 +3023,29 @@ class AuthorCloudContext:
                 self.mode == UserProfile.AUTHOR_MODE_DISABLED,
             ),
         ]
+
+    def resolve_mode(self, request: HttpRequest) -> tuple[str, str]:
+        """当前页面使用的 (grouping, sort)，各页面可覆盖成自己的偏好字段"""
+        return request.user_profile.author_grouping, request.user_profile.author_sort
+
+    def get_author_counts(self, request_context, search):
+        query_set = request_context.get_bookmark_query_set(search)
+        return self.annotate_author_counts(query_set)
+
+    def annotate_author_counts(self, query_set):
+        """按 author_field 聚合计数，并按当前排序方式排序"""
+        field = self.author_field
+        if self.sort == UserProfile.AUTHOR_SORT_NAME:
+            ordering = (field,)
+        else:
+            ordering = ("-count", field)
+        return (
+            query_set.exclude(**{f"{field}__isnull": True})
+            .exclude(**{field: ""})
+            .values(field)
+            .annotate(count=Count("id"))
+            .order_by(*ordering)
+        )
 
     def _build_groups(self, items: list[AuthorItem]) -> list[AuthorGroup]:
         if not items:
@@ -3092,3 +3380,20 @@ class HighlightTagCloudContext:
 
     def get_selected_tags(self):
         return []
+
+
+class HighlightAuthorCloudContext(AuthorCloudContext):
+    """侧边栏作者模块（高亮页）：在当前筛选结果上按作者聚合，计数单位是高亮条数"""
+
+    request_context = HighlightRequestContext
+    author_field = "bookmark__author"
+
+    def resolve_mode(self, request: HttpRequest) -> tuple[str, str]:
+        return UserProfile.author_grouping_sort_for(
+            request.user_profile.highlights_author_mode
+        )
+
+    def get_author_counts(self, request_context, search):
+        return self.annotate_author_counts(
+            _get_filtered_annotation_qs(request_context.request, search)
+        )

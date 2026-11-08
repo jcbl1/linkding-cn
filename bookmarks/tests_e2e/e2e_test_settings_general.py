@@ -74,25 +74,15 @@ class SettingsGeneralE2ETestCase(LinkdingE2ETestCase):
             bookmarks_form.get_by_label("Inline").check()
             expect(max_lines_row).to_be_hidden()
 
-    def test_should_toggle_refresh_favicons_row_from_favicon_switch(self):
-        profile = self.get_or_create_test_user().profile
-        profile.enable_favicons = False
-        profile.save()
-
+    def test_should_show_refresh_favicons_row(self):
         with sync_playwright() as p:
             browser = self.setup_browser(p)
             page = browser.new_page()
             page.goto(self.live_server_url + reverse("linkding:settings.general"))
             self.wait_for_settings_page_behavior(page)
 
-            refresh_row = page.locator("[data-setting-row='refresh_favicons']")
-            expect(refresh_row).to_be_hidden()
-
-            page.get_by_label("Display Favicons").check()
-            expect(refresh_row).to_be_visible()
-
-            page.get_by_label("Display Favicons").uncheck()
-            expect(refresh_row).to_be_hidden()
+            # Favicons 开关已移到书签页的布局侧边栏，设置页只保留刷新入口
+            expect(page.get_by_text("Refresh Favicons")).to_be_visible()
 
     def test_should_restore_long_text_draft_after_theme_reload(self):
         with sync_playwright() as p:

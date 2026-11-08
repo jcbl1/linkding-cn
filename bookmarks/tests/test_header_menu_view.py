@@ -15,81 +15,6 @@ class BookmarkHeaderMenuViewTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         self.assertEqual(response.status_code, 200)
         return self.make_soup(response.content.decode())
 
-    def test_more_menu_lists_actions_before_preferences(self):
-        soup = self.render_index()
-        panel = soup.select_one(".header-more .header-more-panel")
-        self.assertIsNotNone(panel)
-
-        actions = panel.select(".header-menu-action")
-        self.assertEqual(
-            [action.get("data-menu-action") for action in actions],
-            ["bulk-edit", "random-sort"],
-        )
-
-        # 分隔线之后才是显示偏好（只取面板直属的那一条，别撞上偏好组内部的分隔线）
-        self.assertIsNotNone(panel.select_one(":scope > .header-menu-divider"))
-        self.assertIsNotNone(panel.select_one('select[name="theme"]'))
-        self.assertIsNotNone(panel.select_one('select[name="bookmark_view_mode"]'))
-        self.assertIsNotNone(panel.select_one('input[name="items_per_page"]'))
-        self.assertIsNotNone(
-            panel.select_one('input[name="sticky_header_controls"]')
-        )
-        self.assertIsNotNone(panel.select_one('input[name="sticky_pagination"]'))
-
-    def test_more_menu_view_option_matches_profile(self):
-        self.user.profile.bookmark_view_mode = UserProfile.BOOKMARK_VIEW_MODE_COMPACT
-        self.user.profile.save()
-
-        soup = self.render_index()
-        panel = soup.select_one(".header-more .header-more-panel")
-        option = panel.select_one(
-            'select[name="bookmark_view_mode"] option[value="compact"]'
-        )
-        self.assertIsNotNone(option)
-        self.assertTrue(option.has_attr("selected"))
-
-    def test_wide_layout_popover_matches_profile(self):
-        self.user.profile.bookmark_view_mode = UserProfile.BOOKMARK_VIEW_MODE_COMPACT
-        self.user.profile.save()
-
-        soup = self.render_index()
-        popover = soup.select_one(".header-layout .header-more-panel")
-        self.assertIsNotNone(popover)
-        option = popover.select_one(
-            'select[name="bookmark_view_mode"] option[value="compact"]'
-        )
-        self.assertIsNotNone(option)
-        self.assertTrue(option.has_attr("selected"))
-        self.assertIsNotNone(popover.select_one('input[name="items_per_page"]'))
-        self.assertIsNotNone(
-            popover.select_one('input[name="sticky_header_controls"]')
-        )
-        self.assertIsNotNone(
-            popover.select_one('input[name="sticky_pagination"]')
-        )
-
-    def test_random_rows_follow_random_button_and_mode(self):
-        soup = self.render_index()
-        panel = soup.select_one(".header-layout .header-more-panel")
-        self.assertIsNotNone(panel.select_one('select[name="random_mode"]'))
-        # 列表模式下随机目标无意义，行用 hidden 收起（切换模式时由 JS 直接改，不重载）
-        self.assertTrue(
-            panel.select_one('[data-pref-row="random_target"]').has_attr("hidden")
-        )
-
-        self.user.profile.random_mode = UserProfile.RANDOM_MODE_SINGLE
-        self.user.profile.save()
-        panel = self.render_index().select_one(".header-layout .header-more-panel")
-        self.assertFalse(
-            panel.select_one('[data-pref-row="random_target"]').has_attr("hidden")
-        )
-
-        self.user.profile.enable_random_button = False
-        self.user.profile.save()
-        panel = self.render_index().select_one(".header-layout .header-more-panel")
-        self.assertIsNone(panel.select_one('select[name="random_mode"]'))
-        self.assertIsNone(panel.select_one('select[name="random_target"]'))
-
     def test_random_control_renders_both_modes_for_instant_switch(self):
         soup = self.render_index()
         self.assertIsNotNone(soup.select_one("form[data-random-control]:not([hidden])"))
@@ -103,91 +28,16 @@ class BookmarkHeaderMenuViewTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
             soup.select_one("form[data-random-control]").has_attr("hidden")
         )
 
-    def test_collapse_action_only_when_grouped(self):
-        soup = self.render_index()
-        panel = soup.select_one(".header-layout .header-more-panel")
-        self.assertIsNotNone(panel.select_one(".group-toggle-all"))
-
-        self.user.profile.group_by_date = False
-        self.user.profile.save()
-        panel = self.render_index().select_one(".header-layout .header-more-panel")
-        self.assertIsNone(panel.select_one(".group-toggle-all"))
-
-    def test_items_per_page_input_keeps_custom_value(self):
-        self.user.profile.items_per_page = 40
-        self.user.profile.save()
-
-        soup = self.render_index()
-        field = soup.select_one(
-            '.header-layout .header-more-panel input[name="items_per_page"]'
-        )
-        self.assertIsNotNone(field)
-        self.assertEqual(field.get("value"), "40")
-        # 非法值走字段错误容器，原地提示
-        self.assertIsNotNone(
-            soup.select_one(
-                '.header-layout [data-field-error-for="items_per_page"]'
-            )
-        )
-
-    def test_preview_and_toolbar_rows_hidden_in_compact_view(self):
-        soup = self.render_index()
-        panel = soup.select_one(".header-layout .header-more-panel")
-        self.assertIsNotNone(panel.select_one('input[name="enable_preview_images"]'))
-        self.assertIsNotNone(
-            panel.select_one('input[name="bookmark_toolbar_auto_hide"]')
-        )
-
-        self.user.profile.bookmark_view_mode = UserProfile.BOOKMARK_VIEW_MODE_COMPACT
-        self.user.profile.save()
-        panel = self.render_index().select_one(".header-layout .header-more-panel")
-        self.assertIsNone(panel.select_one('input[name="enable_preview_images"]'))
-        self.assertIsNone(panel.select_one('input[name="bookmark_toolbar_auto_hide"]'))
-
-    def test_more_menu_hides_random_action_when_disabled(self):
+    def test_random_controls_hidden_when_button_disabled(self):
         self.user.profile.enable_random_button = False
         self.user.profile.save()
 
         soup = self.render_index()
-        actions = [
-            action.get("data-menu-action")
-            for action in soup.select(".header-more .header-menu-action")
-        ]
-        self.assertEqual(actions, ["bulk-edit"])
-        # 偏好里的随机按钮开关仍在，只是子项收起
-        panel = soup.select_one(".header-more .header-more-panel")
-        self.assertIsNotNone(panel.select_one('input[name="enable_random_button"]'))
-        self.assertIsNone(panel.select_one('select[name="random_mode"]'))
-
-        # 共享页没有批量编辑，随机也关掉后不能留下孤立的分隔线
-        soup = self.make_soup(
-            self.client.get(reverse("linkding:bookmarks.shared")).content.decode()
-        )
-        panel = soup.select_one(".header-more .header-more-panel")
-        self.assertIsNone(panel.select_one(".header-menu-action"))
-        # 只剩偏好组之间的两条分隔线
-        self.assertEqual(len(panel.select(".header-menu-divider")), 2)
-
-    def test_switches_reflect_profile(self):
-        self.user.profile.show_sidebar = False
-        self.user.profile.enable_preview_images = True
-        self.user.profile.bookmark_toolbar_auto_hide = True
-        self.user.profile.theme = UserProfile.THEME_DARK
-        self.user.profile.save()
-
-        soup = self.render_index()
-        panel = soup.select_one(".header-layout .header-more-panel")
-        self.assertFalse(panel.select_one('input[name="show_sidebar"]').has_attr("checked"))
+        # 两个控件都在 DOM 里，只靠 hidden 表达关闭，抽屉里才能即时切换
         self.assertTrue(
-            panel.select_one('input[name="enable_preview_images"]').has_attr("checked")
+            soup.select_one("form[data-random-control]").has_attr("hidden")
         )
-        self.assertTrue(
-            panel.select_one('input[name="bookmark_toolbar_auto_hide"]').has_attr(
-                "checked"
-            )
-        )
-        theme = panel.select_one('select[name="theme"] option[selected]')
-        self.assertEqual(theme.get("value"), "dark")
+        self.assertTrue(soup.select_one("[ld-random-single]").has_attr("hidden"))
 
     def test_save_view_mode_through_quick_endpoint(self):
         response = self.client.post(
@@ -221,7 +71,8 @@ class BookmarkHeaderMenuViewTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
         self.assertTrue(self.user.profile.sticky_header_controls)
         self.assertFalse(self.user.profile.sticky_pagination)
 
-    def test_all_list_pages_render_header_menu(self):
+    def test_list_pages_share_the_same_toolbar(self):
+        # 四个列表页同一个骨架：标题独立、工具栏两行、按钮全部直接陈列
         for url_name in (
             "bookmarks.index",
             "bookmarks.archived",
@@ -231,14 +82,45 @@ class BookmarkHeaderMenuViewTest(TestCase, BookmarkFactoryMixin, HtmlTestMixin):
             response = self.client.get(reverse(f"linkding:{url_name}"))
             self.assertEqual(response.status_code, 200, url_name)
             soup = self.make_soup(response.content.decode())
+            self.assertIsNotNone(soup.select_one(".page-title"), url_name)
             self.assertIsNotNone(
-                soup.select_one(".header-more .header-more-panel"), url_name
+                soup.select_one(".section-header.header-stack .header-actions"), url_name
             )
+            self.assertIsNotNone(soup.select_one("[data-tools-toggle]"), url_name)
+            self.assertIsNone(soup.select_one(".header-more"), url_name)
 
-    def test_shared_menu_has_random_but_no_bulk_action(self):
+    def test_shared_toolbar_has_no_bulk_or_group_controls(self):
+        # 分享页可能被匿名访问，批量与分组（写 profile）都不摆上来
         soup = self.make_soup(
             self.client.get(reverse("linkding:bookmarks.shared")).content.decode()
         )
-        actions = [a.get("data-menu-action") for a in soup.select(".header-menu-action")]
-        self.assertIn("random-sort", actions)
-        self.assertNotIn("bulk-edit", actions)
+        actions = soup.select_one(".section-header.header-stack .header-actions")
+        self.assertIsNotNone(actions)
+        self.assertIsNone(actions.select_one(".bulk-edit-active-toggle"))
+        self.assertIsNone(soup.select_one("[data-toolbar-pref='group_by_date']"))
+        self.assertIsNotNone(soup.select_one("[data-toolbar-nav='sort']"))
+
+    def test_index_toolbar_splits_search_and_list_controls(self):
+        soup = self.render_index()
+        main = soup.select_one(".section-header")
+        tools = soup.select_one(".header-row-tools")
+        self.assertIsNotNone(tools)
+
+        # 搜索 + 常驻操作在第一行
+        self.assertIsNotNone(main.select_one("#bookmark-search-container"))
+        self.assertIsNotNone(main.select_one(".header-actions .bulk-edit-active-toggle"))
+        self.assertIsNotNone(main.select_one("[data-tools-toggle]"))
+
+        # 排序 / 分组 / 全部展开折叠在第二行
+        self.assertIsNotNone(tools.select_one("[data-toolbar-nav='sort']"))
+        self.assertIsNotNone(tools.select_one("[data-toolbar-pref='group_by_date']"))
+        self.assertIsNotNone(tools.select_one("[data-group-expand-all]"))
+        self.assertIsNotNone(tools.select_one("[data-group-collapse-all]"))
+        self.assertIsNone(tools.select_one(".group-toggle-all"))
+        self.assertIsNone(tools.select_one(".header-actions"))
+
+        # 第一行不再有可见的排序控件，但要留一个 hidden 把当前排序带过面板提交
+        self.assertIsNone(main.select_one("select[name='sort']") or soup.select_one(".section-header select[name='sort']"))
+        hidden_sort = main.select_one("input[name='sort']")
+        self.assertIsNotNone(hidden_sort)
+        self.assertEqual(hidden_sort.get("value"), "added_desc")

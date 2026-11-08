@@ -427,12 +427,15 @@ class BookmarkIndexViewTestCase(
         response = self.client.get(url)
         values = self._get_bulk_action_values(response)
 
-        for v in ["bulk_read", "bulk_unread", "bulk_tag", "bulk_untag",
+        for v in ["bulk_read", "bulk_unread", "bulk_edit_metadata",
                    "bulk_enrich_metadata", "bulk_refresh_metadata",
                    "bulk_archive", "bulk_trash", "bulk_delete"]:
             self.assertIn(v, values)
         self.assertNotIn("bulk_share", values)
         self.assertNotIn("bulk_unshare", values)
+        # 标签的增删已收进「编辑元数据」面板，不再有独立动作
+        self.assertNotIn("bulk_tag", values)
+        self.assertNotIn("bulk_untag", values)
 
     @override_settings(LD_ENABLE_SNAPSHOTS=True)
     def test_allowed_bulk_actions_with_html_snapshot_enabled(self):
@@ -710,7 +713,9 @@ class BookmarkIndexViewTestCase(
             element["data-sidebar-module"]
             for element in soup.select(".sidebar [data-sidebar-module]")
         ]
-        self.assertEqual(module_keys, ["tags", "summary", "domains", "authors"])
+        self.assertEqual(
+            module_keys, ["tags", "summary", "domains", "authors"]
+        )
         self.assertIsNone(
             soup.select_one(".sidebar [data-sidebar-module='bundles']")
         )
@@ -1325,7 +1330,8 @@ class BookmarkIndexViewTestCase(
 
             heading = summary.select_one("#sidebar-user-summary-heading")
             self.assertIsNotNone(heading)
-            self.assertEqual(heading.text.strip(), self.user.username)
+            # 用户名挪到了侧边栏顶栏，模块标题固定为「用户数据」
+            self.assertEqual(heading.text.strip(), "用户数据")
             self.assertIsNotNone(summary.select_one(".section-header .section-toggle"))
             self.assertIsNotNone(summary.select_one(".section-header .dropdown"))
             self.assertIsNone(summary.select_one(".summary-avatar"))
@@ -2286,10 +2292,13 @@ class BookmarkIndexViewTestCase(
         self.assertIsNotNone(search_preferences)
 
         selected_by = search_preferences.select_one(
-            f"input[name='date_filter_by'][value='{BookmarkSearch.FILTER_DATE_BY_ADDED}']"
+            "select[name='date_filter_by']"
         )
         self.assertIsNotNone(selected_by)
-        self.assertTrue(selected_by.has_attr("checked"))
+        self.assertEqual(
+            selected_by.select_one("option[selected]").attrs["value"],
+            BookmarkSearch.FILTER_DATE_BY_ADDED,
+        )
 
         selected_type = search_preferences.select_one(
             f"input[name='date_filter_type'][value='{BookmarkSearch.FILTER_DATE_TYPE_ABSOLUTE}']"

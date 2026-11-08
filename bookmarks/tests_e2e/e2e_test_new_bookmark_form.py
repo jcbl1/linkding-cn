@@ -141,7 +141,7 @@ class BookmarkFormE2ETestCase(LinkdingE2ETestCase):
             # Enter bookmarked URL
             page.get_by_label("URL").fill(existing_bookmark.url)
             # Already bookmarked hint should be visible
-            page.get_by_text("This URL is already bookmarked.").wait_for(timeout=2000)
+            expect(page.get_by_text("This URL is already bookmarked.")).to_be_visible()
             # Form should be pre-filled with data from existing bookmark
             self.assertEqual(
                 existing_bookmark.title, page.get_by_label("Title").input_value()
@@ -159,9 +159,7 @@ class BookmarkFormE2ETestCase(LinkdingE2ETestCase):
             # Enter non-bookmarked URL
             page.get_by_label("URL").fill("https://example.com/unknown")
             # Already bookmarked hint should be hidden
-            page.get_by_text("This URL is already bookmarked.").wait_for(
-                state="hidden", timeout=2000
-            )
+            expect(page.get_by_text("This URL is already bookmarked.")).to_be_hidden()
 
     def test_enter_url_of_existing_bookmark_should_show_notes(self):
         bookmark = self.setup_bookmark(
@@ -177,25 +175,56 @@ class BookmarkFormE2ETestCase(LinkdingE2ETestCase):
             page.get_by_label("URL").fill(bookmark.url)
             expect(details).to_have_attribute("open", value="")
 
-    def test_create_should_preview_auto_tags(self):
+    def test_create_should_not_prefill_auto_tags_for_existing_bookmark(self):
+        profile = self.get_or_create_test_user().profile
+        profile.auto_tagging_rules = "github.com dev github"
+        profile.save()
+        self.setup_bookmark(url="https://github.com/sissbruecker/linkding")
+
+        with sync_playwright() as p:
+            page = self.open(reverse("linkding:bookmarks.new"), p)
+
+            # 通过输入 URL 触发 check，而不是依赖 ?url= 初始参数的加载时序
+            page.get_by_label("URL").fill("https://github.com/sissbruecker/linkding")
+            page.wait_for_timeout(800)
+
+            # 已收藏的 URL 只展示规则标签，不填进标签框
+            expect(page.get_by_label("Tags")).to_have_value("")
+            for tag in ("dev", "github"):
+                expect(
+                    page.get_by_role("button", name=tag, exact=True)
+                ).to_have_attribute("aria-pressed", "false")
+
+    def test_create_should_prefill_auto_tags(self):
         profile = self.get_or_create_test_user().profile
         profile.auto_tagging_rules = "github.com dev github"
         profile.save()
 
         with sync_playwright() as p:
-            # 通过输入 URL 触发 check，而不是依赖 ?url= 初始参数的加载时序
             page = self.open(reverse("linkding:bookmarks.new"), p)
-            url = page.get_by_label("URL")
-            auto_tags_hint = page.locator(".form-input-hint.auto-tags")
+            tags_input = page.get_by_label("Tags")
 
-            url.fill("https://github.com/sissbruecker/linkding")
-            expect(auto_tags_hint).to_be_visible()
-            expect(auto_tags_hint).to_have_text("Auto tags: dev github")
+            # 通过输入 URL 触发 check，而不是依赖 ?url= 初始参数的加载时序
+            page.get_by_label("URL").fill("https://github.com/sissbruecker/linkding")
+            expect(tags_input).to_have_value("dev github")
+
+            # 取消选中：标签从输入框移除，按钮变为未选中
+            # 标签框获得焦点时候选菜单会盖住按钮，先关掉再点
+            page.keyboard.press("Escape")
+            page.get_by_role("button", name="dev", exact=True).click()
+            expect(tags_input).to_have_value("github")
+            expect(page.get_by_role("button", name="dev", exact=True)).to_have_attribute(
+                "aria-pressed", "false"
+            )
+
+            # 重新选中：标签回到输入框
+            page.get_by_role("button", name="dev", exact=True).click()
+            expect(tags_input).to_have_value("github dev")
 
             # Change to URL without auto tags
-            url.fill("https://example.com")
+            page.get_by_label("URL").fill("https://example.com")
 
-            expect(auto_tags_hint).to_be_hidden()
+            expect(tags_input).to_have_value("")
 
     def test_clear_buttons_only_shown_when_fields_have_content(self):
         with sync_playwright() as p:
@@ -243,8 +272,10 @@ class BookmarkFormE2ETestCase(LinkdingE2ETestCase):
             url_field.fill("https://example.com/not-bookmarked")
             expect(refresh_button).to_be_visible()
 
-            # 清空 URL 后回到隐藏
+            # 清空 URL 后回到隐藏；等防抖里的自动标签请求落地，避免测试
+            # teardown 时还在访问已被 flush 的内存 SQLite
             url_field.fill("")
+            page.wait_for_timeout(800)
             expect(refresh_button).to_be_hidden()
 
     def test_refresh_from_website_button_updates_title_and_description(self):
@@ -581,6 +612,11 @@ class BookmarkFormE2ETestCase(LinkdingE2ETestCase):
             description_field = page.locator("#id_description")
 
             url_field.fill("https://example.com")
+            # 等元数据抓取完成，确保提交时标题已预填
+            expect(page.get_by_label("Title")).to_have_value("Example Domain")
+            description_details = page.locator("details.description")
+            if not description_details.evaluate("el => el.open"):
+                page.locator("details.description summary").click()
             description_field.fill("Test description")
             description_field.focus()
 

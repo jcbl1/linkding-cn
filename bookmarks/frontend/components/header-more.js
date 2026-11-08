@@ -2,8 +2,12 @@ import { Behavior, registerBehavior } from "./runtime.js";
 import { getCSRFToken } from "../utils/csrf.js";
 import { gettext } from "../utils/i18n.js";
 import { showToast } from "./toast.js";
-import { applyToolbarAutoHide } from "./toolbar-auto-hide.js";
+import { applyToolbarAutoHide } from "./bookmark-list.js";
 import { saveColumnsFromPanel } from "./bookmark-table.js";
+import {
+  getSidebarScope,
+  syncSidebarStateCache,
+} from "../state/sidebar-state.js";
 
 async function savePref(url, field, value, { appendEmpty = true } = {}) {
   const body = new FormData();
@@ -44,16 +48,7 @@ function applyStickyPref(field, enabled) {
 // 「显示侧边栏」存的是默认值，实际开合在 localStorage（优先）与 cookie（服务端据此决定
 // 是否懒加载）里。不先对齐这两处，重载后会被旧状态顶回去。
 function syncSidebarState(enabled) {
-  try {
-    localStorage.removeItem("ld:sidebar-state:bookmarks");
-    localStorage.removeItem("ld:sidebar-state:highlights");
-  } catch {
-    // 隐私模式下 localStorage 不可用，忽略
-  }
-  const cookieName = document.querySelector(".highlights-page")
-    ? "ld_sidebar_highlights"
-    : "ld_sidebar_bookmarks";
-  document.cookie = `${cookieName}=${enabled ? "1" : "0"}; path=/; max-age=31536000; SameSite=Lax`;
+  syncSidebarStateCache(getSidebarScope(), enabled);
 }
 
 // 随机控件两种模式各渲染一份，这里只切显隐，不改服务端渲染结果
@@ -132,14 +127,22 @@ class HeaderMoreMenu extends Behavior {
 
     if (action === "bulk-edit") {
       document.querySelector(".bulk-edit-active-toggle")?.click();
-    } else if (action === "random-sort") {
-      // 两种随机模式各有一份控件，点当前可见的那个
-      const single = document.querySelector("[ld-random-single]:not([hidden])");
-      if (single) {
-        single.click();
+    } else if (action === "random") {
+      // 随机控件两种模式各一份，只点当前可见的那个
+      const control = document.querySelector(
+        "[data-random-control]:not([hidden])",
+      );
+      if (control) {
+        if (control.tagName === "FORM") control.requestSubmit();
+        else control.click();
       } else {
-        document.querySelector("form[data-random-control]")?.requestSubmit();
+        document.querySelector("[data-hl-random]:not([hidden])")?.click();
       }
+    } else if (action === "layout") {
+      // 窄屏下布局按钮被藏起来了，点同名的触发按钮即可（隐藏元素也能程序化点击）
+      document.querySelector("[data-layout-drawer-toggle]")?.click();
+    } else if (action === "sidebar") {
+      document.querySelector("[data-sidebar-toggle]")?.click();
     }
 
     this.element.closest("ld-dropdown")?.close?.();

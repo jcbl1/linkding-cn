@@ -3,7 +3,15 @@ import { Behavior, registerBehavior } from "./runtime.js";
 import { getCSRFToken } from "../utils/csrf.js";
 import { gettext } from "../utils/i18n.js";
 import { showToast } from "./toast.js";
-import { patchBookmark } from "./bookmark-page.js";
+import {
+  closeActiveEditor,
+  closeEditorOverlay,
+  openEditorOverlay,
+  patchBookmark,
+  wireInlineEditor,
+} from "./bookmark-row-editor.js";
+import { toggleTaskCheckbox } from "./bookmark-notes-task.js";
+import { hasSelectionWithin } from "../utils/text-selection.js";
 
 // 拖拽的硬下限：再窄就看不出内容了
 const MIN_COL_PX = 60;
@@ -34,13 +42,20 @@ const EDIT_CELL = {
   notes: ".cell-notes",
 };
 
-/** 字段 → 需要回写的文本节点 */
-const EDIT_TEXT = {
+/** 字段 → 编辑器初始值所在节点（notes 取隐藏 textarea 里的原始 Markdown 源） */
+const EDIT_SOURCE = {
   title: ".title-link span",
   description: ".description-text",
-  notes: ".note-text",
+  notes: ".note-source",
   author: ".author-inner, .author",
 };
+
+/** 读取编辑器初始值：textarea 取 value，其余取 textContent。 */
+function readSourceValue(cell, field) {
+  const el = cell.querySelector(EDIT_SOURCE[field]);
+  if (!el) return "";
+  return el.tagName === "TEXTAREA" ? el.value : el.textContent;
+}
 
 function parseConfig(ul) {
   try {
@@ -132,7 +147,9 @@ export function saveColumnsFromPanel(panel) {
   const checked = new Set(
     [...checkboxes].filter((el) => el.checked).map((el) => el.dataset.tableCol),
   );
-  const ul = document.querySelector("ul.bookmark-list.view-table[ld-bookmark-table]");
+  const ul = document.querySelector(
+    "ul.bookmark-list.view-table[ld-bookmark-table]",
+  );
   const config = parseConfig(ul).map((c) => ({
     ...c,
     on: checked.has(c.key) || c.key === "title",
@@ -195,7 +212,9 @@ class BookmarkTable extends Behavior {
     // 三横向轨道：主体轨道承载数据行，表头轨道独立在 sticky 外层内，底部轨道为常驻可见横滚条
     this.bodyScroll = ul.closest(".table-body-scroll");
     this.headerSticky = document.querySelector(".table-header-sticky");
-    this.headerScroll = this.headerSticky?.querySelector(".table-header-scroll");
+    this.headerScroll = this.headerSticky?.querySelector(
+      ".table-header-scroll",
+    );
     this.headerList = this.headerSticky?.querySelector("ul.table-header-list");
     this.headerRow = this.headerSticky?.querySelector(".table-header");
     this.footerScroll = document.querySelector(".table-footer-scroll");
@@ -213,9 +232,15 @@ class BookmarkTable extends Behavior {
 
     // 三条轨道 scrollLeft 双向同步；标志位阻断事件回环
     this._syncingScroll = false;
-    this.bodyScroll?.addEventListener("scroll", this.onBodyScroll, { passive: true });
-    this.headerScroll?.addEventListener("scroll", this.onHeaderScroll, { passive: true });
-    this.footerScroll?.addEventListener("scroll", this.onFooterScroll, { passive: true });
+    this.bodyScroll?.addEventListener("scroll", this.onBodyScroll, {
+      passive: true,
+    });
+    this.headerScroll?.addEventListener("scroll", this.onHeaderScroll, {
+      passive: true,
+    });
+    this.footerScroll?.addEventListener("scroll", this.onFooterScroll, {
+      passive: true,
+    });
 
     // 表头吸顶顶部：搜索栏吸顶时紧贴其下方，未吸顶/未启用时 top:0
     this.syncStickyTop();
@@ -447,7 +472,7 @@ class BookmarkTable extends Behavior {
     });
   }
 
-// 数据行按新列序重排：格子布局完全由显式 grid-column 决定，只改轨道号、不动 DOM。
+  // 数据行按新列序重排：格子布局完全由显式 grid-column 决定，只改轨道号、不动 DOM。
   applyColumnOrder(keys) {
     this.element.querySelectorAll("li[ld-bookmark-item]").forEach((li) => {
       keys.forEach((key, i) => {
@@ -464,7 +489,9 @@ class BookmarkTable extends Behavior {
     const popover = indicator.querySelector(".health-popover");
     if (!popover) return;
     const rect = indicator.getBoundingClientRect();
-    const viewportRect = (this.bodyScroll || this.element).getBoundingClientRect();
+    const viewportRect = (
+      this.bodyScroll || this.element
+    ).getBoundingClientRect();
     const GAP = 8;
 
     const boundsLeft = Math.max(viewportRect.left, 0);
@@ -506,28 +533,26 @@ class BookmarkTable extends Behavior {
       popover.style.right = "0";
     }
 
-    // 纵向：优先向下；下方空间不足时换向上；两侧都不够就限高滚动
-    const spaceBelow = boundsBottom - rect.bottom - GAP - 6;
-    const spaceAbove = rect.top - boundsTop - GAP - 6;
-    if (spaceBelow >= box.height || spaceBelow >= spaceAbove) {
-      popover.style.top = "calc(100% + 6px)";
-      popover.style.bottom = "auto";
-      if (spaceBelow < box.height) {
-        popover.style.maxHeight = `${Math.max(56, Math.round(spaceBelow))}px`;
-        popover.style.overflowY = "auto";
-      } else {
-        popover.style.overflowY = "";
-      }
-    } else {
-      popover.style.top = "auto";
-      popover.style.bottom = "calc(100% + 6px)";
-      if (spaceAbove < box.height) {
-        popover.style.maxHeight = `${Math.max(56, Math.round(spaceAbove))}px`;
-        popover.style.overflowY = "auto";
-      } else {
-        popover.style.overflowY = "";
-      }
-    }
+    // 纵向：优先向下，放不下换向上；选中的一侧仍放不下就整体平移到贴边——
+    // 弹层与指示器之间只差几像素，平移比限高滚动更可读。只有可视区本身矮于弹层时才滚动。
+    const ANCHOR_GAP = 6;
+    const available = boundsBottom - boundsTop - 2 * GAP;
+    // 限高前先算最终高度，否则按原高算出的偏移配上裁短的高度会顶出上界
+    const height = Math.min(box.height, available);
+    const spaceBelow = boundsBottom - rect.bottom - ANCHOR_GAP - GAP;
+    const spaceAbove = rect.top - boundsTop - ANCHOR_GAP - GAP;
+    const below = spaceBelow >= height || spaceBelow >= spaceAbove;
+    const overflow = below
+      ? rect.bottom + ANCHOR_GAP + height - (boundsBottom - GAP)
+      : boundsTop + GAP - (rect.top - ANCHOR_GAP - height);
+    let top = below ? rect.height + ANCHOR_GAP : -ANCHOR_GAP - height;
+    if (overflow > 0) top += below ? -overflow : overflow;
+    popover.style.top = `${Math.round(top)}px`;
+    popover.style.bottom = "auto";
+
+    popover.style.maxHeight =
+      height < box.height ? `${Math.round(height)}px` : "";
+    popover.style.overflowY = height < box.height ? "auto" : "";
   }
 
   /* ── 单元格内编辑 ─────────────────────────
@@ -538,11 +563,11 @@ class BookmarkTable extends Behavior {
       this.editTags(li);
       return;
     }
+    // 卡片编辑器与行编辑器互斥；标签编辑走 startQuickEdit，自己会处理开关切换
+    closeActiveEditor();
     const cell = li?.querySelector(EDIT_CELL[field]);
     if (!cell || cell.classList.contains("is-editing")) return;
-    const current = (
-      cell.querySelector(EDIT_TEXT[field])?.textContent || ""
-    ).trim();
+    const current = readSourceValue(cell, field).trim();
     // 输入多行（desc/notes 用 Enter 换行）vs 软换行显示（title 用 Enter 保存但超宽自动折行）
     const multiline = field === "description" || field === "notes";
     const softWrap = field === "title";
@@ -582,59 +607,92 @@ class BookmarkTable extends Behavior {
       grow();
     });
 
-    let closed = false;
-    const close = (save) => {
-      if (closed) return;
-      closed = true;
-      const value = editor.value.trim();
-      editor.remove();
-      cell.classList.remove("is-editing");
-      if (!save || value === current) return;
-      patchBookmark(li.dataset.bookmarkId, { [field]: value })
-        .then(() => {
-          let target = cell.querySelector(EDIT_TEXT[field]);
-          // 原本为空的格没有文本节点，补一个再写入，避免要刷新才见
-          if (!target && field === "description") {
-            target = document.createElement("span");
-            target.className = "description-text";
-            cell.querySelector(".description-container")?.appendChild(target);
-          } else if (!target && field === "notes") {
-            target = document.createElement("span");
-            target.className = "note-text";
-            cell.querySelector(".note-container")?.appendChild(target);
-          }
-          if (target) target.textContent = value;
-          if (field === "title") {
-            cell.querySelector(".title-link")?.setAttribute("title", value);
-          }
-        })
-        .catch(() =>
-          showToast(gettext("Couldn't save changes. Please try again."), {
-            tone: "error",
-          }),
+    const close = wireInlineEditor(editor, {
+      originalValue: current,
+      multiline,
+      onInput: grow,
+      onClose: () => {
+        closeEditorOverlay();
+        editor.remove();
+        cell.classList.remove("is-editing");
+      },
+      onSave: (value) => {
+        if (field === "notes") {
+          return this.saveNotes(cell, li, value);
+        }
+        return patchBookmark(li.dataset.bookmarkId, { [field]: value }).then(
+          () => {
+            let target = cell.querySelector(EDIT_SOURCE[field]);
+            // 原本为空的格没有文本节点，补一个再写入，避免要刷新才见
+            if (!target && field === "description") {
+              target = document.createElement("span");
+              target.className = "description-text";
+              cell.querySelector(".description-container")?.appendChild(target);
+            }
+            if (target) target.textContent = value;
+            if (field === "title") {
+              cell.querySelector(".title-link")?.setAttribute("title", value);
+            }
+          },
         );
-    };
-
-    editor.addEventListener("input", grow);
-    editor.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        close(false);
-      } else if (
-        event.key === "Enter" &&
-        (!multiline || event.metaKey || event.ctrlKey)
-      ) {
-        // 单行：回车保存；多行：回车换行，Ctrl/Cmd+Enter 才保存
-        event.preventDefault();
-        close(true);
-      }
+      },
+      onError: () =>
+        showToast(gettext("Couldn't save changes. Please try again."), {
+          tone: "error",
+        }),
     });
-    editor.addEventListener("blur", () => close(true));
+
+    // 遮罩挖出编辑器本身：格内编辑器抬不到遮罩之上，只能反过来让遮罩让开
+    openEditorOverlay({ hole: () => editor, onDismiss: () => close(true) });
+  }
+
+  /** 待办勾选框：交给笔记待办的公共实现，保存链路与另外两个视图一致 */
+  toggleTask(box) {
+    const cell = box.closest(".cell-notes");
+    return toggleTaskCheckbox(box, {
+      bookmarkId: cell?.closest("li[ld-bookmark-item]")?.dataset.bookmarkId,
+      source: cell?.querySelector(".note-source"),
+    });
+  }
+
+  /** 笔记保存：PATCH 后复用 notes_html 接口局部刷新渲染层，不重载页面；
+      同步更新隐藏原始源与折叠提示，清空笔记时一并清空渲染层。 */
+  async saveNotes(cell, li, value) {
+    const bookmarkId = li.dataset.bookmarkId;
+    await patchBookmark(bookmarkId, { notes: value });
+
+    const source = cell.querySelector(".note-source");
+    if (source) source.value = value;
+
+    const rendered = cell.querySelector(".note-markdown");
+    const wrap = cell.querySelector(".note.inline");
+    if (!rendered) return;
+
+    if (!value.trim()) {
+      rendered.innerHTML = "";
+      wrap?.removeAttribute("title");
+      return;
+    }
+
+    let html = "";
+    try {
+      const response = await fetch(`/api/bookmarks/${bookmarkId}/notes_html/`);
+      if (response.ok) {
+        const data = await response.json();
+        html = data.html || "";
+      }
+    } catch (error) {
+      console.error("Failed to refresh notes rendering:", error);
+    }
+    rendered.innerHTML = html;
+    if (wrap) wrap.setAttribute("title", rendered.textContent.trim());
   }
 
   /** 编辑器统一尺寸：至少与标签编辑器同宽（420px），右侧放不下就向左展开 */
   placeEditor(editor, cell, field) {
-    const viewportRect = (this.bodyScroll || this.element).getBoundingClientRect();
+    const viewportRect = (
+      this.bodyScroll || this.element
+    ).getBoundingClientRect();
     const cellRect = cell.getBoundingClientRect();
     const PREFERRED = 420;
     const GAP = 12;
@@ -728,7 +786,17 @@ class BookmarkTable extends Behavior {
   }
 
   onClick(event) {
-    if (event.target.closest(".table-cell-editor")) return;
+    // 编辑器（含标签补全菜单）是独立交互区：点它不折叠/展开整行
+    if (event.target.closest(".table-cell-editor, .quick-edit-tags-container")) {
+      return;
+    }
+
+    // 待办勾选框是独立点击目标：切换完成态，不连带展开/折叠（与链接同理）
+    const taskBox = event.target.closest(".cell-notes .task-checkbox");
+    if (taskBox) {
+      this.toggleTask(taskBox);
+      return;
+    }
 
     const opsBtn = event.target.closest(".row-ops-btn");
     if (opsBtn) {
@@ -770,6 +838,9 @@ class BookmarkTable extends Behavior {
       return;
     }
 
+    // 拖选描述/笔记文字松手会补一次 click（detail=1）：有选区就不当作展开/折叠
+    if (hasSelectionWithin(cell)) return;
+
     // 跳转/筛选只认「点在内容上」；右缘死区与空白处一律展开折叠，杜绝误触跳转
     if (!this.hitsContent(cell, link, event)) {
       if (link) event.preventDefault();
@@ -810,7 +881,12 @@ class BookmarkTable extends Behavior {
     const range = document.createRange();
     range.selectNodeContents(link);
     for (const rect of range.getClientRects()) {
-      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+      if (
+        x >= rect.left &&
+        x <= rect.right &&
+        y >= rect.top &&
+        y <= rect.bottom
+      ) {
         return true;
       }
     }
@@ -845,9 +921,35 @@ class BookmarkTable extends Behavior {
   onDblClick(event) {
     // 编辑已在 click 里按 detail 处理；这里只挡掉双击的默认行为（选词等）
     if (event.target.closest(".table-cell-editor")) return;
-    if (event.target.closest(".cell-title, .cell-author, .cell-desc, .cell-notes, .cell-tags")) {
+    if (
+      event.target.closest(
+        ".cell-title, .cell-author, .cell-desc, .cell-notes, .cell-tags",
+      )
+    ) {
       event.preventDefault();
     }
+  }
+
+  /** 快捷键落在格子上：就地编辑所在单元格（标签走补全菜单）。 */
+  handleShortcut(action, event, target) {
+    if (action !== "quick_edit") return false;
+    const li = target.closest("li[ld-bookmark-item]");
+    if (!li || !this.element.contains(li)) return false;
+    const field = target.closest(".cell-title, .title-link")
+      ? "title"
+      : target.closest(".cell-tags")
+        ? "tags"
+        : target.closest(".cell-desc")
+          ? "description"
+          : target.closest(".cell-notes")
+            ? "notes"
+            : target.closest(".cell-author")
+              ? "author"
+              : null;
+    if (!field) return false;
+    event.preventDefault();
+    this.editCell(li, field);
+    return true;
   }
 }
 
@@ -862,11 +964,9 @@ function FIELD_OF_CELL(cell) {
 
 function hideAllToolbarFloats(keep) {
   document
-    .querySelectorAll("li[ld-bookmark-item].toolbar-visible")
+    .querySelectorAll("ul.view-table li[ld-bookmark-item].toolbar-visible")
     .forEach((el) => {
-      // 紧凑视图的开合状态由自身脚本独立管理，不在此排他收起
-      if (el === keep || el.closest("ul.view-compact")) return;
-      el.classList.remove("toolbar-visible");
+      if (el !== keep) el.classList.remove("toolbar-visible");
     });
 }
 

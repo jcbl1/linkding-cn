@@ -5,50 +5,40 @@
 
 /* ── Toolbar ── */
 
-.highlights-toolbar {
+/* 随机按钮由布局抽屉控制显隐；.btn 自身的 display 会盖掉 [hidden] */
+[data-hl-random][hidden] {
+  display: none;
+}
+
+/* 工具栏骨架与书签页共用；这里只补搜索框与筛选按钮拼成一体的细节 */
+.highlights-page .section-header .search-container {
   display: flex;
-  align-items: center;
-  margin-bottom: var(--unit-1);
-  flex-wrap: wrap;
+  position: relative;
 
-  /* Search container — search input + filter dropdown merged, like bookmark list */
-  .search-container {
-    flex: 1 1 0;
-    display: flex;
-    max-width: 300px;
-    position: relative;
-
-    & form {
-      width: 100%;
-    }
-
-    & .dropdown {
-      position: static;
-    }
-
-    & .menu {
-      left: 0;
-      right: 0;
-    }
-
-    & input[type="search"] {
-      height: var(--control-size);
-      -webkit-appearance: none;
-      border-top-right-radius: 0;
-      border-bottom-right-radius: 0;
-    }
-
-    & .dropdown-toggle {
-      border-top-left-radius: 0;
-      border-bottom-left-radius: 0;
-      margin-left: -1px;
-    }
+  & form {
+    width: 100%;
   }
 
-  @media (max-width: 600px) {
-    .search-container {
-      max-width: initial;
-    }
+  & .dropdown {
+    position: static;
+  }
+
+  & .menu {
+    left: 0;
+    right: 0;
+  }
+
+  & input[type="search"] {
+    height: var(--control-size);
+    -webkit-appearance: none;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  & .dropdown-toggle {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    margin-left: -1px;
   }
 }
 
@@ -130,65 +120,13 @@
   filter: drop-shadow(0 0 1px rgba(0,0,0,0.5));
 }
 
-/* ── Bulk edit bar ── */
+/* ── Bulk edit ──
+   条与条目复选框的显隐来自 .bulk-edit-root 的通用规则（bookmark-page.css），
+   这里只补高亮页自己的骨架：分组头按 baseline 对齐，复选框要单独居中。 */
 
-.highlights-bulk-bar {
-  max-height: 0;
-  overflow: hidden;
-  opacity: 0;
-  transition: max-height 0.2s, opacity 0.2s;
-  margin-bottom: 0;
-}
-
-.highlights-page.bulk-active .highlights-bulk-bar {
-  max-height: 100px;
-  opacity: 1;
-  border-bottom: solid 1px var(--secondary-border-color);
-  margin-bottom: var(--unit-4);
-  padding: var(--unit-2) 0;
-}
-
-.highlights-bulk-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--unit-2);
-  flex-wrap: wrap;
-
-  .form-select {
-    width: auto;
-    max-width: 180px;
-  }
-
-  .bulk-edit-checkbox.all {
-    display: inline-flex;
-    align-items: center;
-    margin: 0;
-    padding: var(--unit-2);
-  }
-}
-
-.highlights-bulk-msg {
-  font-size: var(--font-size-sm);
-  transition: opacity 0.3s;
-
-  &.success {
-    color: var(--success-color);
-  }
-
-  &.error {
-    color: var(--error-color);
-  }
-}
-
-/* Hide bulk checkboxes by default */
-.highlights-page .bulk-edit-checkbox:not(.all) {
-  display: none;
-  padding: 0;
-  min-width: 16px;
-}
-.highlights-page.bulk-active .bulk-edit-checkbox:not(.all) {
-  display: inline-flex;
-  align-items: center;
+.highlight-group-header .bulk-group-checkbox {
+  align-self: center;
+  margin-right: var(--unit-2);
 }
 
 /* ── Search summary ── */
@@ -255,6 +193,26 @@
     font-size: var(--font-size-sm);
     color: var(--tertiary-text-color);
     white-space: nowrap;
+  }
+
+  /* 按书签分组时上提到组标题的作者：弱化文字，最长 10em 省略 */
+  .highlight-group-author {
+    flex: none;
+    max-width: 10em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--font-size-sm);
+    font-weight: 400;
+    color: var(--secondary-text-color);
+  }
+
+  .highlight-group-sep {
+    flex: none;
+    margin-inline: calc(-1 * var(--unit-1));
+    font-size: var(--font-size-sm);
+    font-weight: 400;
+    color: var(--tertiary-text-color);
   }
 
   .highlight-group-color-bar {
@@ -399,6 +357,8 @@
     padding-left: calc(3px + var(--unit-2));
     margin-top: var(--unit-1);
     position: relative;
+    /* 按钮移出流后行高只剩文字高度，这里补回按钮原本撑起的高度 */
+    min-height: 24px;
   }
 
   .highlight-date {
@@ -407,24 +367,56 @@
     white-space: nowrap;
   }
 
-  /* Action buttons — collapse to 0 width when hidden, expand on hover */
+  /* 作者（日期之后、标题之前）：弱化文字，最长 10em 省略；点击进入 author 搜索 */
+  .highlight-author {
+    flex: none;
+    display: inline-block;
+    max-width: 10em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--font-size-sm);
+    color: var(--secondary-text-color);
+    text-decoration: none;
+
+    &:hover {
+      color: var(--primary-color);
+      text-decoration: underline;
+    }
+  }
+
+  /* 作者与标题之间的间隔点：吃掉两侧 gap 的一半，读起来像「鲁迅 · 朝花夕拾」 */
+  .highlight-author-sep {
+    flex: none;
+    margin-inline: calc(-1 * var(--unit-1));
+    font-size: var(--font-size-sm);
+    color: var(--tertiary-text-color);
+  }
+
+  /* 操作按钮悬浮在 meta 行右端之上：不参与行内布局，
+     日期/作者/标题就挤不到它，窄屏也不会把它顶出条目右缘 */
   .highlight-actions {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    z-index: var(--zindex-0);
     display: flex;
     align-items: center;
-    gap: 0;
-    width: 0;
-    overflow: hidden;
+    gap: var(--unit-2);
+    padding: 0 var(--unit-1);
+    border: 1px solid var(--secondary-border-color);
+    border-radius: var(--border-radius);
+    background: var(--body-color);
+    box-shadow: var(--box-shadow-xs);
     opacity: 0;
-    flex-shrink: 0;
-    margin-left: auto;
+    pointer-events: none;
     transition: opacity 0.15s;
 
     .highlight-item:hover &,
-    .highlights-page.bulk-active & {
+    .highlights-page.active &,
+    .highlight-item:focus-within & {
       opacity: 1;
-      width: auto;
-      gap: var(--unit-2);
-      overflow: visible;
+      pointer-events: auto;
     }
   }
 }
@@ -532,17 +524,6 @@
   }
 }
 
-/* ── Sticky header (toolbar + summary) ── */
-
-.highlights-sticky-header[data-sticky-on="true"] {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: var(--body-color);
-  padding-top: var(--unit-2);
-  margin-top: calc(-1 * var(--unit-2));
-}
-
 /* ── Sticky pagination ── */
 
 .highlights-pagination[data-sticky-on="true"] {
@@ -554,43 +535,7 @@
   border-top: 1px solid var(--secondary-border-color);
 }
 
-/* ── Toolbar container query for progressive hiding ── */
-
-.highlights-toolbar {
-  container-type: inline-size;
-}
-
-.highlights-inline-filters {
-  display: flex;
-  align-items: center;
-}
-
-/* Hide Group by first when space tightens */
-@container (max-width: 620px) {
-  .highlights-inline-group {
-    display: none;
-  }
-}
-
-/* Hide Sort by too when even tighter */
-@container (max-width: 460px) {
-  .highlights-inline-sort {
-    display: none;
-  }
-}
-
 @media (max-width: 600px) {
-  .highlights-toolbar {
-    flex-wrap: nowrap;
-
-    .search-container {
-      flex: 1;
-      max-width: none;
-      min-width: 0;
-    }
-
-  }
-
   .highlights-card-view {
     grid-template-columns: 1fr;
   }

@@ -104,6 +104,32 @@ def update_language(request: HttpRequest):
     return response
 
 
+def _build_quick_tag_icon_context(profile_quick_form) -> dict:
+    """快捷标签图标：当前用到的 + 预置图标，供前端直接渲染 SVG。"""
+    from bookmarks.services.icon_loader import load_quick_tags_icon
+
+    icon_data_map = {}
+    for item in profile_quick_form.bookmark_quick_tag_items:
+        icon_name = item.get("icon_name")
+        if icon_name:
+            data = load_quick_tags_icon(icon_name)
+            if data:
+                icon_data_map[icon_name] = data
+    # 预置图标（首次从 API 获取，后续从文件缓存）
+    for icon_name in PRESET_ICON_NAMES:
+        if icon_name not in icon_data_map:
+            data = load_quick_tags_icon(icon_name)
+            if data:
+                icon_data_map[icon_name] = data
+
+    return {
+        "quick_tag_icon_data_json": (
+            json.dumps(icon_data_map, ensure_ascii=False) if icon_data_map else None
+        ),
+        "preset_icon_names_json": json.dumps(PRESET_ICON_NAMES, ensure_ascii=False),
+    }
+
+
 @login_required
 def general(request: HttpRequest, status=200, context_overrides=None):
     enable_refresh_favicons = django_settings.LD_ENABLE_REFRESH_FAVICONS
@@ -117,26 +143,6 @@ def general(request: HttpRequest, status=200, context_overrides=None):
     version_info = get_version_info(get_ttl_hash())
 
     profile_quick_form = UserProfileQuickSettingsForm(instance=request.user_profile)
-    # 加载快捷标签 + 预置图标数据，注入前端渲染
-    from bookmarks.services.icon_loader import load_quick_tags_icon
-    icon_data_map = {}
-    # 快捷标签使用的图标
-    for item in profile_quick_form.bookmark_quick_tag_items:
-        icon_name = item.get("icon_name")
-        if icon_name:
-            data = load_quick_tags_icon(icon_name)
-            if data:
-                icon_data_map[icon_name] = data
-    # 预置图标（首次从 API 获取，后续从文件缓存）
-    for icon_name in PRESET_ICON_NAMES:
-        if icon_name not in icon_data_map:
-            data = load_quick_tags_icon(icon_name)
-            if data:
-                icon_data_map[icon_name] = data
-    quick_tag_icon_data_json = (
-        json.dumps(icon_data_map, ensure_ascii=False)
-        if icon_data_map else None
-    )
     custom_css_form = UserProfileCustomCssForm(instance=request.user_profile)
     # 全局默认值（环境变量），供设置页帮助文案动态展示
     health_defaults = {
@@ -159,9 +165,6 @@ def general(request: HttpRequest, status=200, context_overrides=None):
         instance=request.user_profile
     )
     custom_domain_root_form = UserProfileCustomDomainRootForm(
-        instance=request.user_profile
-    )
-    highlight_copy_format_form = UserProfileHighlightCopyFormatForm(
         instance=request.user_profile
     )
     shortcuts_form = UserProfileShortcutsForm(instance=request.user_profile)
@@ -199,7 +202,6 @@ def general(request: HttpRequest, status=200, context_overrides=None):
             "health_defaults": health_defaults,
             "auto_tagging_rules_form": auto_tagging_rules_form,
             "custom_domain_root_form": custom_domain_root_form,
-            "highlight_copy_format_form": highlight_copy_format_form,
             "shortcuts_form": shortcuts_form,
             "global_settings_form": global_settings_form,
             "primary_language_choices": primary_language_choices,
@@ -213,14 +215,26 @@ def general(request: HttpRequest, status=200, context_overrides=None):
             "settings_general_url": reverse("linkding:settings.general"),
             "enable_refresh_favicons": enable_refresh_favicons,
             "has_snapshot_support": has_snapshot_support,
-            "preset_icon_names_json": json.dumps(PRESET_ICON_NAMES, ensure_ascii=False),
-            "quick_tag_icon_data_json": quick_tag_icon_data_json,
             "success_message": success_message,
             "error_message": error_message,
             "version_info": version_info,
             **context_overrides,
         },
         status=status,
+    )
+
+
+@login_required
+def quick_tags_fragment(request: HttpRequest):
+    """抽屉弹窗用：只回快捷标签编辑器本身，含图标数据脚本。"""
+    profile_quick_form = UserProfileQuickSettingsForm(instance=request.user_profile)
+    return render(
+        request,
+        "settings/quick_tags_form.html",
+        {
+            "profile_quick_form": profile_quick_form,
+            **_build_quick_tag_icon_context(profile_quick_form),
+        },
     )
 
 
@@ -378,6 +392,28 @@ def _build_profile_quick_form_data(profile, request_post) -> dict:
     return form_data
 
 
+def _save_highlights_group_by(request: HttpRequest, profile) -> JsonResponse:
+    """把「高亮分组」写进高亮筛选偏好里的 group_by。"""
+    from bookmarks.views.highlights import GROUP_CHOICES
+
+    field = "highlights_group_by"
+    value = request.POST.get(field, "")
+    if value not in dict(GROUP_CHOICES):
+        return JsonResponse(
+            {
+                "status": "error",
+                "errors": {field: [{"message": _("Please review the highlighted fields.")}]},
+            },
+            status=HTTPStatus.UNPROCESSABLE_ENTITY,
+        )
+
+    preferences = dict(profile.highlights_search_preferences or {})
+    preferences["group_by"] = value
+    profile.highlights_search_preferences = preferences
+    profile.save(update_fields=["highlights_search_preferences"])
+    return JsonResponse({"status": "ok"})
+
+
 @login_required
 def save(request: HttpRequest):
     if request.method != "POST":
@@ -388,6 +424,12 @@ def save(request: HttpRequest):
 
     form_id = request.POST.get("form_id")
     profile = request.user.profile
+
+    # 高亮分组不是独立字段：抽屉里的「高亮分组」写的是筛选偏好里的 group_by，
+    # 与筛选面板的「保存为默认」共享同一份存储。
+    if form_id == "profile_highlights_group_by":
+        return _save_highlights_group_by(request, profile)
+
     profile_before = {
         "enable_favicons": profile.enable_favicons,
         "enable_preview_images": profile.enable_preview_images,
@@ -418,10 +460,16 @@ def save(request: HttpRequest):
     elif form_id in ("profile_highlight_copy_format", "profile_hl_item_format", "profile_hl_separator"):
         submitted_fields = _parse_form_fields(request.POST.get("form_fields"))
         existing_fmt = profile.highlight_copy_format or {}
+        # 只提交一个字段时，其余字段要带上现值；从未设置过就填默认值，
+        # 否则单独改分隔符会把格式一并清成空串
         form_data = {
             "highlight_copy_default_action": profile.highlight_copy_default_action,
-            "item_format": existing_fmt.get("item_format", ""),
-            "separator": existing_fmt.get("separator", ""),
+            "item_format": existing_fmt.get(
+                "item_format", UserProfileHighlightCopyFormatForm.DEFAULT_ITEM_FORMAT
+            ),
+            "separator": existing_fmt.get(
+                "separator", UserProfileHighlightCopyFormatForm.DEFAULT_SEPARATOR
+            ),
         }
         for field_name in submitted_fields:
             if field_name in request.POST:
@@ -724,6 +772,31 @@ def _get_language_display_name(language_code: str, fallback: str) -> str:
         return fallback
 
     return language_info.get("name_local") or language_info.get("name") or fallback
+
+
+def build_language_segment_context(profile) -> dict:
+    """语言分段控件的上下文：设置页与列表页的「布局」抽屉共用一套逻辑。"""
+    primary_language_choices = _get_primary_language_choices()
+    other_language_choices = _get_other_language_choices()
+    current_language = _normalize_language_code(
+        profile.language or django_settings.LANGUAGE_CODE
+    )
+    primary_codes = {code for code, _label in primary_language_choices}
+    other_codes = {code for code, _label in other_language_choices}
+
+    return {
+        "primary_language_choices": primary_language_choices,
+        "other_language_choices": other_language_choices,
+        "language_segment_value": (
+            current_language
+            if current_language in primary_codes
+            else LANGUAGE_OTHER_SENTINEL
+        ),
+        "language_other_sentinel": LANGUAGE_OTHER_SENTINEL,
+        "language_other_current_code": (
+            current_language if current_language in other_codes else ""
+        ),
+    }
 
 
 def _get_supported_interface_languages():
