@@ -62,16 +62,20 @@ class BookmarkValidationTestCase(TestCase, BookmarkFactoryMixin):
     def test_bookmark_model_should_not_validate_url_if_disabled_in_settings(self):
         self._run_bookmark_model_url_validity_checks(DISABLED_URL_VALIDATION_TEST_CASES)
 
+    def _form_request(self, data):
+        request = RequestFactory().post("/", data=data)
+        # Middleware 会注入 user_profile，RequestFactory 不会
+        request.user = self.user
+        request.user_profile = self.user.profile
+        return request
+
     def test_bookmark_form_should_validate_required_fields(self):
-        rf = RequestFactory()
-        request = rf.post("/", data={"url": ""})
-        form = BookmarkForm(request)
+        form = BookmarkForm(self._form_request({"url": ""}))
 
         self.assertEqual(len(form.errors), 1)
         self.assertIn("required", str(form.errors))
 
-        request = rf.post("/", data={})
-        form = BookmarkForm(request)
+        form = BookmarkForm(self._form_request({}))
 
         self.assertEqual(len(form.errors), 1)
         self.assertIn("required", str(form.errors))
@@ -106,9 +110,7 @@ class BookmarkValidationTestCase(TestCase, BookmarkFactoryMixin):
     def _run_bookmark_form_url_validity_checks(self, cases):
         for case in cases:
             url, expectation = case
-            rf = RequestFactory()
-            request = rf.post("/", data={"url": url})
-            form = BookmarkForm(request)
+            form = BookmarkForm(self._form_request({"url": url}))
 
             if expectation:
                 self.assertEqual(len(form.errors), 0)
