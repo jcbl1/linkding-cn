@@ -184,11 +184,15 @@ class BookmarkFormE2ETestCase(LinkdingE2ETestCase):
         self.setup_bookmark(url="https://github.com/sissbruecker/linkding")
 
         with sync_playwright() as p:
-            url = (
-                reverse("linkding:bookmarks.new")
-                + "?url=https%3A%2F%2Fgithub.com%2Fsissbruecker%2Flinkding"
-            )
-            page = self.open(url, p)
+            page = self.open(reverse("linkding:bookmarks.new"), p)
+
+            # 通过输入 URL 触发 check，而不是依赖 ?url= 初始参数的加载时序
+            with page.expect_response(
+                lambda response: "/api/bookmarks/auto-tags/" in response.url
+            ):
+                page.get_by_label("URL").fill(
+                    "https://github.com/sissbruecker/linkding"
+                )
 
             # 已收藏的 URL 只展示规则标签，不填进标签框
             expect(page.get_by_label("Tags")).to_have_value("")
@@ -203,14 +207,11 @@ class BookmarkFormE2ETestCase(LinkdingE2ETestCase):
         profile.save()
 
         with sync_playwright() as p:
-            # Open page with URL that should have auto tags
-            url = (
-                reverse("linkding:bookmarks.new")
-                + "?url=https%3A%2F%2Fgithub.com%2Fsissbruecker%2Flinkding"
-            )
-            page = self.open(url, p)
-
+            page = self.open(reverse("linkding:bookmarks.new"), p)
             tags_input = page.get_by_label("Tags")
+
+            # 通过输入 URL 触发 check，而不是依赖 ?url= 初始参数的加载时序
+            page.get_by_label("URL").fill("https://github.com/sissbruecker/linkding")
             expect(tags_input).to_have_value("dev github")
 
             # 取消选中：标签从输入框移除，按钮变为未选中
@@ -277,8 +278,12 @@ class BookmarkFormE2ETestCase(LinkdingE2ETestCase):
             url_field.fill("https://example.com/not-bookmarked")
             expect(refresh_button).to_be_visible()
 
-            # 清空 URL 后回到隐藏
-            url_field.fill("")
+            # 清空 URL 后回到隐藏；等防抖里的自动标签请求落地，避免测试
+            # teardown 时还在访问已被 flush 的内存 SQLite
+            with page.expect_response(
+                lambda response: "/api/bookmarks/auto-tags/" in response.url
+            ):
+                url_field.fill("")
             expect(refresh_button).to_be_hidden()
 
     def test_refresh_from_website_button_updates_title_and_description(self):
