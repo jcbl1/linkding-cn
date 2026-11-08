@@ -1038,13 +1038,13 @@ class DetailsModal extends Modal {
   // ---- 关闭 ----
 
   doClose() {
-    super.doClose();
     const bookmarkId = this.dataset.bookmarkId;
     if (bookmarkId) {
       setAfterPageLoadFocusTarget(
         `ul.bookmark-list li[data-bookmark-id='${bookmarkId}'] a.view-action`,
       );
     }
+    super.doClose();
   }
 }
 

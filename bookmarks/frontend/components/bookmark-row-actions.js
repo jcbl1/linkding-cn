@@ -62,6 +62,7 @@ export const bookmarkRowActions = {
         );
     }
     if (isShare) {
+      this.element.classList.toggle("shared", target === "share");
       this.element
         .querySelectorAll('[data-action="share"], [data-action="unshare"]')
         .forEach((btn) => this._toggleShareButton(btn, target === "share"));

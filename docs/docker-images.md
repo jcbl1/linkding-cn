@@ -52,7 +52,6 @@ scripts/build-docker.sh --load --platform linux/arm64 \
 GITHUB_TOKEN="$(gh auth token)" docker buildx build \
   --target linkding-plus --platform linux/arm64 \
   -f docker/default.Dockerfile -t woohoodai/linkding-cn:test \
-  --build-arg APT_MIRROR=mirrors.tuna.tsinghua.edu.cn \
   --secret id=github_token,env=GITHUB_TOKEN \
   --pull --load .
 ```
@@ -77,9 +76,11 @@ python3 scripts/verify-docker-image.py test linkding-cn:verify --platform linux/
   --postgres postgres:16-alpine --output-dir tmp/image-test-postgres
 ```
 
-amd64 使用相应的 --platform。基础版在构建命令增加 --base，在测试命令增加 --base；Alpine 再增加 --alpine。本地脚本默认使用清华 APT/APK 镜像源，--no-mirror 使用官方源。--oci 需要支持多输出的 Docker Buildx；当前验证使用 Buildx 的 docker-container builder。
+amd64 使用相应的 --platform。基础版在构建命令增加 --base，在测试命令增加 --base；Alpine 再增加 --alpine。本地脚本默认使用官方 APT/APK 源，--mirror 可切换到清华镜像源。--oci 需要支持多输出的 Docker Buildx；当前验证使用 Buildx 的 docker-container builder。
 
 脚本支持任意顺序的参数；-- 后的参数传给 buildx。--load 只接受一个架构；--push 默认构建两个架构。--print-tags 仅打印标签，可用于检查变体映射。--push 会直接发布，本地使用者应先运行验证；推荐正式发布走 GitHub 工作流。
+
+`--rebuild <hash>`（工作流输入 `rebuild`）只更新 latest，并额外生成 `v版本[-变体]-rebuild-<hash>` 标签，便于区分重建产物；已发布的 `v版本` 标签不会被覆盖。`<hash>` 只允许字母、数字、`.`、`_` 和 `-`。
 
 `scripts/verify-docker-image.py test` 会验证：服务启动、实际 HEALTHCHECK、自定义端口/路径、后台 worker、数据库/ICU、中文翻译、静态文件、最小 Node 依赖、Defuddle。Plus 还验证生产浏览器调用、中文字体、图片/Canvas/SVG 场景、登录后的管理页面与适配器弹窗、JS 快照与 after hook、Cookie 刷新、SingleFile、www-data 下的 uBlock。生成 result.json、系统包清单、容器日志及截图，最后移除自己的临时容器和网络。
 
@@ -99,7 +100,7 @@ uBlock 沿用构建时获取最新稳定版 Chromium 扩展的方式。构建脚
 
 main.yaml 在 main 的 push 与 pull request 上执行单元、现有 E2E 和镜像验证；Node 使用 24.20.0，单元测试覆盖 bookmarks 与 site_adapters。
 
-image-validation.yaml 使用两个架构的原生 GitHub runner，验证三个变体共六个镜像。正式发布由 build.yaml 的 workflow_dispatch 触发，publish 默认关闭。全部验证成功且 publish 为 true 后，工作流上传已验证的 OCI 产物，再用 skopeo --preserve-digests 复制并组装多架构标签；发布阶段不重新构建，避免依赖漂移。
+image-validation.yaml 使用两个架构的原生 GitHub runner，验证三个变体共六个镜像。正式发布由 build.yaml 的 workflow_dispatch 触发，publish 默认关闭。全部验证成功且 publish 为 true 后，工作流上传已验证的 OCI 产物，再用 skopeo --preserve-digests 复制并组装多架构标签；发布阶段不重新构建，避免依赖漂移。重建已发布版本时可填写 `rebuild`，只更新 latest 并额外发布 `v版本[-变体]-rebuild-<hash>` 标签，不移动已有的 `v版本` 标签。
 
 Plus 默认与注册表 latest 比较，读取时解析到具体平台 digest；也可传入固定 digest。新建的 Base 变体第一次发布没有基线，只记录体积；之后需把 baseline_base / baseline_alpine 指向各自上一个已发布变体。比较不同架构或带有不同变体标签的镜像会报错。
 

@@ -12,6 +12,10 @@
     <link href="{% static 'theme-light.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
   {% elif request.user_profile.theme == 'dark' %}
     <link href="{% static 'theme-dark.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
+  {% elif request.user_profile.theme == 'nord' %}
+    <link href="{% static 'theme-nord.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
+  {% elif request.user_profile.theme == 'wireframe' %}
+    <link href="{% static 'theme-wireframe.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
   {% else %}
     <link href="{% static 'theme-dark.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"
           media="(prefers-color-scheme: dark)"/>

@@ -49,7 +49,7 @@ class BookmarkPagePartialUpdatesE2ETestCase(LinkdingE2ETestCase):
 
             self.select_bulk_action("Move to trash")
             self.locate_bulk_edit_bar().get_by_text("Execute").click()
-            self.page.get_by_text("Confirm").click()
+            self.confirm()
             # Wait until bookmark list is updated (old reference becomes invisible)
             expect(bookmark_list).not_to_be_visible()
 
@@ -87,7 +87,7 @@ class BookmarkPagePartialUpdatesE2ETestCase(LinkdingE2ETestCase):
 
             self.select_bulk_action("Delete permanently")
             self.locate_bulk_edit_bar().get_by_text("Execute").click()
-            self.page.get_by_text("Confirm").click()
+            self.confirm()
             # Wait until bookmark list is updated (old reference becomes invisible)
             expect(bookmark_list).not_to_be_visible()
 
@@ -125,7 +125,7 @@ class BookmarkPagePartialUpdatesE2ETestCase(LinkdingE2ETestCase):
 
             self.select_bulk_action("Move to trash")
             self.locate_bulk_edit_bar().get_by_text("Execute").click()
-            self.page.get_by_text("Confirm").click()
+            self.confirm()
             # Wait until bookmark list is updated (old reference becomes invisible)
             expect(bookmark_list).not_to_be_visible()
 
@@ -163,7 +163,7 @@ class BookmarkPagePartialUpdatesE2ETestCase(LinkdingE2ETestCase):
 
             self.select_bulk_action("Delete permanently")
             self.locate_bulk_edit_bar().get_by_text("Execute").click()
-            self.page.get_by_text("Confirm").click()
+            self.confirm()
             # Wait until bookmark list is updated (old reference becomes invisible)
             expect(bookmark_list).not_to_be_visible()
 
@@ -304,7 +304,7 @@ class BookmarkPagePartialUpdatesE2ETestCase(LinkdingE2ETestCase):
 
             self.select_bulk_action("Mark as unread")
             self.locate_bulk_edit_bar().get_by_text("Execute").click()
-            self.page.get_by_text("Confirm").click()
+            self.confirm()
             page.wait_for_timeout(1000)
 
             # Selection preserved after the action
@@ -325,7 +325,7 @@ class BookmarkPagePartialUpdatesE2ETestCase(LinkdingE2ETestCase):
             # A second action applies to the same batch
             self.select_bulk_action("Mark as read")
             self.locate_bulk_edit_bar().get_by_text("Execute").click()
-            self.page.get_by_text("Confirm").click()
+            self.confirm()
             page.wait_for_timeout(1000)
 
             expect(self.locate_bulk_edit_select_across()).to_be_checked()
@@ -348,7 +348,7 @@ class BookmarkPagePartialUpdatesE2ETestCase(LinkdingE2ETestCase):
 
             self.select_bulk_action("Move to trash")
             self.locate_bulk_edit_bar().get_by_text("Execute").click()
-            self.page.get_by_text("Confirm").click()
+            self.confirm()
             page.wait_for_timeout(1000)
 
             checkboxes = page.locator("label.bulk-edit-checkbox input")
@@ -372,7 +372,7 @@ class BookmarkPagePartialUpdatesE2ETestCase(LinkdingE2ETestCase):
 
             self.select_bulk_action("Move to trash")
             self.locate_bulk_edit_bar().get_by_text("Execute").click()
-            self.page.get_by_text("Confirm").click()
+            self.confirm()
             # Wait for turbo stream to update the page
             page.wait_for_timeout(1000)
 
@@ -528,7 +528,7 @@ class BookmarkPagePartialUpdatesE2ETestCase(LinkdingE2ETestCase):
             # Move all selected bookmarks to trash
             self.select_bulk_action("Move to trash")
             self.locate_bulk_edit_bar().get_by_text("Execute").click()
-            self.page.get_by_text("Confirm").click()
+            self.confirm()
             page.wait_for_timeout(1000)
 
             # Bookmark 1 must still be present
