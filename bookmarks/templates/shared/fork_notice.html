@@ -4,11 +4,11 @@
   <div class="container fork-notice-inner">
     {% if CURRENT_LANGUAGE == "zh-hans" %}
       <p class="fork-notice-text">
-        本仓库已同步上游 v1.3.4，主题系统改用上游的「皮肤（Skin）」方案。本仓库原有的多主题定制（Nord / Wireframe）不再单独维护；如需保留原有主题外观，请继续使用 v1.3.3 版本，或在「设置」中自行导入、配置皮肤。
+        自<code>v1.3.4</code>版本开始，本仓库原有的多主题定制（Nord / Wireframe）不再单独维护，改为与上游同步的<strong>皮肤</strong>（Skin）方案，并计划于下个<code>vx.x</code>版本更新时归档。如需保留原有主题外观，请继续使用 v1.3.3 版本，或在「设置」中自行导入、配置皮肤。
       </p>
     {% else %}
       <p class="fork-notice-text">
-        This fork now follows the skin system introduced in upstream v1.3.4. The local multi-theme options (Nord / Wireframe) are no longer maintained separately; use v1.3.3 if you need them, or import and configure a skin in Settings.
+        Since <code>v1.3.4</code>, this fork's local multi-theme options (Nord / Wireframe) are no longer maintained separately. They have been replaced by the <strong>skin</strong> system synced from upstream and are planned to be archived in the next <code>vx.x</code> release. If you need the original themes, keep using v1.3.3 or import and configure a skin in Settings.
       </p>
     {% endif %}
     <button type="button" class="fork-notice-close" data-fork-notice-close aria-label="{% translate 'Dismiss' %}">
