@@ -104,7 +104,7 @@ def _table_sort_query(request: HttpRequest, sort_value: str) -> str:
 
 def _bookmark_group_key(date_added) -> str:
     """按收藏日期（本地时区）计算分组键：
-    today / yesterday / this_week（本周一至昨天）/ this_month（本月非本周）/
+    today / yesterday / this_week（本周一及以后，含未来日期）/ this_month（本月非本周）/
     更早按自然月返回 "YYYY-MM"。
     列表按收藏时间倒序，组顺序天然为 today → yesterday → this_week → this_month → 更早月份。"""
     today = timezone.localdate()
@@ -266,7 +266,11 @@ def _bookmark_group_counts(query_set, search: BookmarkSearch) -> Counter:
 
 
 def _bookmark_group_rank():
-    """分组键的秩：0=today … 3=this_month、4=更早的自然月（靠月份键区分）。"""
+    """分组键的秩：0=today … 3=this_month、4=更早的自然月（靠月份键区分）。
+
+    today / yesterday 必须带上界，否则未来日期会被算进 today，与
+    _bookmark_group_key 把未来日期归入 this_week 的口径不一致。
+    """
     today = timezone.localdate()
     tz = timezone.get_current_timezone()
 
@@ -274,8 +278,16 @@ def _bookmark_group_rank():
         return datetime.combine(day, datetime.min.time(), tzinfo=tz)
 
     return Case(
-        When(date_added__gte=at_midnight(today), then=0),
-        When(date_added__gte=at_midnight(today - timedelta(days=1)), then=1),
+        When(
+            Q(date_added__gte=at_midnight(today))
+            & Q(date_added__lt=at_midnight(today + timedelta(days=1))),
+            then=0,
+        ),
+        When(
+            Q(date_added__gte=at_midnight(today - timedelta(days=1)))
+            & Q(date_added__lt=at_midnight(today)),
+            then=1,
+        ),
         When(
             date_added__gte=at_midnight(today - timedelta(days=today.weekday())), then=2
         ),
