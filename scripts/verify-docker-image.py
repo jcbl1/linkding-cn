@@ -392,6 +392,7 @@ def run_in_container(args):
     import django
 
     django.setup()
+    from bookmarks.skins import skin_ids
     from django.conf import settings
     from django.contrib.auth import get_user_model
     from django.db import connection
@@ -445,6 +446,14 @@ def run_in_container(args):
     )
     result["checks"].append("translations-and-authenticated-pages")
 
+    builtin_skins = skin_ids()
+    assert builtin_skins, "no builtin skin found in STATIC_ROOT"
+    for skin_id in sorted(builtin_skins | {"default"}):
+        response = client.get(reverse("linkding:skins.file", args=[skin_id]))
+        assert response.status_code == 200, skin_id
+        assert b"@skin" in response.content, skin_id
+    result["checks"].append("builtin-skins")
+
     base_url = (
         "http://127.0.0.1:"
         + os.environ["LD_SERVER_PORT"]
@@ -453,8 +462,7 @@ def run_in_container(args):
     )
     for asset in (
         "bundle.js",
-        "theme-light.css",
-        "theme-dark.css",
+        "theme.css",
         "site-adapters.js",
         "adapters.js",
         "site-adapters.css",

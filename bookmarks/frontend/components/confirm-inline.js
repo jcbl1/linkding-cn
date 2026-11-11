@@ -3,6 +3,7 @@ import { gettext } from "../utils/i18n.js";
 
 let activePopup = null;
 let scrollRafId = null;
+let altId = 0;
 
 function dismissActive() {
   if (activePopup) {
@@ -11,10 +12,41 @@ function dismissActive() {
   }
 }
 
+/**
+ * 按钮可以用 form 属性关联到表外的表单（皮肤导入/删除就是这样，避免 form 嵌套），
+ * closest() 只会找到祖先，那种按钮会被误认成提交外层表单。
+ */
+function resolveForm(button) {
+  const id = button.getAttribute("form");
+  const linked = id ? button.ownerDocument.getElementById(id) : null;
+  return linked || button.closest("form");
+}
+
+function submitTarget(form, submitter) {
+  if (!form) return;
+  // requestSubmit 要求 submitter 的 form owner 就是目标表单，跨表关联的按钮不满足，只能无参提交
+  const owner = submitter && submitter.form === form ? submitter : null;
+  form.requestSubmit(owner || undefined);
+}
+
+/**
+ * 列表三个视图的行内动作栏都是「悬停才显形」：确认弹窗一出现，指针就离开行、动作栏收起，
+ * 按钮（弹窗的锚点）随之不占位。弹窗存活期间把所在行钉住，关闭时只撤掉自己加的那次。
+ */
+function pinRow(button) {
+  const item = button?.closest("li[ld-bookmark-item]");
+  if (!item || item.classList.contains("toolbar-visible")) return null;
+  item.classList.add("toolbar-visible");
+  return item;
+}
+
 function updatePopupPosition() {
   if (!activePopup || !activePopup._button) return;
   const button = activePopup._button;
   const rect = button.getBoundingClientRect();
+  // 锚点此刻不占位（行被收起或移除）时量到的全是 0：贴过去等于把弹窗扔到视口角落。
+  // 保持原位，等锚点回来再算。
+  if (!rect.width && !rect.height) return;
   const popupWidth = activePopup.offsetWidth;
   const popupHeight = activePopup.offsetHeight;
 
@@ -27,12 +59,12 @@ function updatePopupPosition() {
   const preferUp = rect.top + rect.height / 2 > window.innerHeight / 2;
   let top;
   if (preferUp) {
-    top = rect.top - popupHeight - 6;
-    if (top < 8) top = rect.bottom + 6;
+    top = rect.top - popupHeight - 14;
+    if (top < 8) top = rect.bottom + 14;
   } else {
-    top = rect.bottom + 6;
+    top = rect.bottom + 14;
     if (top + popupHeight > window.innerHeight - 8) {
-      top = rect.top - popupHeight - 6;
+      top = rect.top - popupHeight - 14;
     }
   }
 
@@ -65,6 +97,8 @@ document.addEventListener("turbo:before-cache", dismissActive);
 class ConfirmPopup extends HTMLElement {
   connectedCallback() {
     dismissActive();
+    // 上一个弹窗关掉时可能把自己钉住的行放了，轮到本弹窗再钉一次
+    this._pinnedRow = this._pinnedRow || pinRow(this._button);
 
     const button = this._button;
     const question =
@@ -72,12 +106,41 @@ class ConfirmPopup extends HTMLElement {
       gettext("Are you sure?");
     const isDanger = button.hasAttribute("ld-confirm-danger");
     const confirmClass = isDanger ? "btn-error" : "btn-primary";
+    // 危险操作默认折叠：多点一次展开，才露出不可恢复的那一项
+    const altLabel = button.getAttribute("ld-confirm-alt-label");
+    const altAction = button.getAttribute("ld-confirm-alt-action");
+    const altPanelId = altLabel ? `confirm-alt-${altId++}` : null;
 
     const rect = button.getBoundingClientRect();
 
     // Render off-screen to measure
     this.style.cssText = "position:fixed;visibility:hidden;";
-    this.innerHTML = `<span class="confirm-popup-question">${question}</span><span class="confirm-popup-actions"><button type="button" class="btn btn-sm">${gettext("Cancel")}</button><button type="button" class="btn btn-sm ${confirmClass}">${gettext("Confirm")}</button></span>`;
+    this.innerHTML = `
+      <span class="confirm-popup-question">${question}</span>
+      <span class="confirm-popup-actions">
+        <button type="button" class="btn btn-sm" data-confirm-cancel>${gettext("Cancel")}</button>
+        <button type="button" class="btn btn-sm ${confirmClass}" data-confirm-ok>${gettext("Confirm")}</button>
+        ${
+          altLabel
+            ? `<button type="button" class="confirm-popup-toggle"
+                       data-confirm-toggle aria-expanded="false"
+                       aria-controls="${altPanelId}"
+                       aria-label="${gettext("More options")}" title="${gettext("More options")}">
+                 <svg width="12" height="12" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                   <polyline points="6 8 10 12 14 8" stroke="currentColor" stroke-width="2"
+                             stroke-linecap="round" stroke-linejoin="round"/>
+                 </svg>
+               </button>`
+            : ""
+        }
+      </span>
+      ${
+        altLabel
+          ? `<span class="confirm-popup-alt" id="${altPanelId}" data-confirm-alt-panel hidden>
+               <button type="button" class="btn btn-sm btn-error" data-confirm-alt>${altLabel}</button>
+             </span>`
+          : ""
+      }`;
 
     const popupWidth = this.offsetWidth;
     const popupHeight = this.offsetHeight;
@@ -93,21 +156,23 @@ class ConfirmPopup extends HTMLElement {
     const preferUp = rect.top + rect.height / 2 > window.innerHeight / 2;
     let top;
     if (preferUp) {
-      top = rect.top - popupHeight - 6;
-      if (top < 8) top = rect.bottom + 6;
+      top = rect.top - popupHeight - 14;
+      if (top < 8) top = rect.bottom + 14;
     } else {
-      top = rect.bottom + 6;
+      top = rect.bottom + 14;
       if (top + popupHeight > window.innerHeight - 8) {
-        top = rect.top - popupHeight - 6;
+        top = rect.top - popupHeight - 14;
       }
     }
 
     // Final position
     this.style.cssText = `position:fixed;top:${top}px;left:${left}px;`;
 
-    const buttons = this.querySelectorAll(".confirm-popup-actions .btn");
-    const cancelBtn = buttons[0];
-    const confirmBtn = buttons[1];
+    const cancelBtn = this.querySelector("[data-confirm-cancel]");
+    const confirmBtn = this.querySelector("[data-confirm-ok]");
+    const toggleBtn = this.querySelector("[data-confirm-toggle]");
+    const altPanel = this.querySelector("[data-confirm-alt-panel]");
+    const altBtn = this.querySelector("[data-confirm-alt]");
 
     if (cancelBtn) cancelBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -120,10 +185,32 @@ class ConfirmPopup extends HTMLElement {
       if (this._onConfirm) {
         this._onConfirm();
       } else {
-        const form = button.closest("form");
-        if (form) {
-          form.requestSubmit(button);
-        }
+        submitTarget(resolveForm(button), button);
+      }
+      dismissActive();
+    });
+
+    if (toggleBtn && altPanel) {
+      toggleBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const expanded = toggleBtn.getAttribute("aria-expanded") === "true";
+        toggleBtn.setAttribute("aria-expanded", String(!expanded));
+        altPanel.hidden = expanded;
+        // 展开后高度变化，重新贴回按钮
+        updatePopupPosition();
+      });
+    }
+
+    if (altBtn) altBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (this._onAltConfirm) {
+        this._onAltConfirm();
+      } else {
+        const form = resolveForm(button);
+        const submitter = altAction
+          ? form?.querySelector(`[name="${altAction}"]`)
+          : null;
+        submitTarget(form, submitter);
       }
       dismissActive();
     });
@@ -134,6 +221,8 @@ class ConfirmPopup extends HTMLElement {
 
   close() {
     this.remove();
+    this._pinnedRow?.classList.remove("toolbar-visible");
+    this._pinnedRow = null;
     if (activePopup === this) {
       activePopup = null;
     }
@@ -172,6 +261,7 @@ class ConfirmButtonBehavior extends Behavior {
     const popup = document.createElement("ld-confirm-popup");
     popup._button = this.element;
     popup._onConfirm = this.element._onConfirm || null;
+    popup._onAltConfirm = this.element._onAltConfirm || null;
     document.body.appendChild(popup);
   }
 }

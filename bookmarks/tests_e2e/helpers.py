@@ -74,7 +74,9 @@ class LinkdingE2ETestCase(StaticLiveServerTestCase, BookmarkFactoryMixin):
     def confirm(self):
         popup = self.locate_confirm_popup()
         expect(popup).to_be_visible()
-        popup.locator(".confirm-popup-actions button").last.click()
+        # v1.3.4 起危险确认弹窗在 actions 末尾多了「更多选项」折叠按钮，
+        # 不能再靠 last 定位确认键。
+        popup.locator("[data-confirm-ok]").click()
 
     def locate_status_chip(self, modal, field: str):
         return modal.locator(f'.detail-status-chip[data-chip-field="{field}"]')

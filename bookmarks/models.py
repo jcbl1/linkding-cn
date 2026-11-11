@@ -994,20 +994,10 @@ class UserProfile(models.Model):
     THEME_AUTO = "auto"
     THEME_LIGHT = "light"
     THEME_DARK = "dark"
-    THEME_NORD = "nord"
-    THEME_WIREFRAME = "wireframe"
     THEME_CHOICES = [
         (THEME_AUTO, _("Auto")),
         (THEME_LIGHT, _("Light")),
         (THEME_DARK, _("Dark")),
-        (THEME_NORD, _("Nord")),
-        (THEME_WIREFRAME, _("Wireframe")),
-    ]
-    THEME_LIGHT_CHOICES = [
-        (THEME_LIGHT, _("Light")),
-        (THEME_DARK, _("Dark")),
-        (THEME_NORD, _("Nord")),
-        (THEME_WIREFRAME, _("Wireframe")),
     ]
     BOOKMARK_DATE_DISPLAY_RELATIVE = "relative"
     BOOKMARK_DATE_DISPLAY_ABSOLUTE = "absolute"
@@ -1188,6 +1178,7 @@ class UserProfile(models.Model):
     ACTION_EDIT = "edit"
     ACTION_ARCHIVE = "archive"
     ACTION_REMOVE = "remove"
+    ACTION_RESTORE = "restore"
     ACTION_KEYS = [
         ACTION_READ,
         ACTION_VIEW,
@@ -1196,6 +1187,25 @@ class UserProfile(models.Model):
         ACTION_ARCHIVE,
         ACTION_REMOVE,
     ]
+    # 回收站与书签列表各自独立配置：回收站多一个「恢复」，没有「移到回收站」
+    TRASH_ACTION_KEYS = [
+        ACTION_EDIT,
+        ACTION_VIEW,
+        ACTION_READ,
+        ACTION_ARCHIVE,
+        ACTION_RESTORE,
+        ACTION_REMOVE,
+        ACTION_HIGHLIGHT,
+    ]
+    TRASH_ACTION_DEFAULTS = {
+        ACTION_EDIT: True,
+        ACTION_VIEW: True,
+        ACTION_READ: False,
+        ACTION_ARCHIVE: False,
+        ACTION_RESTORE: True,
+        ACTION_REMOVE: True,
+        ACTION_HIGHLIGHT: False,
+    }
     ACTION_LABELS = {
         ACTION_READ: pgettext_lazy("bookmark_action", "Read"),
         ACTION_VIEW: _("View"),
@@ -1203,6 +1213,15 @@ class UserProfile(models.Model):
         ACTION_EDIT: _("Edit"),
         ACTION_ARCHIVE: _("Archive"),
         ACTION_REMOVE: _("Remove"),
+    }
+    TRASH_ACTION_LABELS = {
+        ACTION_EDIT: _("Edit"),
+        ACTION_VIEW: _("View"),
+        ACTION_READ: pgettext_lazy("bookmark_action", "Read"),
+        ACTION_ARCHIVE: _("Archive"),
+        ACTION_RESTORE: _("Restore"),
+        ACTION_REMOVE: _("Permanently delete"),
+        ACTION_HIGHLIGHT: _("Highlights"),
     }
     ACTION_ICONS = {
         ACTION_READ: "ld-icon-unread",
@@ -1278,12 +1297,8 @@ class UserProfile(models.Model):
     theme = models.CharField(
         max_length=10, choices=THEME_CHOICES, blank=False, default=THEME_AUTO
     )
-    theme_light = models.CharField(
-        max_length=10, choices=THEME_LIGHT_CHOICES, blank=False, default=THEME_LIGHT
-    )
-    theme_dark = models.CharField(
-        max_length=10, choices=THEME_LIGHT_CHOICES, blank=False, default=THEME_DARK
-    )
+    # 皮肤 id，空串表示内置默认皮肤。可选值来自磁盘上的皮肤文件，不做 choices 约束
+    skin = models.CharField(max_length=64, blank=True, default="")
     bookmark_date_display = models.CharField(
         max_length=10,
         choices=BOOKMARK_DATE_DISPLAY_CHOICES,
@@ -1366,6 +1381,7 @@ class UserProfile(models.Model):
     display_remove_bookmark_action = models.BooleanField(default=True, null=False)
     display_read_bookmark_action = models.BooleanField(default=True, null=False)
     bookmark_actions = models.JSONField(default=list, blank=True, null=False)
+    trash_bookmark_actions = models.JSONField(default=list, blank=True, null=False)
     bookmark_statuses = models.JSONField(default=list, blank=True, null=False)
     bookmark_quick_edits = models.JSONField(default=list, blank=True, null=False)
     bookmark_action_display_mode = models.CharField(
@@ -1644,14 +1660,6 @@ class UserProfile(models.Model):
         else:
             self.custom_css_hash = ""
         super().save(*args, **kwargs)
-
-    @property
-    def theme_light_css(self):
-        return f"theme-{self.theme_light}.css"
-
-    @property
-    def theme_dark_css(self):
-        return f"theme-{self.theme_dark}.css"
 
     @classmethod
     def default_sidebar_modules(cls, bundles_enabled: bool = True) -> list[dict]:
@@ -1972,6 +1980,56 @@ class UserProfile(models.Model):
             for item in self.get_bookmark_actions()
         ]
 
+    @classmethod
+    def default_trash_bookmark_actions(cls) -> list[dict]:
+        return [
+            {"key": key, "enabled": cls.TRASH_ACTION_DEFAULTS[key]}
+            for key in cls.TRASH_ACTION_KEYS
+        ]
+
+    @classmethod
+    def normalize_trash_bookmark_actions(cls, actions: list | None) -> list[dict]:
+        if not isinstance(actions, list) or len(actions) == 0:
+            return cls.default_trash_bookmark_actions()
+
+        normalized = []
+        seen = set()
+        for item in actions:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            if key not in cls.TRASH_ACTION_DEFAULTS or key in seen:
+                continue
+            normalized.append(
+                {
+                    "key": key,
+                    "enabled": bool(
+                        item.get("enabled", cls.TRASH_ACTION_DEFAULTS[key])
+                    ),
+                }
+            )
+            seen.add(key)
+
+        for key in cls.TRASH_ACTION_KEYS:
+            if key not in seen:
+                normalized.append(
+                    {"key": key, "enabled": cls.TRASH_ACTION_DEFAULTS[key]}
+                )
+
+        return normalized
+
+    def get_trash_bookmark_actions(self) -> list[dict]:
+        return self.normalize_trash_bookmark_actions(self.trash_bookmark_actions)
+
+    def get_trash_bookmark_action_items(self) -> list[dict]:
+        return [
+            {
+                **item,
+                "label": self.TRASH_ACTION_LABELS[item["key"]],
+            }
+            for item in self.get_trash_bookmark_actions()
+        ]
+
     @property
     def health_max_age(self) -> int:
         """健康状态有效期（天）：优先用户自定义，缺省用全局默认。"""
@@ -2082,8 +2140,7 @@ class UserProfileForm(forms.ModelForm):
         model = UserProfile
         fields = [
             "theme",
-            "theme_light",
-            "theme_dark",
+            "skin",
             "bookmark_date_display",
             "bookmark_date_route",
             "bookmark_description_display",
@@ -2149,15 +2206,29 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
     show_highlights_sidebar = forms.BooleanField(required=False)
     enable_web_archive = forms.BooleanField(required=False)
     sharing_mode = forms.ChoiceField(choices=SHARING_MODE_CHOICES)
+    # 可选皮肤来自磁盘，随目录变化，不能用静态 choices 约束；
+    # 白名单校验放在 clean_skin 里，无效值统一归一到默认皮肤
+    skin = forms.CharField(required=False)
     sidebar_modules = forms.CharField()
     highlights_sidebar_modules = forms.CharField()
     bookmark_actions = forms.CharField()
+    trash_bookmark_actions = forms.CharField(required=False)
     bookmark_statuses = forms.CharField()
     bookmark_quick_edits = forms.CharField()
     bookmark_quick_tags = forms.CharField(required=False)
     bookmark_toolbar_modules = forms.CharField()
 
     bookmark_table_columns = forms.JSONField(required=False)
+
+    def clean_skin(self):
+        """皮肤文件被移除后遗留的旧 id 归一到默认皮肤。
+
+        直接拒绝会报 invalid_choice，导致任何单字段保存整体失败。
+        """
+        from bookmarks.skins import skin_ids
+
+        value = (self.cleaned_data.get("skin") or "").strip()
+        return value if value in skin_ids() else ""
 
     def clean_bookmark_table_columns(self):
         value = self.cleaned_data.get("bookmark_table_columns")
@@ -2210,8 +2281,7 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
         model = UserProfile
         fields = [
             "theme",
-            "theme_light",
-            "theme_dark",
+            "skin",
             "bookmark_date_display",
             "bookmark_date_route",
             "bookmark_description_display",
@@ -2275,6 +2345,9 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
             )
             self.fields["bookmark_actions"].initial = json.dumps(
                 self.instance.get_bookmark_actions()
+            )
+            self.fields["trash_bookmark_actions"].initial = json.dumps(
+                self.instance.get_trash_bookmark_actions()
             )
             self.fields["bookmark_statuses"].initial = json.dumps(
                 self.instance.get_bookmark_statuses()
@@ -2412,6 +2485,19 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
 
         return UserProfile.normalize_bookmark_actions(parsed_value)
 
+    def clean_trash_bookmark_actions(self):
+        raw_value = self.cleaned_data.get("trash_bookmark_actions")
+        if not raw_value:
+            return UserProfile.default_trash_bookmark_actions()
+        try:
+            parsed_value = json.loads(raw_value)
+        except (TypeError, ValueError):
+            raise forms.ValidationError(
+                _("Invalid bookmark actions configuration.")
+            ) from None
+
+        return UserProfile.normalize_trash_bookmark_actions(parsed_value)
+
     @property
     def bookmark_status_items(self) -> list[dict]:
         if self.is_bound:
@@ -2539,6 +2625,7 @@ class UserProfileQuickSettingsForm(forms.ModelForm):
                 setattr(profile, field_name, action["enabled"])
 
         profile.bookmark_statuses = self.cleaned_data["bookmark_statuses"]
+        profile.trash_bookmark_actions = self.cleaned_data["trash_bookmark_actions"]
         profile.bookmark_quick_edits = self.cleaned_data["bookmark_quick_edits"]
         profile.bookmark_quick_tags = self.cleaned_data.get("bookmark_quick_tags", [])
 

@@ -1,4 +1,7 @@
 @import "theme/variables.css";
+@import "highlight-colors.css";
+@import "skins/default-light.css";
+@import "skins/default-dark.css";
 @import "theme/_normalize.css";
 @import "theme/base.css";
 @import "theme/typography.css";
@@ -22,6 +25,7 @@
 @import "responsive.css";
 @import "layout.css";
 @import "components.css";
+@import "fork-notice.css";
 @import "favicon.css";
 @import "crud.css";
 @import "bookmark-details.css";
@@ -42,5 +46,6 @@
 @import "bundles.css";
 @import "tags.css";
 @import "highlights.css";
+@import "highlight-item.css";
 @import "update-checker.css";
 @import "health.css";

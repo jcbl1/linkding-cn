@@ -54,17 +54,6 @@ const DEPENDENT_STATE_RULES = [
   {
     matches(form, hasField) {
       return (
-        hasField("theme") ||
-        form.matches("[data-theme-settings-form]")
-      );
-    },
-    apply(behavior, form) {
-      behavior.updateThemeAutoSettingsState(form);
-    },
-  },
-  {
-    matches(form, hasField) {
-      return (
         hasField("bookmark_description_display") ||
         hasField("bookmark_description_max_lines")
       );
@@ -1012,29 +1001,6 @@ class SettingsPageBehavior extends Behavior {
     // Modules remain editable even when sidebar is collapsed,
     // because the sidebar can still be opened via the drawer button.
 
-  }
-
-  updateThemeAutoSettingsState(form = null) {
-    if (!(form instanceof HTMLFormElement)) {
-      form = this.element.querySelector("[data-theme-settings-form]");
-    }
-    if (!form) {
-      return;
-    }
-
-    const autoSettings = form.querySelector("[data-theme-auto-settings]");
-    if (!autoSettings) {
-      return;
-    }
-
-    const themeValue = this.getCheckedRadioValue(form, "theme");
-    const isAuto = themeValue === "auto";
-
-    if (isAuto) {
-      autoSettings.classList.remove("is-hidden");
-    } else {
-      autoSettings.classList.add("is-hidden");
-    }
   }
 
   updateRandomModeState(form = null) {

@@ -1,6 +1,6 @@
 {% load i18n static %}
 <!DOCTYPE html>
-<html lang="{{ LANGUAGE_CODE|default:'en' }}" class="reader-mode" data-api-base-url="{{ api_base_url }}/">
+<html lang="{{ LANGUAGE_CODE|default:'en' }}" class="reader-mode" data-api-base-url="{{ api_base_url }}/" data-theme-mode="{{ request.user_profile.theme }}">
 <head>
   <meta charset="UTF-8">
   <link rel="icon" href="{% static 'favicon.ico' %}" sizes="48x48">
@@ -9,43 +9,14 @@
   <title>{% translate "Reader view" %}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimal-ui">
   <meta name="turbo-cache-control" content="cache">
-  {# Include specific theme variant based on user profile setting #}
-  {% if request.user_profile.theme == 'light' %}
-    <link href="{% static 'theme-light.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
-    <meta name="theme-color" content="#5856e0">
-  {% elif request.user_profile.theme == 'dark' %}
-    <link href="{% static 'theme-dark.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
-    <meta name="theme-color" content="#161822">
-  {% elif request.user_profile.theme == 'nord' %}
-    <link href="{% static 'theme-nord.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
-    <meta name="theme-color" content="#2E3440">
-  {% elif request.user_profile.theme == 'wireframe' %}
-    <link href="{% static 'theme-wireframe.css' %}?v={{ app_version }}" rel="stylesheet" type="text/css"/>
-    <meta name="theme-color" content="#404040">
-  {% else %}
-    {# Auto mode: use user-configured light/dark themes #}
-    <link href="{% static request.user_profile.theme_light_css %}?v={{ app_version }}" rel="stylesheet" type="text/css"
-          media="(prefers-color-scheme: light)"/>
-    <link href="{% static request.user_profile.theme_dark_css %}?v={{ app_version }}" rel="stylesheet" type="text/css"
-          media="(prefers-color-scheme: dark)"/>
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#5856e0">
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161822">
-  {% endif %}
-  {% if request.user_profile.custom_css %}
-    <link href="{% url 'linkding:custom_css' %}?hash={{ request.user_profile.custom_css_hash }}" rel="stylesheet" type="text/css"/>
-  {% endif %}
+  {% include 'bookmarks/stylesheets.html' %}
   <script>
   (function(){
     try {
       var s = JSON.parse(localStorage.getItem('ld:reader:settings')||'{}');
       var t = s.theme;
-      if (!t || t === 'auto') return;
-      var urls = {light: '{% static "theme-light.css" %}?v={{ app_version }}', dark: '{% static "theme-dark.css" %}?v={{ app_version }}'};
-      document.querySelectorAll('link[href*="theme-"]').forEach(function(el){ el.remove(); });
-      var l = document.createElement('link');
-      l.rel = 'stylesheet';
-      l.href = urls[t];
-      document.head.appendChild(l);
+      if (t !== 'light' && t !== 'dark') return;
+      document.documentElement.setAttribute('data-theme', t);
     } catch(e){}
   })();
   </script>
@@ -75,6 +46,8 @@
 {{ api_base_url|default:"/api/"|json_script:"reader-api-base-url" }}
 {{ assets_base_url|default:"/assets"|json_script:"reader-assets-base-url" }}
 {{ bookmarks_index_url|default:"/bookmarks"|json_script:"reader-bookmarks-index-url" }}
+{{ request.available_skins|json_script:"reader-skins" }}
+{{ request.skin|default:""|json_script:"reader-global-skin" }}
 <script src="{% url 'javascript-catalog' %}"></script>
 <script src="{% static 'reader.js' %}?v={{ app_version }}{% if reader_preview_data %}&preview=1{% endif %}" type="application/javascript"></script>
 <script type="application/javascript">

@@ -1,0 +1,35 @@
+.fork-notice {
+  background: var(--primary-color);
+  color: var(--contrast-text-color);
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.fork-notice-inner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--unit-2);
+  padding-block: var(--unit-2);
+
+  .fork-notice-text {
+    flex: 1;
+    margin: 0;
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+  }
+
+  .fork-notice-close {
+    flex: none;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+
+    &:hover {
+      opacity: 0.8;
+    }
+  }
+}
