@@ -1032,7 +1032,7 @@ class SettingsPageBehavior extends Behavior {
     clearSidebarState(scope);
   }
 
-  // 语言设置：主选项与”其他语言”下拉的联动提交。
+  // 语言设置：主选项与"其他语言"下拉的联动提交。
   handleLanguageChange(target) {
     if (!(target instanceof HTMLElement) || !this.languageForm) {
       return false;

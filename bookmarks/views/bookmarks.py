@@ -467,6 +467,11 @@ def trashed(request: HttpRequest):
     bookmark_details = contexts.get_details_context(
         request, contexts.TrashedBookmarkDetailsContext
     )
+    deleted_date_label = _("Date deleted")
+    sort_choices = [
+        (BookmarkSearch.SORT_DELETED_ASC, f"{deleted_date_label} ↑"),
+        (BookmarkSearch.SORT_DELETED_DESC, f"{deleted_date_label} ↓"),
+    ] + list(BookmarkSearchForm.SORT_CHOICES)
 
     return render_bookmarks_view(
         request,
@@ -474,7 +479,7 @@ def trashed(request: HttpRequest):
         {
             "page_title": _("Trash - Linkding"),
             "bookmark_list": bookmark_list,
-            "sort_choices": BookmarkSearchForm.SORT_CHOICES,
+            "sort_choices": sort_choices,
             "bundles": bundles,
             "domains": domains,
             "tag_cloud": tag_cloud,

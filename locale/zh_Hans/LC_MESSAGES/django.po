@@ -472,6 +472,14 @@ msgstr "浅色"
 msgid "Dark"
 msgstr "深色"
 
+#: bookmarks/models.py:996 bookmarks/models.py:1002
+msgid "Nord"
+msgstr "Nord"
+
+#: bookmarks/models.py:997 bookmarks/models.py:1003
+msgid "Wireframe"
+msgstr "Wireframe"
+
 #: bookmarks/models.py:1001
 msgid "Hidden"
 msgstr "隐藏"
@@ -779,7 +787,7 @@ msgid ""
 "default 15)."
 msgstr ""
 "健康检查结果的有效期（天）。留空则使用全局默认值（LINK_HEALTH_MAX_AGE_DAYS，"
-"默认 15）。"
+"默认 15 天）。"
 
 #: bookmarks/models.py:1382 bookmarks/templates/settings/general.html:471
 msgid "Check concurrency"
@@ -924,11 +932,11 @@ msgstr "无效的书签快捷标签配置。"
 
 #: bookmarks/models.py:2514
 msgid "Must be at least 0 days (0 = never expires)."
-msgstr "最少 0 天（0 表示永不过期）。"
+msgstr "必须至少为 0 天（0 表示永不过期）。"
 
 #: bookmarks/models.py:2520
 msgid "Must be at least 1."
-msgstr "最少为 1。"
+msgstr "必须至少为 1。"
 
 #: bookmarks/models.py:2526
 msgid "Must not be negative."
@@ -3049,6 +3057,24 @@ msgid ""
 "Choose a light or dark theme, or automatically follow your system setting."
 msgstr "选择浅色或深色主题，或自动跟随系统设置。"
 
+#: bookmarks/templates/settings/general.html:119
+msgid "Auto theme configuration"
+msgstr "自动主题配置"
+
+#: bookmarks/templates/settings/general.html:121
+msgid ""
+"When following system theme, choose which theme to use for light and dark "
+"mode."
+msgstr "跟随系统主题时，分别为浅色模式和深色模式选择使用的主题。"
+
+#: bookmarks/templates/settings/general.html:126
+msgid "Light mode theme"
+msgstr "浅色模式主题"
+
+#: bookmarks/templates/settings/general.html:137
+msgid "Dark mode theme"
+msgstr "深色模式主题"
+
 #: bookmarks/templates/settings/general.html:124
 msgid "Custom CSS"
 msgstr "自定义 CSS"
@@ -4642,11 +4668,11 @@ msgstr "没有高亮被修改。"
 #~ msgid "Arrangement"
 #~ msgstr "排布"
 
-#~ msgid "Description style"
-#~ msgstr "描述样式"
+msgid "Description style"
+msgstr "描述样式"
 
-#~ msgid "Description max lines"
-#~ msgstr "描述最大行数"
+msgid "Description max lines"
+msgstr "描述最大行数"
 
 #~ msgid "Add tags"
 #~ msgstr "添加标签"
@@ -4661,13 +4687,13 @@ msgstr "没有高亮被修改。"
 #~ "Drag to reorder modules and toggle whether they are shown in the sidebar."
 #~ msgstr "拖拽排序模块，并切换是否在侧边栏中显示。"
 
-#~ msgid ""
-#~ "Show bookmark descriptions and tags in one line, or render them in "
-#~ "separate blocks."
-#~ msgstr "在一行中显示书签描述和标签，或分别渲染为独立区块。"
+msgid ""
+"Show bookmark descriptions and tags in one line, or render them in "
+"separate blocks."
+msgstr "在一行中显示书签描述和标签，或分别渲染为独立区块。"
 
-#~ msgid "Limit how many lines are shown for bookmark descriptions."
-#~ msgstr "限制书签描述显示的行数。"
+msgid "Limit how many lines are shown for bookmark descriptions."
+msgstr "限制书签描述显示的行数。"
 
 #~ msgid "By default, this feature uses a Google service to fetch favicons."
 #~ msgstr "默认情况下，此功能使用 Google 服务来获取 favicon。"

@@ -156,6 +156,58 @@ class BuildToolsTest(unittest.TestCase):
                                 "woohoodai/linkding-cn:latest-base-alpine", command
                             )
 
+    def test_build_script_adds_optional_rebuild_tags(self):
+        version = (ROOT / "version.txt").read_text().strip()
+
+        def tags(*args):
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(ROOT / "scripts/build-docker.sh"),
+                    "--print-tags",
+                    "--platform",
+                    "linux/amd64",
+                    "--repository",
+                    "example/app",
+                    *args,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout.splitlines()
+
+        self.assertEqual(
+            tags(), ["example/app:latest", f"example/app:v{version}"]
+        )
+        self.assertEqual(
+            tags("--rebuild", "abc1234"),
+            [
+                "example/app:latest",
+                f"example/app:v{version}-rebuild-abc1234",
+            ],
+        )
+        self.assertEqual(
+            tags("--base", "--alpine", "--rebuild", "abc1234"),
+            [
+                "example/app:latest-base-alpine",
+                f"example/app:v{version}-base-alpine-rebuild-abc1234",
+            ],
+        )
+        invalid = subprocess.run(
+            [
+                "bash",
+                str(ROOT / "scripts/build-docker.sh"),
+                "--print-tags",
+                "--rebuild",
+                "bad/id",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(invalid.returncode, 2)
+        self.assertIn("--rebuild", invalid.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

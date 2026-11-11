@@ -6,6 +6,7 @@ from io import StringIO
 from unittest import mock
 
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 
 from site_adapters.services.config.loader import _cache
@@ -61,7 +62,9 @@ class SiteAdaptersCommandTestCase(TestCase):
         path = self.write("bundle.jsonc", '{"domains": {"bad.com": {"type": "alias"}}}')
         out = StringIO()
 
-        call_command("site_adapter", "validate-subscription", path, stdout=out)
+        # validate 系列错误级退出码非零：错误详情先写入 stdout，再抛 CommandError
+        with self.assertRaises(CommandError):
+            call_command("site_adapter", "validate-subscription", path, stdout=out)
 
         self.assertIn("bad.com alias missing target", out.getvalue())
 
