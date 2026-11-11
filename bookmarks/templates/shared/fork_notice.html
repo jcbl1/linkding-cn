@@ -1,0 +1,36 @@
+{% load i18n %}
+<div class="fork-notice" data-fork-notice hidden>
+  <div class="container fork-notice-inner">
+    {% if CURRENT_LANGUAGE == "zh-hans" %}
+      <p class="fork-notice-text">
+        本仓库已同步上游 v1.3.4，主题系统改用上游的「皮肤（Skin）」方案。本仓库原有的多主题定制（Nord / Wireframe）不再单独维护；如需保留原有主题外观，请继续使用 v1.3.3 版本，或在「设置」中自行导入、配置皮肤。
+      </p>
+    {% else %}
+      <p class="fork-notice-text">
+        This fork now follows the skin system introduced in upstream v1.3.4. The local multi-theme options (Nord / Wireframe) are no longer maintained separately; use v1.3.3 if you need them, or import and configure a skin in Settings.
+      </p>
+    {% endif %}
+    <button type="button" class="fork-notice-close" data-fork-notice-close aria-label="{% translate 'Dismiss' %}">
+      <svg width="14" height="14" aria-hidden="true"><use href="#ld-icon-close"></use></svg>
+    </button>
+  </div>
+</div>
+<script>
+  (function () {
+    var KEY = "ld:fork-notice-dismissed:v1.3.4";
+    var notice = document.querySelector("[data-fork-notice]");
+    if (!notice) return;
+    try {
+      if (localStorage.getItem(KEY) === "1") return;
+    } catch (e) {}
+    notice.hidden = false;
+    notice
+      .querySelector("[data-fork-notice-close]")
+      .addEventListener("click", function () {
+        notice.hidden = true;
+        try {
+          localStorage.setItem(KEY, "1");
+        } catch (e) {}
+      });
+  })();
+</script>

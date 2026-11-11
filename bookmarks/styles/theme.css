@@ -25,6 +25,7 @@
 @import "responsive.css";
 @import "layout.css";
 @import "components.css";
+@import "fork-notice.css";
 @import "favicon.css";
 @import "crud.css";
 @import "bookmark-details.css";

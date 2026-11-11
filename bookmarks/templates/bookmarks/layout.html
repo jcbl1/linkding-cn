@@ -9,6 +9,8 @@
 
 {% include 'shared/svg_icons.html' %}
 
+{% include 'shared/fork_notice.html' %}
+
 {% if has_toasts %}
   <div class="toast-notice-fixed">
     <form action="{% url 'linkding:toasts.acknowledge' %}?return_url={{ request.path | urlencode }}" method="post">
