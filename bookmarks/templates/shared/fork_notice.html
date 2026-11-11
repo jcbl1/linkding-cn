@@ -1,5 +1,6 @@
 {% load i18n %}
-<div class="fork-notice" data-fork-notice hidden>
+{% if not request.COOKIES.ld_fork_notice_dismissed %}
+<div class="fork-notice" data-fork-notice>
   <div class="container fork-notice-inner">
     {% if CURRENT_LANGUAGE == "zh-hans" %}
       <p class="fork-notice-text">
@@ -17,20 +18,15 @@
 </div>
 <script>
   (function () {
-    var KEY = "ld:fork-notice-dismissed:v1.3.4";
     var notice = document.querySelector("[data-fork-notice]");
     if (!notice) return;
-    try {
-      if (localStorage.getItem(KEY) === "1") return;
-    } catch (e) {}
-    notice.hidden = false;
     notice
       .querySelector("[data-fork-notice-close]")
       .addEventListener("click", function () {
+        document.cookie =
+          "ld_fork_notice_dismissed=1; path=/; max-age=31536000; SameSite=Lax";
         notice.hidden = true;
-        try {
-          localStorage.setItem(KEY, "1");
-        } catch (e) {}
       });
   })();
 </script>
+{% endif %}
