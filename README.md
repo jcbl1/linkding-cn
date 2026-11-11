@@ -4,6 +4,8 @@ linkding-cn 是一款开源、自托管的网页管理&阅读工具（书签管�
 
 > [!IMPORTANT]
 > 自`v1.3.4`版本开始，本仓库原有的多主题定制（Nord / Wireframe）不再单独维护，改为与上游同步的**皮肤**（Skin）方案，并计划于下个`vx.x`版本更新时归档。如需保留原有主题外观，请继续使用 [v1.3.3](https://github.com/jcbl1/linkding-cn/releases/tag/v1.3.3) 版本，或在「设置」中自行导入、配置皮肤。
+>
+> 切换到上游镜像的步骤见[迁移指南](./docs/switch-to-upstream-image.md)。
 
 ![](https://github.com/user-attachments/assets/725f6d6f-c286-4119-a280-c4cde450e171)
 
