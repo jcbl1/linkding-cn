@@ -1,0 +1,312 @@
+/* @skin
+{
+    "id": "wireframe",
+    "name": "Wireframe",
+    "author": "jcbl1",
+    "version": "1.1.0",
+    "preview": [
+        "#f2f2f2",
+        "#404040",
+        "#1a1a1a"
+    ],
+    "description": "Wireframe 线框：浅色线框，深色反相"
+}
+*/
+
+/*
+Wireframe 只用灰阶与描边表达层级：
+- 浅色：沿用原主题的浅灰底、深灰文字与描边。
+- 深色：反相为深灰底、浅灰文字与描边，保留同一套线框风格。
+*/
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --gray-wf-text: #404040;
+  --gray-wf-secondary: #595959;
+  --gray-wf-border: #a6a6a6;
+  --gray-wf-contrast: #d9d9d9;
+  --gray-wf-bg: #f2f2f2;
+
+  /* Contrast scale based on Wireframe text */
+  --contrast-5: rgba(64, 64, 64, 0.05);
+  --contrast-10: rgba(64, 64, 64, 0.1);
+  --contrast-20: rgba(64, 64, 64, 0.18);
+  --contrast-30: rgba(64, 64, 64, 0.28);
+  --contrast-40: rgba(64, 64, 64, 0.38);
+  --contrast-50: rgba(64, 64, 64, 0.48);
+  --contrast-60: rgba(64, 64, 64, 0.56);
+  --contrast-70: rgba(64, 64, 64, 0.66);
+  --contrast-80: rgba(64, 64, 64, 0.78);
+  --contrast-90: rgba(64, 64, 64, 0.88);
+  --primary-color: var(--gray-wf-text);
+  --primary-color-highlight: var(--gray-wf-secondary);
+  --primary-color-shade: rgba(64, 64, 64, 0.075);
+  --alternative-color: var(--gray-wf-secondary);
+  --alternative-color-dark: var(--gray-wf-text);
+  --success-color: var(--gray-wf-text);
+  --success-color-highlight: var(--gray-wf-secondary);
+  --success-color-shade: rgba(64, 64, 64, 0.1);
+  --warning-color: var(--gray-wf-text);
+  --warning-color-highlight: var(--gray-wf-secondary);
+  --warning-color-shade: rgba(64, 64, 64, 0.1);
+  --error-color: var(--gray-wf-text);
+  --error-color-highlight: var(--gray-wf-secondary);
+  --error-color-shade: rgba(64, 64, 64, 0.1);
+  --text-color: var(--gray-wf-text);
+  --secondary-text-color: var(--gray-wf-secondary);
+  --tertiary-text-color: var(--gray-wf-border);
+  --contrast-text-color: #fff;
+  --primary-text-color: var(--gray-wf-text);
+  --link-color: var(--gray-wf-text);
+  --secondary-link-color: var(--gray-wf-secondary);
+  --icon-color: var(--gray-wf-secondary);
+  --border-color: var(--gray-wf-border);
+  --secondary-border-color: var(--gray-wf-contrast);
+  --body-color: var(--gray-wf-bg);
+  --body-color-contrast: var(--gray-wf-contrast);
+
+  /* 标签 */
+  --tag-color: var(--gray-wf-secondary);
+
+  /* 应用图标 */
+  --logo-mark-bg: var(--gray-wf-text);
+  --logo-mark-fg: #fff;
+
+  /* 灰阶 */
+  --gray-50: #fafafa;
+  --gray-100: #f2f2f2;
+  --gray-200: #e6e6e6;
+  --gray-300: #d9d9d9;
+  --gray-400: #a6a6a6;
+  --gray-500: #737373;
+  --gray-600: #595959;
+  --gray-700: #404040;
+  --gray-800: #262626;
+  --gray-900: #171717;
+
+  /* Focus */
+  --focus-outline: 2px solid var(--gray-wf-text);
+  --focus-outline-offset: 2px;
+
+  /* Shadows */
+  --box-shadow-xs: rgba(0, 0, 0, 0.05) 0px 1px 2px 0px;
+  --box-shadow:
+    0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  --box-shadow-lg:
+    0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+
+  /* Form controls */
+  --input-bg-color: #fff;
+  --input-disabled-bg-color: var(--gray-wf-contrast);
+  --input-text-color: var(--text-color);
+  --input-hint-color: var(--secondary-text-color);
+  --input-border-color: var(--border-color);
+  --input-placeholder-color: var(--gray-wf-border);
+  --input-box-shadow: var(--box-shadow-xs);
+  --checkbox-bg-color: #fff;
+  --checkbox-checked-bg-color: var(--gray-wf-text);
+  --checkbox-disabled-bg-color: var(--gray-wf-contrast);
+  --checkbox-border-color: var(--border-color);
+  --checkbox-icon-color: #fff;
+  --switch-bg-color: var(--gray-wf-contrast);
+  --switch-border-color: var(--border-color);
+  --switch-toggle-color: var(--gray-wf-text);
+
+  /* Buttons */
+  --btn-bg-color: #fff;
+  --btn-hover-bg-color: var(--gray-50);
+  --btn-border-color: var(--border-color);
+  --btn-text-color: var(--text-color);
+  --btn-icon-color: var(--icon-color);
+  --btn-font-weight: 400;
+  --btn-box-shadow: var(--box-shadow-xs);
+  --btn-primary-bg-color: var(--gray-wf-text);
+  --btn-primary-hover-bg-color: var(--gray-wf-secondary);
+  --btn-primary-text-color: #fff;
+  --btn-success-bg-color: var(--gray-wf-text);
+  --btn-success-hover-bg-color: var(--gray-wf-secondary);
+  --btn-success-text-color: #fff;
+  --btn-error-bg-color: var(--gray-wf-text);
+  --btn-error-hover-bg-color: var(--gray-wf-secondary);
+  --btn-error-text-color: #fff;
+  --btn-link-text-color: var(--gray-wf-text);
+  --btn-link-hover-text-color: var(--gray-wf-secondary);
+
+  /* Modal */
+  --modal-overlay-bg-color: rgba(64, 64, 64, 0.45);
+  --modal-container-bg-color: #fff;
+  --modal-container-border-color: var(--border-color);
+  --modal-border-radius: var(--border-radius-lg);
+  --modal-box-shadow: var(--box-shadow-lg);
+
+  /* Menu */
+  --menu-bg-color: #fff;
+  --menu-border-color: var(--border-color);
+  --menu-border-radius: var(--border-radius);
+  --menu-box-shadow: var(--box-shadow);
+  --menu-item-color: var(--text-color);
+  --menu-item-hover-color: var(--text-color);
+  --menu-item-bg-color: transparent;
+  --menu-item-hover-bg-color: var(--gray-wf-contrast);
+
+  /* Tabs */
+  --tab-color: var(--text-color);
+  --tab-hover-color: var(--gray-wf-text);
+  --tab-active-color: var(--gray-wf-text);
+  --tab-highlight-color: var(--gray-wf-text);
+
+  /* Bookmarks */
+  --bookmark-title-color: var(--gray-wf-text);
+  --bookmark-title-weight: 500;
+  --bookmark-description-color: var(--text-color);
+  --bookmark-description-weight: 400;
+  --bookmark-actions-color: var(--secondary-text-color);
+  --bookmark-actions-hover-color: var(--text-color);
+  --bookmark-actions-weight: 400;
+  --bulk-actions-bg-color: var(--gray-wf-contrast);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --gray-wf-text: #e6e6e6;
+  --gray-wf-secondary: #b3b3b3;
+  --gray-wf-border: #595959;
+  --gray-wf-contrast: #262626;
+  --gray-wf-bg: #1a1a1a;
+
+  /* Contrast scale based on Wireframe text */
+  --contrast-5: hsla(0, 0%, 90%, 0.05);
+  --contrast-10: hsla(0, 0%, 90%, 0.1);
+  --contrast-20: hsla(0, 0%, 90%, 0.18);
+  --contrast-30: hsla(0, 0%, 90%, 0.28);
+  --contrast-40: hsla(0, 0%, 90%, 0.38);
+  --contrast-50: hsla(0, 0%, 90%, 0.48);
+  --contrast-60: hsla(0, 0%, 90%, 0.56);
+  --contrast-70: hsla(0, 0%, 90%, 0.66);
+  --contrast-80: hsla(0, 0%, 90%, 0.78);
+  --contrast-90: hsla(0, 0%, 90%, 0.88);
+  --primary-color: var(--gray-wf-text);
+  --primary-color-highlight: #fff;
+  --primary-color-shade: hsla(0, 0%, 90%, 0.12);
+  --alternative-color: var(--gray-wf-secondary);
+  --alternative-color-dark: var(--gray-wf-text);
+  --success-color: var(--gray-wf-text);
+  --success-color-highlight: #fff;
+  --success-color-shade: hsla(0, 0%, 90%, 0.12);
+  --warning-color: var(--gray-wf-text);
+  --warning-color-highlight: #fff;
+  --warning-color-shade: hsla(0, 0%, 90%, 0.12);
+  --error-color: var(--gray-wf-text);
+  --error-color-highlight: #fff;
+  --error-color-shade: hsla(0, 0%, 90%, 0.12);
+  --text-color: var(--gray-wf-text);
+  --secondary-text-color: var(--gray-wf-secondary);
+  --tertiary-text-color: gray;
+  --contrast-text-color: var(--gray-wf-bg);
+  --primary-text-color: var(--gray-wf-text);
+  --link-color: var(--gray-wf-text);
+  --secondary-link-color: var(--gray-wf-secondary);
+  --icon-color: var(--gray-wf-secondary);
+  --border-color: var(--gray-wf-border);
+  --secondary-border-color: #404040;
+  --body-color: var(--gray-wf-bg);
+  --body-color-contrast: var(--gray-wf-contrast);
+
+  /* 标签 */
+  --tag-color: var(--gray-wf-secondary);
+
+  /* 应用图标 */
+  --logo-mark-bg: var(--gray-wf-text);
+  --logo-mark-fg: var(--gray-wf-bg);
+
+  /* 灰阶 */
+  --gray-50: #e6e6e6;
+  --gray-100: #ccc;
+  --gray-200: #b3b3b3;
+  --gray-300: #999;
+  --gray-400: gray;
+  --gray-500: #666;
+  --gray-600: #4d4d4d;
+  --gray-700: #333;
+  --gray-800: #262626;
+  --gray-900: #1a1a1a;
+
+  /* Focus */
+  --focus-outline: 2px solid var(--gray-wf-text);
+  --focus-outline-offset: 2px;
+
+  /* Shadows */
+  --box-shadow-xs: none;
+  --box-shadow: none;
+  --box-shadow-lg: none;
+
+  /* Form controls */
+  --input-bg-color: var(--gray-wf-bg);
+  --input-disabled-bg-color: var(--gray-wf-contrast);
+  --input-text-color: var(--text-color);
+  --input-hint-color: var(--secondary-text-color);
+  --input-border-color: var(--border-color);
+  --input-placeholder-color: gray;
+  --input-box-shadow: none;
+  --checkbox-bg-color: var(--gray-wf-bg);
+  --checkbox-checked-bg-color: var(--gray-wf-text);
+  --checkbox-disabled-bg-color: var(--gray-wf-contrast);
+  --checkbox-border-color: var(--border-color);
+  --checkbox-icon-color: var(--gray-wf-bg);
+  --switch-bg-color: var(--gray-wf-contrast);
+  --switch-border-color: var(--border-color);
+  --switch-toggle-color: var(--gray-wf-text);
+
+  /* Buttons */
+  --btn-bg-color: var(--gray-wf-bg);
+  --btn-hover-bg-color: var(--gray-wf-contrast);
+  --btn-border-color: var(--border-color);
+  --btn-text-color: var(--text-color);
+  --btn-icon-color: var(--icon-color);
+  --btn-font-weight: 400;
+  --btn-box-shadow: none;
+  --btn-primary-bg-color: var(--gray-wf-text);
+  --btn-primary-hover-bg-color: #fff;
+  --btn-primary-text-color: var(--gray-wf-bg);
+  --btn-success-bg-color: var(--gray-wf-text);
+  --btn-success-hover-bg-color: #fff;
+  --btn-success-text-color: var(--gray-wf-bg);
+  --btn-error-bg-color: var(--gray-wf-text);
+  --btn-error-hover-bg-color: #fff;
+  --btn-error-text-color: var(--gray-wf-bg);
+  --btn-link-text-color: var(--gray-wf-text);
+  --btn-link-hover-text-color: #fff;
+
+  /* Modal */
+  --modal-overlay-bg-color: rgba(0, 0, 0, 0.72);
+  --modal-container-bg-color: var(--gray-wf-bg);
+  --modal-container-border-color: var(--border-color);
+  --modal-border-radius: var(--border-radius-lg);
+  --modal-box-shadow: none;
+
+  /* Menu */
+  --menu-bg-color: var(--gray-wf-bg);
+  --menu-border-color: var(--border-color);
+  --menu-border-radius: var(--border-radius);
+  --menu-box-shadow: none;
+  --menu-item-color: var(--text-color);
+  --menu-item-hover-color: var(--text-color);
+  --menu-item-bg-color: transparent;
+  --menu-item-hover-bg-color: var(--gray-wf-contrast);
+
+  /* Tabs */
+  --tab-color: var(--text-color);
+  --tab-hover-color: #fff;
+  --tab-active-color: #fff;
+  --tab-highlight-color: #fff;
+
+  /* Bookmarks */
+  --bookmark-title-color: var(--gray-wf-text);
+  --bookmark-title-weight: 500;
+  --bookmark-description-color: var(--text-color);
+  --bookmark-description-weight: 400;
+  --bookmark-actions-color: var(--secondary-text-color);
+  --bookmark-actions-hover-color: var(--text-color);
+  --bookmark-actions-weight: 400;
+  --bulk-actions-bg-color: var(--gray-wf-contrast);
+}

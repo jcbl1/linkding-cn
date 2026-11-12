@@ -1,0 +1,349 @@
+/* @skin
+{
+    "id": "nord",
+    "name": "Nord",
+    "author": "jcbl1",
+    "version": "1.1.0",
+    "preview": [
+        "#eceff4",
+        "#4c6f99",
+        "#2e3440"
+    ],
+    "description": "Nord 极夜 / 雪暴：浅色 Snow Storm，深色 Polar Night"
+}
+*/
+
+/*
+基于 Nord 官方配色：
+- 浅色：Snow Storm（nord4–nord6）作底，Polar Night（nord0–nord3）作文字，
+  强调色用加深后的 Frost（nord10），保证浅底上的对比度。
+- 深色：沿用原 Nord 主题的 Polar Night 底色与 Frost/Aurora 强调色。
+*/
+
+html[data-theme="light"] {
+  color-scheme: light;
+
+  /* Nord Polar Night palette */
+  --nord0: #2e3440;
+  --nord1: #3b4252;
+  --nord2: #434c5e;
+  --nord3: #4c566a;
+  /* Nord Snow Storm palette */
+  --nord4: #d8dee9;
+  --nord5: #e5e9f0;
+  --nord6: #eceff4;
+  /* Nord Frost palette */
+  --nord7: #8fbcbb;
+  --nord8: #88c0d0;
+  --nord9: #81a1c1;
+  --nord10: #5e81ac;
+  /* Nord Aurora palette */
+  --nord11: #bf616a;
+  --nord12: #d08770;
+  --nord13: #ebcb8b;
+  --nord14: #a3be8c;
+  --nord15: #b48ead;
+
+  /* Contrast scale based on Nord0 */
+  --contrast-5: rgba(46, 52, 64, 0.05);
+  --contrast-10: rgba(46, 52, 64, 0.1);
+  --contrast-20: rgba(46, 52, 64, 0.18);
+  --contrast-30: rgba(46, 52, 64, 0.28);
+  --contrast-40: rgba(46, 52, 64, 0.38);
+  --contrast-50: rgba(46, 52, 64, 0.48);
+  --contrast-60: rgba(46, 52, 64, 0.56);
+  --contrast-70: rgba(46, 52, 64, 0.66);
+  --contrast-80: rgba(46, 52, 64, 0.78);
+  --contrast-90: rgba(46, 52, 64, 0.88);
+
+  /* 加深后的 Frost / Aurora，保证浅底对比度 */
+  --primary-color: #4c6f99;
+  --primary-color-highlight: #3f5e82;
+  --primary-color-shade: rgba(76, 111, 153, 0.12);
+  --alternative-color: #7d5f8c;
+  --alternative-color-dark: #6b4f79;
+  --success-color: #456d33;
+  --success-color-highlight: #55843f;
+  --success-color-shade: rgba(69, 109, 51, 0.12);
+  --warning-color: #7a5e00;
+  --warning-color-highlight: #967400;
+  --warning-color-shade: rgba(122, 94, 0, 0.12);
+  --error-color: #b23a48;
+  --error-color-highlight: #c94a58;
+  --error-color-shade: rgba(178, 58, 72, 0.12);
+
+  /* Core colors */
+  --text-color: var(--nord0);
+  --secondary-text-color: var(--nord3);
+  --tertiary-text-color: #5e6b7e;
+  --contrast-text-color: var(--nord6);
+  --primary-text-color: var(--primary-color);
+  --link-color: var(--primary-color);
+  --secondary-link-color: rgba(76, 111, 153, 0.8);
+  --icon-color: var(--nord3);
+  --border-color: var(--nord4);
+  --secondary-border-color: var(--nord5);
+  --body-color: var(--nord6);
+  --body-color-contrast: var(--nord5);
+
+  /* 标签 */
+  --tag-color: var(--alternative-color);
+
+  /* 应用图标 */
+  --logo-mark-bg: var(--primary-color);
+  --logo-mark-fg: var(--nord6);
+
+  /* 青灰阶 */
+  --gray-50: #f7f9fb;
+  --gray-100: #eceff4;
+  --gray-200: #e5e9f0;
+  --gray-300: #d8dee9;
+  --gray-400: #a9b8c9;
+  --gray-500: #7b8a9e;
+  --gray-600: #5e6b7e;
+  --gray-700: #4c566a;
+  --gray-800: #3b4252;
+  --gray-900: #2e3440;
+
+  /* Focus */
+  --focus-outline: 2px solid var(--primary-color);
+  --focus-outline-offset: 2px;
+
+  /* Shadows */
+  --box-shadow-xs: 0 1px 2px rgba(46, 52, 64, 0.06);
+  --box-shadow: 0 1px 3px rgba(46, 52, 64, 0.08);
+  --box-shadow-lg: 0 10px 15px -3px rgba(46, 52, 64, 0.12);
+
+  /* Form controls */
+  --input-bg-color: var(--gray-50);
+  --input-disabled-bg-color: var(--nord5);
+  --input-text-color: var(--text-color);
+  --input-hint-color: var(--secondary-text-color);
+  --input-border-color: var(--border-color);
+  --input-placeholder-color: var(--gray-500);
+  --input-box-shadow: none;
+  --checkbox-bg-color: var(--gray-50);
+  --checkbox-checked-bg-color: var(--primary-color);
+  --checkbox-disabled-bg-color: var(--nord5);
+  --checkbox-border-color: var(--border-color);
+  --checkbox-icon-color: var(--nord6);
+  --switch-bg-color: var(--nord4);
+  --switch-border-color: var(--gray-400);
+  --switch-toggle-color: #fff;
+
+  /* Buttons */
+  --btn-bg-color: var(--gray-50);
+  --btn-hover-bg-color: var(--nord5);
+  --btn-border-color: var(--border-color);
+  --btn-text-color: var(--text-color);
+  --btn-icon-color: var(--icon-color);
+  --btn-font-weight: 400;
+  --btn-box-shadow: var(--box-shadow-xs);
+  --btn-primary-bg-color: var(--primary-color);
+  --btn-primary-hover-bg-color: var(--primary-color-highlight);
+  --btn-primary-text-color: var(--nord6);
+  --btn-success-bg-color: var(--success-color);
+  --btn-success-hover-bg-color: var(--success-color-highlight);
+  --btn-success-text-color: var(--nord6);
+  --btn-error-bg-color: var(--error-color);
+  --btn-error-hover-bg-color: var(--error-color-highlight);
+  --btn-error-text-color: var(--nord6);
+  --btn-link-text-color: var(--link-color);
+  --btn-link-hover-text-color: var(--primary-color-highlight);
+
+  /* Modal */
+  --modal-overlay-bg-color: rgba(46, 52, 64, 0.28);
+  --modal-container-bg-color: var(--body-color);
+  --modal-container-border-color: var(--border-color);
+  --modal-border-radius: var(--border-radius-lg);
+  --modal-box-shadow: var(--box-shadow-lg);
+
+  /* Menu */
+  --menu-bg-color: var(--body-color);
+  --menu-border-color: var(--border-color);
+  --menu-border-radius: var(--border-radius);
+  --menu-box-shadow: var(--box-shadow);
+  --menu-item-color: var(--text-color);
+  --menu-item-hover-color: var(--text-color);
+  --menu-item-bg-color: transparent;
+  --menu-item-hover-bg-color: var(--nord5);
+
+  /* Tabs */
+  --tab-color: var(--text-color);
+  --tab-hover-color: var(--primary-text-color);
+  --tab-active-color: var(--primary-text-color);
+  --tab-highlight-color: var(--primary-text-color);
+
+  /* Bookmarks */
+  --bookmark-title-color: var(--primary-text-color);
+  --bookmark-title-weight: 500;
+  --bookmark-description-color: var(--text-color);
+  --bookmark-description-weight: 400;
+  --bookmark-actions-color: var(--secondary-text-color);
+  --bookmark-actions-hover-color: var(--text-color);
+  --bookmark-actions-weight: 400;
+  --bulk-actions-bg-color: var(--nord5);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Nord Polar Night palette */
+  --nord0: #2e3440;
+  --nord1: #3b4252;
+  --nord2: #434c5e;
+  --nord3: #4c566a;
+  /* Nord Snow Storm palette */
+  --nord4: #d8dee9;
+  --nord5: #e5e9f0;
+  --nord6: #eceff4;
+  /* Nord Frost palette */
+  --nord7: #8fbcbb;
+  --nord8: #88c0d0;
+  --nord9: #81a1c1;
+  --nord10: #5e81ac;
+  /* Nord Aurora palette */
+  --nord11: #bf616a;
+  --nord12: #d08770;
+  --nord13: #ebcb8b;
+  --nord14: #a3be8c;
+  --nord15: #b48ead;
+
+  /* Contrast scale based on Nord */
+  --contrast-5: rgba(216, 222, 233, 0.06);
+  --contrast-10: rgba(216, 222, 233, 0.12);
+  --contrast-20: rgba(216, 222, 233, 0.18);
+  --contrast-30: rgba(216, 222, 233, 0.28);
+  --contrast-40: rgba(216, 222, 233, 0.38);
+  --contrast-50: rgba(216, 222, 233, 0.48);
+  --contrast-60: rgba(216, 222, 233, 0.56);
+  --contrast-70: rgba(216, 222, 233, 0.66);
+  --contrast-80: rgba(216, 222, 233, 0.78);
+  --contrast-90: rgba(216, 222, 233, 0.88);
+  --primary-color: var(--nord8);
+  --primary-color-highlight: #94d0de;
+  --primary-color-shade: rgba(136, 192, 208, 0.35);
+  --alternative-color: var(--nord7);
+  --alternative-color-dark: #7daeac;
+  --success-color: var(--nord14);
+  --success-color-highlight: #b0c896;
+  --success-color-shade: rgba(163, 190, 140, 0.1);
+  --warning-color: var(--nord13);
+  --warning-color-highlight: #f0d596;
+  --warning-color-shade: rgba(235, 203, 139, 0.1);
+  --error-color: var(--nord11);
+  --error-color-highlight: #cc717a;
+  --error-color-shade: rgba(191, 97, 106, 0.1);
+
+  /* Core colors */
+  --text-color: var(--nord4);
+  --secondary-text-color: var(--nord9);
+  --tertiary-text-color: var(--nord3);
+  --contrast-text-color: var(--nord6);
+  --primary-text-color: var(--nord8);
+  --link-color: var(--primary-text-color);
+  --secondary-link-color: rgba(136, 192, 208, 0.8);
+  --icon-color: var(--nord4);
+  --border-color: var(--contrast-30);
+  --secondary-border-color: var(--contrast-20);
+  --body-color: var(--nord0);
+  --body-color-contrast: var(--nord1);
+
+  /* 标签 */
+  --tag-color: var(--alternative-color);
+
+  /* 应用图标 */
+  --logo-mark-bg: var(--nord8);
+  --logo-mark-fg: var(--nord0);
+
+  /* 青灰阶 */
+  --gray-50: #eceff4;
+  --gray-100: #e5e9f0;
+  --gray-200: #d8dee9;
+  --gray-300: #a9b8c9;
+  --gray-400: #81a1c1;
+  --gray-500: #6d7a8c;
+  --gray-600: #4c566a;
+  --gray-700: #434c5e;
+  --gray-800: #3b4252;
+  --gray-900: #2e3440;
+
+  /* Focus */
+  --focus-outline: 2px solid var(--nord8);
+  --focus-outline-offset: 2px;
+
+  /* Shadows */
+  --box-shadow-xs: none;
+  --box-shadow: none;
+  --box-shadow-lg: none;
+
+  /* Form controls */
+  --input-bg-color: var(--nord1);
+  --input-disabled-bg-color: var(--contrast-30);
+  --input-text-color: var(--text-color);
+  --input-hint-color: var(--secondary-text-color);
+  --input-border-color: var(--border-color);
+  --input-placeholder-color: var(--tertiary-text-color);
+  --input-box-shadow: var(--box-shadow-xs);
+  --checkbox-bg-color: var(--nord1);
+  --checkbox-checked-bg-color: var(--primary-color);
+  --checkbox-disabled-bg-color: var(--contrast-30);
+  --checkbox-border-color: var(--border-color);
+  --checkbox-icon-color: var(--nord0);
+  --switch-bg-color: var(--nord1);
+  --switch-border-color: var(--border-color);
+  --switch-toggle-color: var(--text-color);
+
+  /* Buttons */
+  --btn-bg-color: var(--nord1);
+  --btn-hover-bg-color: var(--nord2);
+  --btn-border-color: var(--border-color);
+  --btn-text-color: var(--text-color);
+  --btn-icon-color: var(--icon-color);
+  --btn-font-weight: 400;
+  --btn-box-shadow: var(--box-shadow-xs);
+  --btn-primary-bg-color: var(--primary-color);
+  --btn-primary-hover-bg-color: var(--primary-color-highlight);
+  --btn-primary-text-color: var(--nord0);
+  --btn-success-bg-color: var(--success-color);
+  --btn-success-hover-bg-color: var(--success-color-highlight);
+  --btn-success-text-color: var(--nord0);
+  --btn-error-bg-color: var(--error-color);
+  --btn-error-hover-bg-color: var(--error-color-highlight);
+  --btn-error-text-color: var(--nord0);
+  --btn-link-text-color: var(--link-color);
+  --btn-link-hover-text-color: var(--link-color);
+
+  /* Modal */
+  --modal-overlay-bg-color: rgba(46, 52, 64, 0.55);
+  --modal-container-bg-color: var(--nord1);
+  --modal-container-border-color: var(--contrast-30);
+  --modal-border-radius: var(--border-radius-lg);
+  --modal-box-shadow: none;
+
+  /* Menu */
+  --menu-bg-color: var(--nord1);
+  --menu-border-color: var(--contrast-30);
+  --menu-border-radius: var(--border-radius);
+  --menu-box-shadow: none;
+  --menu-item-color: var(--text-color);
+  --menu-item-hover-color: var(--text-color);
+  --menu-item-bg-color: transparent;
+  --menu-item-hover-bg-color: var(--contrast-20);
+
+  /* Tabs */
+  --tab-color: var(--text-color);
+  --tab-hover-color: var(--primary-text-color);
+  --tab-active-color: var(--primary-text-color);
+  --tab-highlight-color: var(--primary-text-color);
+
+  /* Bookmarks */
+  --bookmark-title-color: var(--primary-text-color);
+  --bookmark-title-weight: 500;
+  --bookmark-description-color: var(--text-color);
+  --bookmark-description-weight: 400;
+  --bookmark-actions-color: var(--secondary-text-color);
+  --bookmark-actions-hover-color: var(--text-color);
+  --bookmark-actions-weight: 400;
+  --bulk-actions-bg-color: var(--nord1);
+}
