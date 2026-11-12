@@ -322,6 +322,9 @@ class BookmarkDetailsModalE2ETestCase(LinkdingE2ETestCase):
                     "Site title"
                 )
                 expect(modal.locator("#undo-metadata-btn")).to_be_visible()
+                # URL 撤销按钮在提交后就会显示，但抓取未结束时点击会被忽略；
+                # “重新抓取”按钮恢复可用才代表本轮抓取和 PATCH 已落定。
+                expect(modal.locator("#refresh-metadata-btn")).to_be_enabled()
 
                 # URL 修改本身也可撤销
                 url_undo = modal.locator('[data-undo-field="url"]')
