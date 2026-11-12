@@ -48,5 +48,7 @@
 ## 注意
 
 - 建议把镜像固定到 `v1.3.4` 或更高版本，不要切换到更低版本。
-- 从 v1.3.3 升级时，建议先在设置中把主题改为 Auto / Light / Dark；上游不再提供 Nord / Wireframe。
+- 从 v1.3.3 升级时，建议先在设置中把主题改为 Auto / Light / Dark；上游不再提供 Nord / Wireframe，需要的话可参考下面两个css文件。
+   - [nord.css](../bookmarks/styles/skins/nord.css)
+   - [wireframe.css](../bookmarks/styles/skins/wireframe.css)
 - 回滚请使用第 3 步的完整数据备份，或回到本仓库 `v1.3.4` 镜像。
